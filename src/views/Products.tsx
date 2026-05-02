@@ -23,7 +23,7 @@ async function downloadCostBackup() {
 
 export default function Products() {
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">產品與成本庫存</h2>

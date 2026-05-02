@@ -9,6 +9,7 @@ import {
   Legend,
 } from 'recharts';
 import { useAccountingLedger } from '../hooks/useAccountingLedger';
+import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { computeMarinadeExpenseAnalysis } from '../lib/accountingLedgerStorage';
 import { ymdDashToSlash } from '../lib/dateDisplay';
 import { cn } from '../lib/utils';
@@ -72,6 +73,7 @@ function money(n: number) {
  * 滷料成本分析（資料來自流水帳滷料集合）。預設統計當月，可自訂區間。
  */
 export default function MarinadeCostAnalysis() {
+  const isNarrow = useIsNarrowScreen();
   const { entries } = useAccountingLedger();
 
   const defaultRange = useMemo(() => monthBoundsFromYm(currentYm()), []);
@@ -240,8 +242,8 @@ export default function MarinadeCostAnalysis() {
           {marinadeAnalysis.totalMarinadeExpense <= 0 || marinadeAnalysis.pieRows.length === 0 ? (
             <p className="text-xs text-zinc-500 py-10 text-center">此期間尚無滷料相關支出</p>
           ) : (
-            <div className="h-[200px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className={cn('w-full', isNarrow ? 'h-[220px]' : 'h-[200px]')}>
+              <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
                 <PieChart>
                   <Pie
                     data={marinadeAnalysis.pieRows}
@@ -249,11 +251,14 @@ export default function MarinadeCostAnalysis() {
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    innerRadius={40}
-                    outerRadius={72}
+                    innerRadius={isNarrow ? 36 : 40}
+                    outerRadius={isNarrow ? 76 : 72}
                     paddingAngle={1}
-                    label={({ name, percent }) =>
-                      `${String(name).length > 4 ? String(name).slice(0, 4) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
+                    label={
+                      isNarrow
+                        ? false
+                        : ({ name, percent }) =>
+                            `${String(name).length > 4 ? String(name).slice(0, 4) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
                     }
                   >
                     {marinadeAnalysis.pieRows.map((_, i) => (
@@ -272,13 +277,15 @@ export default function MarinadeCostAnalysis() {
                       border: '1px solid #3f3f46',
                       backgroundColor: '#18181b',
                       color: '#f5f2ed',
-                      fontSize: '0.75rem',
+                      fontSize: isNarrow ? '0.8125rem' : '0.75rem',
                     }}
                   />
-                  <Legend
-                    wrapperStyle={{ fontSize: '0.6875rem', color: '#a1a1aa' }}
-                    formatter={(value) => <span className="text-zinc-400">{value}</span>}
-                  />
+                  {!isNarrow && (
+                    <Legend
+                      wrapperStyle={{ fontSize: '0.75rem', color: '#a1a1aa' }}
+                      formatter={(value) => <span className="text-zinc-400">{value}</span>}
+                    />
+                  )}
                 </PieChart>
               </ResponsiveContainer>
             </div>

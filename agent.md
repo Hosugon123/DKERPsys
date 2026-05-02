@@ -96,6 +96,14 @@
 - 介面與本文件預設 **繁體中文**。
 - 視覺：深色底、琥珀色重點，與現有 Tailwind 類名風格一致；大改主題需同步多頁。
 
+### 7.1 行動版（iPhone Safari 等）
+
+- **`index.html`**：`viewport-fit=cover`，以利 `env(safe-area-inset-*)`。
+- **`App.tsx`**：側欄開啟時以 `body { position: fixed; top: -scrollY }` 鎖背景捲動；`<main>` 加 **`uio-touch-host`** 類別。
+- **`index.css`**：`.uio-touch-host` 在寬度 `<640px` 時，將 `input`／`select`／`textarea`（排除 checkbox 等）字級至少 **16px**、最小高度約 **44px**，減少 iOS 聚焦自動縮放與難點擊。
+- **`useIsNarrowScreen()`**（`src/hooks/useIsNarrowScreen.ts`）：與 Tailwind `sm`（640px）對齊；`Dashboard`、`MarinadeCostAnalysis` 等用於圖表降載（例：隱藏 pie `label`／`Legend`、放大 Tooltip）。
+- **`CostStructureTable`**：小螢幕表格外層可橫向捲動（`min-w-[760px]`），欄寬拖曳支援 **touch** 事件。
+
 ---
 
 ## 8. 修改時的自檢清單

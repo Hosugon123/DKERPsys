@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
+import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { computeAdminDashboardFinance, computeIngredientMonthDashboard, currentYmLocal } from '../lib/financeLib';
 import { ACCOUNTING_LEDGER_UPDATED_EVENT, listAccountingLedgerEntries } from '../lib/accountingLedgerStorage';
 import { getSupplyItem } from '../lib/supplyCatalog';
@@ -134,6 +135,7 @@ function pct(numerator: number, denominator: number): number {
 }
 
 export default function Dashboard({ userRole }: { userRole: UserRole }) {
+  const isNarrow = useIsNarrowScreen();
   const isAdmin = userRole === 'admin';
   const [financeTick, setFinanceTick] = useState(0);
   const [orderTick, setOrderTick] = useState(0);
@@ -255,6 +257,11 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       .sort((a, b) => (b.revenue === a.revenue ? b.sales - a.sales : b.revenue - a.revenue))
       .map((r, i) => ({ id: i + 1, ...r }));
   }, [dashboardOrders, isAdmin, nonAdminSummary]);
+
+  const topProductsTotalRevenue = useMemo(
+    () => topProducts.reduce((s, p) => s + p.revenue, 0),
+    [topProducts],
+  );
 
   const nonAdminExpenseRows = useMemo(() => {
     if (isAdmin) return [];
@@ -536,8 +543,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   <p className="text-xs text-zinc-500 mt-2">尚無直營已完成訂單。</p>
                 ) : (
                   <>
-                    <div className="h-36 mt-2">
-                      <ResponsiveContainer width="100%" height="100%">
+                    <div className={cn('mt-2', isNarrow ? 'h-44' : 'h-36')}>
+                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
                         <PieChart>
                           <Pie
                             data={adminDirectProducts.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.revenue }))}
@@ -545,15 +552,24 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                             nameKey="name"
                             cx="50%"
                             cy="50%"
-                            innerRadius={24}
-                            outerRadius={52}
+                            innerRadius={isNarrow ? 22 : 24}
+                            outerRadius={isNarrow ? 58 : 52}
                             paddingAngle={2}
                           >
                             {adminDirectProducts.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
                               <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']} />
+                          <Tooltip
+                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']}
+                            contentStyle={{
+                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
+                              borderRadius: '10px',
+                              border: '1px solid #3f3f46',
+                              backgroundColor: '#18181b',
+                              color: '#f5f2ed',
+                            }}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -583,8 +599,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   <p className="text-xs text-zinc-500 mt-2">尚無加盟批貨已完成訂單。</p>
                 ) : (
                   <>
-                    <div className="h-36 mt-2">
-                      <ResponsiveContainer width="100%" height="100%">
+                    <div className={cn('mt-2', isNarrow ? 'h-44' : 'h-36')}>
+                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
                         <PieChart>
                           <Pie
                             data={adminFranchiseProducts.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.revenue }))}
@@ -592,15 +608,24 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                             nameKey="name"
                             cx="50%"
                             cy="50%"
-                            innerRadius={24}
-                            outerRadius={52}
+                            innerRadius={isNarrow ? 22 : 24}
+                            outerRadius={isNarrow ? 58 : 52}
                             paddingAngle={2}
                           >
                             {adminFranchiseProducts.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
                               <Cell key={i} fill={INGREDIENT_STRUCTURE_PIE_COLORS[i % INGREDIENT_STRUCTURE_PIE_COLORS.length]} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']} />
+                          <Tooltip
+                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']}
+                            contentStyle={{
+                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
+                              borderRadius: '10px',
+                              border: '1px solid #3f3f46',
+                              backgroundColor: '#18181b',
+                              color: '#f5f2ed',
+                            }}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -633,8 +658,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   <p className="text-sm text-zinc-500 py-8 text-center">尚無已完成銷售可排行。</p>
                 ) : (
                   <>
-                    <div className="h-40">
-                      <ResponsiveContainer width="100%" height="100%">
+                    <div className={cn(isNarrow ? 'h-48' : 'h-40')}>
+                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
                         <PieChart>
                           <Pie
                             data={topProducts.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.revenue }))}
@@ -642,15 +667,24 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                             nameKey="name"
                             cx="50%"
                             cy="50%"
-                            innerRadius={30}
-                            outerRadius={62}
+                            innerRadius={isNarrow ? 28 : 30}
+                            outerRadius={isNarrow ? 68 : 62}
                             paddingAngle={2}
                           >
                             {topProducts.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
                               <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']} />
+                          <Tooltip
+                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']}
+                            contentStyle={{
+                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
+                              borderRadius: '10px',
+                              border: '1px solid #3f3f46',
+                              backgroundColor: '#18181b',
+                              color: '#f5f2ed',
+                            }}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -659,11 +693,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                         <div key={product.id} className="flex justify-between text-xs">
                           <span className="truncate pr-2 text-zinc-300">{product.id}. {product.name}</span>
                           <span className="text-amber-100 tabular-nums">
-                            {moneyTW(product.revenue)} / {(
-                              (product.revenue / Math.max(1, topProducts.reduce((s, p) => s + p.revenue, 0))) *
-                              100
-                            ).toFixed(1)}
-                            %
+                            {moneyTW(product.revenue)} /{' '}
+                            {((product.revenue / Math.max(1, topProductsTotalRevenue)) * 100).toFixed(1)}%
                           </span>
                         </div>
                       ))}
@@ -686,8 +717,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   <p className="text-sm text-zinc-500 py-6 text-center">尚無支出資料。</p>
                 ) : (
                   <>
-                    <div className="h-40 mt-2">
-                      <ResponsiveContainer width="100%" height="100%">
+                    <div className={cn('mt-2', isNarrow ? 'h-48' : 'h-40')}>
+                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
                         <PieChart>
                           <Pie
                             data={nonAdminExpenseRows.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.amount }))}
@@ -695,15 +726,24 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                             nameKey="name"
                             cx="50%"
                             cy="50%"
-                            innerRadius={30}
-                            outerRadius={62}
+                            innerRadius={isNarrow ? 28 : 30}
+                            outerRadius={isNarrow ? 68 : 62}
                             paddingAngle={2}
                           >
                             {nonAdminExpenseRows.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
                               <Cell key={i} fill={INGREDIENT_STRUCTURE_PIE_COLORS[i % INGREDIENT_STRUCTURE_PIE_COLORS.length]} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={(value: number | undefined) => [moneyTW(value ?? 0), '支出']} />
+                          <Tooltip
+                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '支出']}
+                            contentStyle={{
+                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
+                              borderRadius: '10px',
+                              border: '1px solid #3f3f46',
+                              backgroundColor: '#18181b',
+                              color: '#f5f2ed',
+                            }}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -768,8 +808,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                       </span>
                     </span>
                   </div>
-                  <div className="h-[240px] w-full flex-1">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className={cn('w-full flex-1', isNarrow ? 'h-[220px]' : 'h-[240px]')}>
+                    <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
                       <PieChart>
                         <Pie
                           data={ingredientMonth.cogsVsSeasoningPie}
@@ -777,11 +817,14 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                           nameKey="name"
                           cx="50%"
                           cy="50%"
-                          innerRadius={48}
-                          outerRadius={88}
+                          innerRadius={isNarrow ? 40 : 48}
+                          outerRadius={isNarrow ? 78 : 88}
                           paddingAngle={2}
-                          label={({ name, percent }) =>
-                            `${String(name).length > 10 ? String(name).slice(0, 10) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
+                          label={
+                            isNarrow
+                              ? false
+                              : ({ name, percent }) =>
+                                  `${String(name).length > 10 ? String(name).slice(0, 10) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
                           }
                         >
                           {ingredientMonth.cogsVsSeasoningPie.map((_, i) => (
@@ -800,12 +843,15 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                             border: '1px solid #3f3f46',
                             backgroundColor: '#18181b',
                             color: '#f5f2ed',
+                            fontSize: isNarrow ? '0.8125rem' : '0.75rem',
                           }}
                         />
-                        <Legend
-                          wrapperStyle={{ fontSize: '0.6875rem', color: '#a1a1aa' }}
-                          formatter={(value) => <span className="text-zinc-400">{value}</span>}
-                        />
+                        {!isNarrow && (
+                          <Legend
+                            wrapperStyle={{ fontSize: '0.75rem', color: '#a1a1aa' }}
+                            formatter={(value) => <span className="text-zinc-400">{value}</span>}
+                          />
+                        )}
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
@@ -822,8 +868,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   尚無「食材支出」紀錄可供分析。
                 </p>
               ) : (
-                <div className="h-[280px] w-full min-h-[200px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className={cn('w-full min-h-[200px]', isNarrow ? 'h-[260px]' : 'h-[280px]')}>
+                  <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
                     <BarChart
                       layout="vertical"
                       data={ingredientMonth.ingredientDetailRows.slice(0, 12).map((r) => ({
@@ -832,7 +878,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                         value: r.value,
                         pct: r.pctOfIngredient,
                       }))}
-                      margin={{ top: 4, right: 12, left: 4, bottom: 4 }}
+                      margin={{ top: 4, right: isNarrow ? 8 : 12, left: 4, bottom: 4 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#27272a" />
                       <XAxis
@@ -840,13 +886,13 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                         tickFormatter={(v) =>
                           Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v))
                         }
-                        tick={{ fill: '#a1a1aa', fontSize: '0.6875rem' }}
+                        tick={{ fill: '#a1a1aa', fontSize: isNarrow ? '0.75rem' : '0.6875rem' }}
                       />
                       <YAxis
                         type="category"
                         dataKey="name"
-                        width={100}
-                        tick={{ fill: '#a1a1aa', fontSize: '0.6875rem' }}
+                        width={isNarrow ? 96 : 100}
+                        tick={{ fill: '#a1a1aa', fontSize: isNarrow ? '0.75rem' : '0.6875rem' }}
                         tickLine={false}
                         axisLine={false}
                       />
@@ -864,10 +910,10 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                           border: '1px solid #3f3f46',
                           backgroundColor: '#18181b',
                           color: '#f5f2ed',
-                          fontSize: '0.75rem',
+                          fontSize: isNarrow ? '0.8125rem' : '0.75rem',
                         }}
                       />
-                      <Bar dataKey="value" name="金額" fill={INGREDIENT_BAR_COLOR} radius={[0, 6, 6, 0]} maxBarSize={22} />
+                      <Bar dataKey="value" name="金額" fill={INGREDIENT_BAR_COLOR} radius={[0, 6, 6, 0]} maxBarSize={isNarrow ? 26 : 22} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

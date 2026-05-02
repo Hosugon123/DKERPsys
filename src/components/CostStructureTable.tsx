@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type TouchEvent as ReactTouchEvent,
 } from 'react';
 import {
   Plus,
@@ -122,11 +123,11 @@ function EditableCell({ value, kind, placeholder, onSave, className, ariaLabel }
         onKeyDown={onKey}
         aria-label={ariaLabel}
         className={cn(
-          'w-full bg-transparent border border-transparent rounded-md px-1.5 py-0.5 text-xs text-zinc-200 placeholder-zinc-600',
+          'w-full min-h-10 rounded-md border border-transparent bg-transparent px-1.5 py-2 text-base text-zinc-200 placeholder-zinc-600 sm:min-h-0 sm:py-0.5 sm:text-xs',
           'hover:border-zinc-700 focus:border-amber-600 focus:outline-none transition-colors',
           align,
-          showPrefix && 'pl-5',
-          showSuffix && 'pr-5',
+          showPrefix && 'pl-5 sm:pl-5',
+          showSuffix && 'pr-5 sm:pr-5',
         )}
       />
       {showSuffix && (
@@ -545,22 +546,36 @@ export default function CostStructureTable() {
       const startX = clientX;
       const startPercents = [...layoutDraft];
 
-      const onMove = (ev: globalThis.MouseEvent) => {
+      const clientXFrom = (ev: globalThis.MouseEvent | globalThis.TouchEvent): number => {
+        if ('touches' in ev && ev.touches.length > 0) return ev.touches[0].clientX;
+        if ('changedTouches' in ev && ev.changedTouches.length > 0)
+          return ev.changedTouches[0].clientX;
+        return (ev as globalThis.MouseEvent).clientX;
+      };
+
+      const onMove = (ev: globalThis.Event) => {
+        const me = ev as globalThis.MouseEvent | globalThis.TouchEvent;
         const w = wrap.getBoundingClientRect().width;
         if (w <= 0) return;
-        const delta = ((ev.clientX - startX) / w) * 100;
+        const delta = ((clientXFrom(me) - startX) / w) * 100;
         setLayoutDraft(applyAdjacentColumnResize(startPercents, leftIndex, delta, COST_TABLE_MIN_COL_PCT));
       };
 
       const onUp = () => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onUp);
+        document.removeEventListener('touchcancel', onUp);
         document.body.style.removeProperty('cursor');
         document.body.style.removeProperty('user-select');
       };
 
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onUp);
+      document.addEventListener('touchcancel', onUp);
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
     },
@@ -623,9 +638,32 @@ export default function CostStructureTable() {
     void products.cost.moveCostColumn(col.id, delta);
   };
 
+  const columnResizeHandleEl = (leftIndex: number, ariaLabel: string) =>
+    columnLayoutEditMode ? (
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={ariaLabel}
+        className="absolute right-0 top-0 bottom-0 z-20 flex w-4 -mr-2 cursor-col-resize touch-none items-center justify-center max-lg:w-7 max-lg:-mr-2.5"
+        onMouseDown={(e: ReactMouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          beginColumnResize(leftIndex, e.clientX);
+        }}
+        onTouchStart={(e: ReactTouchEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const t = e.touches[0];
+          if (t) beginColumnResize(leftIndex, t.clientX);
+        }}
+      >
+        <span className="h-full w-0.5 max-lg:w-1 rounded-full bg-amber-500/80 hover:bg-amber-400" />
+      </div>
+    ) : null;
+
   return (
-    <section className="bg-zinc-900/30 rounded-2xl border border-zinc-800 overflow-hidden">
-      <div className="p-4 flex flex-col gap-3 border-b border-zinc-800">
+    <section className="flex min-w-0 flex-col rounded-2xl border border-zinc-800 bg-zinc-900/30">
+      <div className="shrink-0 flex flex-col gap-3 rounded-t-2xl border-b border-zinc-800 p-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
           <div>
             <h3 className="text-base font-semibold text-zinc-100">成本結構表</h3>
@@ -691,7 +729,7 @@ export default function CostStructureTable() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜尋品名、單位、類別、備註或任一欄位內容…"
-            className="w-full pl-8 pr-8 py-1.5 bg-zinc-950 border border-zinc-700 rounded-lg text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500"
+            className="min-h-10 w-full rounded-lg border border-zinc-700 bg-zinc-950 py-2 pl-8 pr-8 text-base text-zinc-200 placeholder-zinc-500 focus:border-amber-500 focus:outline-none sm:min-h-0 sm:py-1.5 sm:text-xs"
             />
             {search && (
               <button
@@ -706,7 +744,7 @@ export default function CostStructureTable() {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="shrink-0 bg-zinc-950 border border-zinc-700 text-zinc-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-amber-500"
+            className="min-h-10 shrink-0 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-2 text-base text-zinc-300 focus:border-amber-500 focus:outline-none sm:min-h-0 sm:py-1.5 sm:text-xs"
           >
             <option value="">所有類別</option>
             {categories.map((c) => (
@@ -723,8 +761,14 @@ export default function CostStructureTable() {
         )}
       </div>
 
-      <div className="w-full min-w-0" ref={tableWrapRef}>
-        <table className="w-full table-fixed text-left border-collapse">
+      <p className="shrink-0 px-2 pb-1.5 pt-1 text-center text-[0.6875rem] text-amber-200/80 lg:hidden">
+        下方表格可<strong className="font-semibold">左右滑動</strong>；必要時可拖曳底部橫向捲軸。
+      </p>
+      <div
+        className="max-w-full min-w-0 flex-1 touch-pan-x overflow-x-scroll overscroll-x-contain rounded-b-2xl [-webkit-overflow-scrolling:touch] lg:overflow-x-auto"
+        ref={tableWrapRef}
+      >
+        <table className="w-full min-w-[1000px] table-fixed border-collapse text-left lg:min-w-0">
           <colgroup>
             {activeColPercents.slice(0, 4).map((p, i) => (
               <col key={['expand', 'name', 'unit', 'category'][i]} style={{ width: `${p.toFixed(2)}%` }} />
@@ -742,21 +786,7 @@ export default function CostStructureTable() {
                   columnLayoutEditMode && 'relative',
                 )}
               >
-                {columnLayoutEditMode && (
-                  <div
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="調整展開欄與品名欄寬度"
-                    className="absolute right-0 top-0 bottom-0 w-2 -mr-1 z-20 cursor-col-resize flex justify-center"
-                    onMouseDown={(e: ReactMouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      beginColumnResize(0, e.clientX);
-                    }}
-                  >
-                    <span className="w-0.5 h-full bg-amber-500/80 hover:bg-amber-400 rounded-full" />
-                  </div>
-                )}
+                {columnResizeHandleEl(0, '調整展開欄與品名欄寬度')}
               </th>
               <th
                 className={cn(
@@ -765,21 +795,7 @@ export default function CostStructureTable() {
                 )}
               >
                 品名
-                {columnLayoutEditMode && (
-                  <div
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="調整品名欄與單位欄寬度"
-                    className="absolute right-0 top-0 bottom-0 w-2 -mr-1 z-20 cursor-col-resize flex justify-center"
-                    onMouseDown={(e: ReactMouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      beginColumnResize(1, e.clientX);
-                    }}
-                  >
-                    <span className="w-0.5 h-full bg-amber-500/80 hover:bg-amber-400 rounded-full" />
-                  </div>
-                )}
+                {columnResizeHandleEl(1, '調整品名欄與單位欄寬度')}
               </th>
               <th
                 className={cn(
@@ -788,21 +804,7 @@ export default function CostStructureTable() {
                 )}
               >
                 單位
-                {columnLayoutEditMode && (
-                  <div
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="調整單位欄與類別欄寬度"
-                    className="absolute right-0 top-0 bottom-0 w-2 -mr-1 z-20 cursor-col-resize flex justify-center"
-                    onMouseDown={(e: ReactMouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      beginColumnResize(2, e.clientX);
-                    }}
-                  >
-                    <span className="w-0.5 h-full bg-amber-500/80 hover:bg-amber-400 rounded-full" />
-                  </div>
-                )}
+                {columnResizeHandleEl(2, '調整單位欄與類別欄寬度')}
               </th>
               <th
                 className={cn(
@@ -811,21 +813,7 @@ export default function CostStructureTable() {
                 )}
               >
                 類別
-                {columnLayoutEditMode && (
-                  <div
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="調整類別欄與第一個自訂欄寬度"
-                    className="absolute right-0 top-0 bottom-0 w-2 -mr-1 z-20 cursor-col-resize flex justify-center"
-                    onMouseDown={(e: ReactMouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      beginColumnResize(3, e.clientX);
-                    }}
-                  >
-                    <span className="w-0.5 h-full bg-amber-500/80 hover:bg-amber-400 rounded-full" />
-                  </div>
-                )}
+                {columnResizeHandleEl(3, '調整類別欄與第一個自訂欄寬度')}
               </th>
               {snapshot.columns.map((col, idx) => (
                 <th
@@ -879,21 +867,7 @@ export default function CostStructureTable() {
                       </button>
                     </div>
                   </div>
-                  {columnLayoutEditMode && (
-                    <div
-                      role="separator"
-                      aria-orientation="vertical"
-                      aria-label={`調整「${col.label}」與右側欄寬度`}
-                      className="absolute right-0 top-0 bottom-0 w-2 -mr-1 z-20 cursor-col-resize flex justify-center"
-                      onMouseDown={(e: ReactMouseEvent) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        beginColumnResize(4 + idx, e.clientX);
-                      }}
-                    >
-                      <span className="w-0.5 h-full bg-amber-500/80 hover:bg-amber-400 rounded-full" />
-                    </div>
-                  )}
+                  {columnResizeHandleEl(4 + idx, `調整「${col.label}」與右側欄寬度`)}
                 </th>
               ))}
               <th className="py-1.5 px-1 font-medium text-center border-b border-zinc-800">操作</th>
@@ -1019,7 +993,7 @@ const Row: FC<RowProps> = ({
             onBlur={(e) =>
               void products.cost.updateCostItem(item.id, { category: e.target.value || null })
             }
-            className="w-full bg-transparent border border-transparent rounded-md px-1.5 py-0.5 text-xs text-zinc-300 placeholder-zinc-600 hover:border-zinc-700 focus:border-amber-600 focus:outline-none"
+            className="min-h-10 w-full rounded-md border border-transparent bg-transparent px-1.5 py-2 text-base text-zinc-300 placeholder-zinc-600 hover:border-zinc-700 focus:border-amber-600 focus:outline-none sm:min-h-0 sm:py-0.5 sm:text-xs"
           />
           <datalist id={`cat-${item.id}`}>
             {categories.map((c) => (

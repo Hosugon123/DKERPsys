@@ -2,23 +2,34 @@ import { Bell, Settings, Menu, Search, ChevronDown } from 'lucide-react';
 import { UserRole } from '../views/Orders';
 
 interface TopbarProps {
+  isMobileMenuOpen: boolean;
   setIsMobileMenuOpen: (isOpen: boolean) => void;
   userRole: UserRole;
   setUserRole: (role: UserRole) => void;
 }
 
-export default function Topbar({ setIsMobileMenuOpen, userRole, setUserRole }: TopbarProps) {
+export default function Topbar({
+  isMobileMenuOpen,
+  setIsMobileMenuOpen,
+  userRole,
+  setUserRole,
+}: TopbarProps) {
   const roleDisplayNames = {
     admin: '超級管理員',
     franchisee: '加盟主',
     employee: '直營店員工'
   };
   return (
-    <header className="bg-[#111111] border-b border-zinc-800 h-16 flex items-center justify-between px-4 lg:px-8 z-30 sticky top-0">
+    <header className="sticky top-0 z-30 border-b border-zinc-800 bg-[#111111] pt-[env(safe-area-inset-top)]">
+      <div className="flex h-16 items-center justify-between px-4 lg:px-8">
       <div className="flex items-center gap-4">
-        <button 
+        <button
+          type="button"
           onClick={() => setIsMobileMenuOpen(true)}
-          className="p-2 -ml-2 rounded-lg text-zinc-400 hover:bg-zinc-800 lg:hidden"
+          aria-label="開啟選單"
+          aria-expanded={isMobileMenuOpen}
+          aria-controls="app-sidebar-drawer"
+          className="-ml-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 lg:hidden"
         >
           <Menu size={24} />
         </button>
@@ -67,6 +78,7 @@ export default function Topbar({ setIsMobileMenuOpen, userRole, setUserRole }: T
             className="w-full h-full object-cover"
           />
         </div>
+      </div>
       </div>
     </header>
   );

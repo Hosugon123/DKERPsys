@@ -4,12 +4,39 @@
   /* 全系統字級 +15%（rem／em 與 Tailwind 字級階層會跟著縮放） */
   html {
     font-size: 115%;
+    height: 100%;
+    /* 減少 iOS 橡皮筋穿透外層 */
+    overscroll-behavior-y: none;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100%;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #root {
+    min-height: 100%;
   }
 }
 
 @layer utilities {
   .scrollbar-none::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/**
+ * 手機表單基線（iPhone Safari）：可聚焦欄位至少 16px 字級與約 44px 觸控高度，避免自動縮放與難點擊。
+ * 掛在 main 容器（見 App.tsx）；排除 checkbox/radio 等小控制項。
+ */
+@media (max-width: 639px) {
+  .uio-touch-host input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not([type="color"]),
+  .uio-touch-host select,
+  .uio-touch-host textarea {
+    font-size: max(1rem, 100%);
+    min-height: 2.75rem;
   }
 }
 

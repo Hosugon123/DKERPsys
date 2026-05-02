@@ -137,13 +137,19 @@ export default function Sidebar({ currentView, setCurrentView, isOpen, setIsOpen
   return (
     <>
       <div
-        className={cn('fixed inset-0 bg-black/50 z-40 lg:hidden', isOpen ? 'block' : 'hidden')}
+        role="presentation"
+        aria-hidden={!isOpen}
+        className={cn(
+          'fixed inset-0 z-40 touch-none overscroll-none bg-black/50 lg:hidden',
+          isOpen ? 'block' : 'hidden',
+        )}
         onClick={() => setIsOpen(false)}
       />
       <aside
+        id="app-sidebar-drawer"
         className={cn(
-          'fixed lg:static inset-y-0 left-0 z-50 w-64 bg-[#0f0f0f] border-r border-zinc-800 transform transition-transform duration-200 ease-in-out flex flex-col py-6',
-          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+          'fixed inset-y-0 left-0 z-50 flex w-64 max-w-[85vw] flex-col border-r border-zinc-800 bg-[#0f0f0f] py-6 transition-transform duration-200 ease-in-out max-lg:overscroll-y-contain max-lg:pl-[env(safe-area-inset-left)] lg:static lg:max-w-none lg:translate-x-0',
+          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         )}
       >
         <div className="flex items-center gap-3 px-4 mb-3">
@@ -261,7 +267,7 @@ export default function Sidebar({ currentView, setCurrentView, isOpen, setIsOpen
           })}
         </nav>
 
-        <div className="p-4 border-t border-zinc-800 space-y-1 flex-shrink-0">
+        <div className="flex-shrink-0 space-y-1 border-t border-zinc-800 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {userRole === 'admin' && (
             <button
               type="button"
