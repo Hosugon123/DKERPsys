@@ -94,10 +94,10 @@ export default function ForgotPasswordModal({ open, onClose }: ForgotPasswordMod
         role="dialog"
         aria-modal="true"
         aria-labelledby="forgot-pw-title"
-        className="w-full max-w-md rounded-2xl border border-zinc-800 bg-[#111111] shadow-xl"
+        className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-[#111111] shadow-xl max-h-[92dvh] sm:max-h-[88dvh] flex flex-col"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 sm:px-5 sm:py-4">
           <h2 id="forgot-pw-title" className="text-lg font-bold text-[#f5f2ed]">
             忘記密碼
           </h2>
@@ -112,7 +112,7 @@ export default function ForgotPasswordModal({ open, onClose }: ForgotPasswordMod
           </button>
         </div>
 
-        <div className="px-5 py-5">
+        <div className="overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
           {step === 'done' ? (
             <div className="space-y-4 text-center">
               <p className="text-sm text-emerald-400">密碼已更新，請返回使用新密碼登入。</p>

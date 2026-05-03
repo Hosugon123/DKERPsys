@@ -596,10 +596,10 @@ export default function Permissions({
       </div>
 
       {isAddModalOpen && isSuperAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-6 border-b border-zinc-800">
-              <h3 className="text-xl font-bold text-[#f5f2ed]">新增系統使用者</h3>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-2 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[92dvh] sm:max-h-[88dvh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 sm:px-6 sm:py-4">
+              <h3 className="text-lg sm:text-xl font-bold text-[#f5f2ed]">新增系統使用者</h3>
               <button
                 type="button"
                 onClick={() => setIsAddModalOpen(false)}
@@ -609,7 +609,7 @@ export default function Permissions({
               </button>
             </div>
             <form
-              className="p-6 space-y-5"
+              className="overflow-y-auto px-4 py-4 space-y-4 sm:px-6 sm:py-5 sm:space-y-5"
               onSubmit={(e) => {
                 e.preventDefault();
                 void submitAdd();
@@ -628,7 +628,7 @@ export default function Permissions({
                   className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-1.5">登入帳號（英數）</label>
                   <input
@@ -651,7 +651,7 @@ export default function Permissions({
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-1.5">角色權限</label>
                   <select
@@ -682,7 +682,7 @@ export default function Permissions({
                 </div>
               </div>
               {addRole === 'employee' && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-1.5">員工隸屬</label>
                     <select
@@ -754,10 +754,10 @@ export default function Permissions({
       )}
 
       {editing && isSuperAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-6 border-b border-zinc-800">
-              <h3 className="text-xl font-bold text-[#f5f2ed]">編輯使用者</h3>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-2 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[92dvh] sm:max-h-[88dvh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 sm:px-6 sm:py-4">
+              <h3 className="text-lg sm:text-xl font-bold text-[#f5f2ed]">編輯使用者</h3>
               <button
                 type="button"
                 onClick={closeEditModal}
@@ -767,7 +767,7 @@ export default function Permissions({
               </button>
             </div>
             <form
-              className="p-6 space-y-5"
+              className="overflow-y-auto px-4 py-4 space-y-4 sm:px-6 sm:py-5 sm:space-y-5"
               onSubmit={(e) => {
                 e.preventDefault();
                 void submitEdit();
@@ -803,7 +803,7 @@ export default function Permissions({
                   />
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-1.5">角色權限</label>
                   <select
@@ -843,7 +843,7 @@ export default function Permissions({
                 </div>
               </div>
               {editRole === 'employee' && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                   <div>
                     <label className="block text-sm font-medium text-zinc-400 mb-1.5">員工隸屬</label>
                     <select
@@ -969,9 +969,9 @@ export default function Permissions({
       )}
 
       {pwdResetFor && (
-        <div className="fixed inset-0 z-[55] flex items-end justify-center bg-black/60 p-4 sm:items-center sm:p-6">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 shadow-xl">
-            <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+        <div className="fixed inset-0 z-[55] flex items-end justify-center bg-black/60 p-2 sm:items-center sm:p-6">
+          <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 shadow-xl max-h-[92dvh] sm:max-h-[88dvh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 sm:px-5 sm:py-4">
               <h3 className="text-lg font-bold text-[#f5f2ed]">重設密碼</h3>
               <button
                 type="button"
@@ -985,7 +985,7 @@ export default function Permissions({
                 <X size={22} />
               </button>
             </div>
-            <div className="space-y-4 px-5 py-5">
+            <div className="overflow-y-auto space-y-4 px-4 py-4 sm:px-5 sm:py-5">
               <p className="text-sm text-zinc-400">
                 使用者：<span className="font-medium text-[#f5f2ed]">{pwdResetFor.name}</span>（
                 <span className="font-mono text-amber-200/90">{pwdResetFor.loginId ?? '尚未設定登入帳號'}</span>）
