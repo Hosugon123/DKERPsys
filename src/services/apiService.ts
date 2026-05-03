@@ -17,6 +17,11 @@ import {
   type DongshanDataBundleV1,
   type ImportBundleResult,
 } from '../lib/appDataBundle';
+import * as credentialStorage from '../lib/credentialStorage';
+import {
+  confirmPasswordResetWithOtp,
+  requestPasswordResetByEmail,
+} from '../lib/passwordResetOtp';
 import * as systemUsers from '../lib/systemUsersStorage';
 import { getStoreCode3, setStoreCode3 } from '../lib/storeCodeStorage';
 
@@ -242,22 +247,86 @@ export type { CostColumn, CostItem, CostFieldKind, AddCostItemInput, UpdateCostI
 
 // ——— 權限／店號（本機目錄）———
 
+export type CreateUserPayload = systemUsers.NewSystemUserInput & { initialPassword?: string };
+
+export type UpdateAccountPayload = systemUsers.SystemUserUpdate & { newPassword?: string };
+
+function normalizeLoginId(s: string): string {
+  return s.trim().toLowerCase();
+}
+
 export const accounts = {
   async listUsers(): Promise<systemUsers.SystemUser[]> {
     return withLocal(() => systemUsers.listSystemUsers());
   },
-  async createUser(input: systemUsers.NewSystemUserInput): Promise<systemUsers.SystemUser> {
-    return withLocal(() => systemUsers.createSystemUser(input));
+  async createUser(input: CreateUserPayload): Promise<systemUsers.SystemUser> {
+    return withLocal(() => {
+      const { initialPassword, ...rest } = input;
+      if (rest.loginId?.trim() && !initialPassword?.trim()) {
+        throw new Error('已填寫登入帳號時，請一併設定初始密碼。');
+      }
+      if (initialPassword?.trim() && !rest.loginId?.trim()) {
+        throw new Error('設定初始密碼前請先填寫登入帳號。');
+      }
+      const u = systemUsers.createSystemUser(rest);
+      try {
+        if (rest.loginId?.trim() && initialPassword) {
+          credentialStorage.registerCredential(rest.loginId, initialPassword);
+        }
+      } catch (e) {
+        systemUsers.removeSystemUser(u.id);
+        throw e;
+      }
+      return u;
+    });
   },
-  async updateUser(id: string, patch: systemUsers.SystemUserUpdate): Promise<boolean> {
-    return withLocal(() => systemUsers.updateSystemUser(id, patch));
+  async updateUser(id: string, patch: UpdateAccountPayload): Promise<boolean> {
+    return withLocal(() => {
+      const { newPassword, ...userPatch } = patch;
+      const cur = systemUsers.listSystemUsers().find((u) => u.id === id);
+      const oldLogin = cur?.loginId;
+      const ok = systemUsers.updateSystemUser(id, userPatch);
+      if (!ok) return false;
+      const refreshed = systemUsers.listSystemUsers().find((u) => u.id === id);
+      const newLogin = refreshed?.loginId;
+      if (oldLogin && newLogin && normalizeLoginId(oldLogin) !== normalizeLoginId(newLogin)) {
+        credentialStorage.migrateCredential(oldLogin, newLogin);
+      }
+      if (newPassword?.trim()) {
+        const lid = refreshed?.loginId;
+        if (!lid) throw new Error('此帳號尚未設定登入帳號，請先補上登入帳號再重設密碼。');
+        credentialStorage.setCredential(lid, newPassword);
+      }
+      return true;
+    });
   },
   async removeUser(id: string): Promise<boolean> {
-    return withLocal(() => systemUsers.removeSystemUser(id));
+    return withLocal(() => {
+      const cur = systemUsers.listSystemUsers().find((u) => u.id === id);
+      const ok = systemUsers.removeSystemUser(id);
+      if (ok && cur?.loginId) credentialStorage.removeCredential(cur.loginId);
+      return ok;
+    });
+  },
+  async setUserPassword(loginId: string, newPassword: string): Promise<void> {
+    return withLocal(() => {
+      credentialStorage.setCredential(loginId, newPassword);
+    });
   },
 };
 
 export type { SystemUser, SystemUserRole, SystemUserStatus, NewSystemUserInput, SystemUserUpdate } from '../lib/systemUsersStorage';
+
+export const passwordReset = {
+  async requestCode(email: string) {
+    await storageTick();
+    assertLocalOrThrow(getStorageMode());
+    return requestPasswordResetByEmail(email);
+  },
+  async confirm(email: string, code: string, newPassword: string) {
+    return withLocal(() => confirmPasswordResetWithOtp(email, code, newPassword));
+  },
+};
 
 export const storeSettings = {
   async getStoreCode3(): Promise<string> {

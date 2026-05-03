@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import Dashboard from './views/Dashboard';
+import LoginScreen from './views/LoginScreen';
 import Products from './views/Products';
 import Permissions from './views/Permissions';
 import Procurement from './views/Procurement';
@@ -18,16 +19,64 @@ import SalesRecord from './views/SalesRecord';
 import Accounting from './views/Accounting';
 import DataHub from './views/DataHub';
 import { setSupplyCatalogRetailView, userRoleToSupplyRetailView } from './lib/supplyCatalog';
+import {
+  AUTH_SESSION_CHANGED_EVENT,
+  clearSession,
+  ensureAuthBootstrap,
+  isSuperAdminSession,
+  readSession,
+  validateSession,
+  type AuthSession,
+} from './lib/authSession';
 
 export default function App() {
-  const [userRole, setUserRole] = useState<UserRole>('admin');
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [userRole, setUserRole] = useState<UserRole>('employee');
   const [currentView, setCurrentView] = useState('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const scrollLockYRef = useRef(0);
 
+  const isSuperAdmin = session ? isSuperAdminSession(session.loginId) : false;
+
+  useEffect(() => {
+    ensureAuthBootstrap();
+    const s = readSession();
+    if (s && validateSession(s)) setSession(s);
+    else {
+      clearSession();
+      setSession(null);
+    }
+    setAuthReady(true);
+  }, []);
+
+  useEffect(() => {
+    const onAuth = () => {
+      const s = readSession();
+      if (s && validateSession(s)) setSession(s);
+      else {
+        clearSession();
+        setSession(null);
+      }
+    };
+    window.addEventListener(AUTH_SESSION_CHANGED_EVENT, onAuth);
+    return () => window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, onAuth);
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    setUserRole(session.role);
+  }, [session]);
+
   useEffect(() => {
     setSupplyCatalogRetailView(userRoleToSupplyRetailView(userRole));
   }, [userRole]);
+
+  useEffect(() => {
+    if (!isSuperAdmin && currentView === 'permissions') {
+      setCurrentView('dashboard');
+    }
+  }, [isSuperAdmin, currentView]);
 
   /** 手機側欄開啟時鎖定背景捲動（iOS Safari 用 fixed + 還原 scrollY） */
   useEffect(() => {
@@ -72,37 +121,77 @@ export default function App() {
     }
   }, [userRole, currentView]);
 
+  const handleLogout = () => {
+    clearSession();
+    setSession(null);
+    setCurrentView('dashboard');
+  };
+
   const renderView = () => {
-    switch(currentView) {
-      case 'dashboard': return <Dashboard userRole={userRole} />;
-      case 'orders': return <Orders userRole={userRole} />;
-      case 'products': return <Products />;
-      case 'permissions': return <Permissions userRole={userRole} />;
-      case 'procurement': return <Procurement userRole={userRole} />;
-      case 'orderHistory': return <OrderHistory userRole={userRole} />;
-      case 'stallInventory': return <StallInventory userRole={userRole} />;
-      case 'salesRecord': return <SalesRecord userRole={userRole} />;
-      case 'accounting': return <Accounting userRole={userRole} />;
-      case 'dataHub': return <DataHub userRole={userRole} />;
-      default: return <Dashboard userRole={userRole} />;
+    if (!session) return null;
+    switch (currentView) {
+      case 'dashboard':
+        return <Dashboard userRole={userRole} />;
+      case 'orders':
+        return <Orders userRole={userRole} />;
+      case 'products':
+        return <Products />;
+      case 'permissions':
+        return <Permissions userRole={userRole} sessionLoginId={session.loginId} />;
+      case 'procurement':
+        return <Procurement userRole={userRole} />;
+      case 'orderHistory':
+        return <OrderHistory userRole={userRole} />;
+      case 'stallInventory':
+        return <StallInventory userRole={userRole} />;
+      case 'salesRecord':
+        return <SalesRecord userRole={userRole} />;
+      case 'accounting':
+        return <Accounting userRole={userRole} />;
+      case 'dataHub':
+        return <DataHub userRole={userRole} />;
+      default:
+        return <Dashboard userRole={userRole} />;
     }
   };
 
+  if (!authReady) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-[#0d0d0d] text-zinc-500">
+        載入中…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <LoginScreen
+        onSuccess={() => {
+          const s = readSession();
+          if (s && validateSession(s)) setSession(s);
+        }}
+      />
+    );
+  }
+
   return (
-    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 bg-[#0d0d0d] text-[#f5f2ed] font-sans overflow-hidden selection:bg-amber-600/30">
+    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 bg-[#0d0d0d] font-sans text-[#f5f2ed] overflow-hidden selection:bg-amber-600/30">
       <Sidebar
         currentView={currentView}
         setCurrentView={setCurrentView}
         isOpen={isMobileMenuOpen}
         setIsOpen={setIsMobileMenuOpen}
         userRole={userRole}
+        isSuperAdmin={isSuperAdmin}
+        onLogout={handleLogout}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar
           isMobileMenuOpen={isMobileMenuOpen}
           setIsMobileMenuOpen={setIsMobileMenuOpen}
+          loginId={session.loginId}
           userRole={userRole}
-          setUserRole={setUserRole}
+          onLogout={handleLogout}
         />
         <main className="uio-touch-host min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 md:px-6 md:pb-6 md:pt-6 lg:px-8 lg:pb-8 lg:pt-8">
           {renderView()}

@@ -1,6 +1,8 @@
 /**
  * 權限設定／系統使用者目錄（本機 localStorage，結構預留對應 Cloud SQL `users` 表）。
  */
+import { SUPER_ADMIN_LOGIN_ID } from './authConstants';
+
 const KEY = 'dongshan_system_users_v1';
 
 export const SYSTEM_USERS_UPDATED_EVENT = 'systemUsersUpdated';
@@ -15,6 +17,8 @@ export type SystemUser = {
   id: string;
   name: string;
   role: SystemUserRole;
+  /** 系統登入帳號（英數，儲存為小寫） */
+  loginId?: string;
   email: string;
   phone: string;
   status: SystemUserStatus;
@@ -35,6 +39,8 @@ export type NewSystemUserInput = {
   role: SystemUserRole;
   email: string;
   phone: string;
+  /** 登入帳號（建立帳號時建議一併設定，並由 api 層寫入密碼） */
+  loginId?: string;
   employeeOrgType?: EmployeeOrgType;
   parentFranchiseeUserId?: string;
   storeLabel?: string;
@@ -44,7 +50,15 @@ export type NewSystemUserInput = {
 export type SystemUserUpdate = Partial<
   Pick<
     SystemUser,
-    'name' | 'role' | 'email' | 'phone' | 'status' | 'employeeOrgType' | 'parentFranchiseeUserId' | 'storeLabel'
+    | 'name'
+    | 'role'
+    | 'loginId'
+    | 'email'
+    | 'phone'
+    | 'status'
+    | 'employeeOrgType'
+    | 'parentFranchiseeUserId'
+    | 'storeLabel'
   >
 >;
 
@@ -54,6 +68,14 @@ function dispatchUpdated(): void {
 
 function normalizeEmail(s: string): string {
   return s.trim().toLowerCase();
+}
+
+function normalizeLoginId(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function isPrimarySuperAdminUser(u: SystemUser): boolean {
+  return Boolean(u.loginId && normalizeLoginId(u.loginId) === normalizeLoginId(SUPER_ADMIN_LOGIN_ID));
 }
 
 function nowIso(): string {
@@ -128,6 +150,7 @@ function coerceUser(raw: unknown): SystemUser | null {
   const role = o.role;
   const email = typeof o.email === 'string' ? o.email : '';
   const phone = typeof o.phone === 'string' ? o.phone : '';
+  const loginIdRaw = o.loginId;
   const status = o.status;
   const employeeOrgType = o.employeeOrgType;
   const parentFranchiseeUserId = o.parentFranchiseeUserId;
@@ -158,6 +181,9 @@ function coerceUser(raw: unknown): SystemUser | null {
     }
   }
   if (typeof storeLabel === 'string' && storeLabel.trim()) u.storeLabel = storeLabel.trim();
+  if (typeof loginIdRaw === 'string' && loginIdRaw.trim()) {
+    u.loginId = normalizeLoginId(loginIdRaw);
+  }
   return u;
 }
 
@@ -219,13 +245,69 @@ export function listSystemUsers(): SystemUser[] {
   return loaded.map((u) => ({ ...u }));
 }
 
+/**
+ * 保底建立／修正主要超級管理員帳號（dk001）。
+ * - 若無任何 admin，會建立一筆 admin。
+ * - 若有 admin 但沒有任何 loginId=dk001，會把第一位 admin 的 loginId 改為 dk001 並啟用。
+ */
+export function ensurePrimarySuperAdminAccount(): SystemUser {
+  const list = listSystemUsers();
+  const dk = list.find((u) => u.loginId && normalizeLoginId(u.loginId) === normalizeLoginId(SUPER_ADMIN_LOGIN_ID));
+  if (dk) {
+    if (dk.status !== 'active') {
+      updateSystemUser(dk.id, { status: 'active' });
+      const refreshed = listSystemUsers().find((u) => u.id === dk.id);
+      return refreshed ? { ...refreshed } : { ...dk, status: 'active' };
+    }
+    return { ...dk };
+  }
+
+  const firstAdmin = list.find((u) => u.role === 'admin');
+  if (firstAdmin) {
+    updateSystemUser(firstAdmin.id, {
+      loginId: SUPER_ADMIN_LOGIN_ID,
+      status: 'active',
+    });
+    const refreshed = listSystemUsers().find((u) => u.id === firstAdmin.id);
+    return refreshed
+      ? { ...refreshed }
+      : { ...firstAdmin, loginId: SUPER_ADMIN_LOGIN_ID, status: 'active' };
+  }
+
+  const t = nowIso();
+  const seededAdmin: SystemUser = {
+    id: crypto.randomUUID(),
+    name: '系統管理員',
+    role: 'admin',
+    loginId: SUPER_ADMIN_LOGIN_ID,
+    email: 'dk001@local.dongshan',
+    phone: '',
+    status: 'active',
+    createdAt: t,
+    updatedAt: t,
+  };
+  savePersisted([seededAdmin, ...list]);
+  return { ...seededAdmin };
+}
+
 export function createSystemUser(input: NewSystemUserInput): SystemUser {
   const list = listSystemUsers();
   const emailN = normalizeEmail(input.email);
   if (!input.name.trim()) throw new Error('請填寫使用者名稱。');
   if (!emailN) throw new Error('請填寫電子信箱。');
+  if (input.role === 'admin') {
+    throw new Error('無法新增超級管理員帳號；系統僅保留主要管理帳號。');
+  }
   if (list.some((u) => normalizeEmail(u.email) === emailN)) {
     throw new Error('此信箱已被使用。');
+  }
+  let loginId: string | undefined;
+  if (input.loginId?.trim()) {
+    loginId = normalizeLoginId(input.loginId);
+    if (!loginId) throw new Error('登入帳號不可僅有空白。');
+    if (list.some((x) => x.loginId && normalizeLoginId(x.loginId) === loginId)) {
+      throw new Error('此登入帳號已被使用。');
+    }
   }
   const t = nowIso();
   const u: SystemUser = {
@@ -238,6 +320,7 @@ export function createSystemUser(input: NewSystemUserInput): SystemUser {
     createdAt: t,
     updatedAt: t,
   };
+  if (loginId) u.loginId = loginId;
   const affiliation = normalizeEmployeeAffiliation(
     input.role,
     input.employeeOrgType,
@@ -254,6 +337,18 @@ export function updateSystemUser(id: string, patch: SystemUserUpdate): boolean {
   const list = listSystemUsers();
   const i = list.findIndex((u) => u.id === id);
   if (i < 0) return false;
+  const cur = list[i];
+  if (isPrimarySuperAdminUser(cur)) {
+    if (patch.role != null && patch.role !== 'admin') {
+      throw new Error('無法變更主要超級管理員的角色。');
+    }
+    if (patch.status === 'disabled') {
+      throw new Error('無法將主要超級管理員帳號設為停權。');
+    }
+    if (patch.loginId != null && normalizeLoginId(String(patch.loginId)) !== normalizeLoginId(SUPER_ADMIN_LOGIN_ID)) {
+      throw new Error('無法變更主要超級管理員的登入帳號。');
+    }
+  }
   const nextEmail = patch.email != null ? normalizeEmail(patch.email) : normalizeEmail(list[i].email);
   if (patch.email != null) {
     if (!String(patch.email).trim()) throw new Error('信箱不可為空。');
@@ -261,9 +356,18 @@ export function updateSystemUser(id: string, patch: SystemUserUpdate): boolean {
       throw new Error('此信箱已被其他帳號使用。');
     }
   }
+  if (patch.loginId !== undefined) {
+    const lid = String(patch.loginId).trim() ? normalizeLoginId(String(patch.loginId)) : '';
+    if (!lid) throw new Error('登入帳號不可為空。');
+    if (list.some((u, j) => j !== i && u.loginId && normalizeLoginId(u.loginId) === lid)) {
+      throw new Error('此登入帳號已被其他帳號使用。');
+    }
+  }
   const t = nowIso();
-  const cur = list[i];
   const nextRole = patch.role ?? cur.role;
+  if (patch.role === 'admin' && !isPrimarySuperAdminUser(cur)) {
+    throw new Error('無法將其他帳號升級為超級管理員。');
+  }
   const nextOrgType = patch.employeeOrgType ?? cur.employeeOrgType;
   const nextParent = patch.parentFranchiseeUserId ?? cur.parentFranchiseeUserId;
   const affiliation = normalizeEmployeeAffiliation(nextRole, nextOrgType, nextParent, list);
@@ -276,6 +380,9 @@ export function updateSystemUser(id: string, patch: SystemUserUpdate): boolean {
     status: patch.status ?? cur.status,
     updatedAt: t,
   };
+  if (patch.loginId !== undefined) {
+    merged.loginId = String(patch.loginId).trim() ? normalizeLoginId(String(patch.loginId)) : undefined;
+  }
   if (nextRole !== 'employee') {
     delete merged.employeeOrgType;
     delete merged.parentFranchiseeUserId;
@@ -295,7 +402,11 @@ export function updateSystemUser(id: string, patch: SystemUserUpdate): boolean {
 
 export function removeSystemUser(id: string): boolean {
   const list = listSystemUsers();
-  const next = list.filter((u) => u.id !== id);
+  const u = list.find((x) => x.id === id);
+  if (u && isPrimarySuperAdminUser(u)) {
+    throw new Error('無法刪除主要超級管理員帳號。');
+  }
+  const next = list.filter((x) => x.id !== id);
   if (next.length === list.length) return false;
   savePersisted(next);
   return true;

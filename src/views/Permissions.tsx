@@ -4,6 +4,8 @@ import type { UserRole } from './Orders';
 import { accounts, storeSettings } from '../services/apiService';
 import type { EmployeeOrgType, SystemUser, SystemUserRole, SystemUserStatus } from '../lib/systemUsersStorage';
 import { SYSTEM_USERS_UPDATED_EVENT } from '../lib/systemUsersStorage';
+import { SUPER_ADMIN_LOGIN_ID } from '../lib/authConstants';
+import { isSuperAdminSession } from '../lib/authSession';
 import { cn } from '../lib/utils';
 
 function roleLabel(r: SystemUserRole): string {
@@ -37,10 +39,52 @@ function avatarChar(name: string): string {
   return cp ?? '?';
 }
 
+function isPrimarySuperUser(u: SystemUser | null | undefined): boolean {
+  return Boolean(u?.loginId && u.loginId.toLowerCase() === SUPER_ADMIN_LOGIN_ID.toLowerCase());
+}
+
 type RoleFilter = 'all' | SystemUserRole;
 
-export default function Permissions({ userRole }: { userRole: UserRole }) {
-  const isAdmin = userRole === 'admin';
+/** 刪除二次確認用：以開啟刪除流程當下的系統紀錄為準（不受表單草稿欄位影響） */
+type DeleteConfirmSnapshot = {
+  userId: string;
+  name: string;
+  loginId: string;
+  email: string;
+};
+
+function normalizeDeleteInputLogin(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function normalizeDeleteInputEmail(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function deleteConfirmMatches(snapshot: DeleteConfirmSnapshot, rawInput: string): boolean {
+  const input = rawInput.trim();
+  if (!input) return false;
+  if (snapshot.loginId && normalizeDeleteInputLogin(input) === normalizeDeleteInputLogin(snapshot.loginId)) {
+    return true;
+  }
+  if (input === snapshot.name.trim()) {
+    return true;
+  }
+  if (snapshot.email && normalizeDeleteInputEmail(input) === normalizeDeleteInputEmail(snapshot.email)) {
+    return true;
+  }
+  return false;
+}
+
+export default function Permissions({
+  userRole: _userRole,
+  sessionLoginId,
+}: {
+  userRole: UserRole;
+  sessionLoginId: string;
+}) {
+  void _userRole;
+  const isSuperAdmin = isSuperAdminSession(sessionLoginId);
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -70,7 +114,18 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
-  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteSnapshot, setDeleteSnapshot] = useState<DeleteConfirmSnapshot | null>(null);
+  const [addLoginId, setAddLoginId] = useState('');
+  const [addInitialPassword, setAddInitialPassword] = useState('');
+  const [editLoginId, setEditLoginId] = useState('');
+  const [pwdResetFor, setPwdResetFor] = useState<SystemUser | null>(null);
+  const [pwdResetNew, setPwdResetNew] = useState('');
+  const [pwdResetNew2, setPwdResetNew2] = useState('');
+  const [pwdResetErr, setPwdResetErr] = useState<string | null>(null);
+  const [pwdResetBusy, setPwdResetBusy] = useState(false);
+
+  const isEditingPrimarySuper = useMemo(() => isPrimarySuperUser(editing), [editing]);
 
   const refreshUsers = useCallback(async () => {
     setListLoading(true);
@@ -121,6 +176,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
+        (u.loginId ?? '').toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q) ||
         u.phone.replace(/\s/g, '').includes(q.replace(/\s/g, ''))
       );
@@ -138,13 +194,24 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
     setAddPhone('');
     setAddEmail('');
     setAddStoreLabel('');
+    setAddLoginId('');
+    setAddInitialPassword('');
     setIsAddModalOpen(true);
+  };
+
+  const closeEditModal = () => {
+    setEditing(null);
+    setDeleteArmed(false);
+    setDeleteConfirmText('');
+    setDeleteSnapshot(null);
+    setEditError(null);
   };
 
   const openEdit = (u: SystemUser) => {
     setEditError(null);
     setDeleteArmed(false);
-    setDeleteConfirmName('');
+    setDeleteConfirmText('');
+    setDeleteSnapshot(null);
     setEditing(u);
     setEditName(u.name);
     setEditRole(u.role);
@@ -154,10 +221,19 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
     setEditEmail(u.email);
     setEditStoreLabel(u.storeLabel ?? '');
     setEditStatus(u.status);
+    setEditLoginId(u.loginId ?? '');
   };
 
   const submitAdd = async () => {
     setAddError(null);
+    if (!addLoginId.trim()) {
+      setAddError('請填寫登入帳號。');
+      return;
+    }
+    if (!addInitialPassword.trim() || addInitialPassword.length < 4) {
+      setAddError('請設定至少 4 碼的初始密碼。');
+      return;
+    }
     setAddSaving(true);
     try {
       await accounts.createUser({
@@ -165,6 +241,8 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
         role: addRole,
         email: addEmail,
         phone: addPhone,
+        loginId: addLoginId.trim(),
+        initialPassword: addInitialPassword,
         employeeOrgType: addRole === 'employee' ? addEmployeeOrgType : undefined,
         parentFranchiseeUserId:
           addRole === 'employee' && addEmployeeOrgType === 'franchisee' ? addParentFranchiseeUserId : undefined,
@@ -181,12 +259,17 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
 
   const submitEdit = async () => {
     if (!editing) return;
+    if (!isEditingPrimarySuper && !editLoginId.trim()) {
+      setEditError('請填寫登入帳號。');
+      return;
+    }
     setEditError(null);
     setEditSaving(true);
     try {
       await accounts.updateUser(editing.id, {
         name: editName,
         role: editRole,
+        loginId: isEditingPrimarySuper ? SUPER_ADMIN_LOGIN_ID : editLoginId.trim(),
         email: editEmail,
         phone: editPhone,
         status: editStatus,
@@ -195,7 +278,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
           editRole === 'employee' && editEmployeeOrgType === 'franchisee' ? editParentFranchiseeUserId : undefined,
         storeLabel: editStoreLabel,
       });
-      setEditing(null);
+      closeEditModal();
       await refreshUsers();
     } catch (e) {
       setEditError(e instanceof Error ? e.message : '更新失敗');
@@ -205,31 +288,41 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
   };
 
   const removeEditingUser = async () => {
-    if (!editing || !isAdmin) return;
+    if (!editing || !isSuperAdmin) return;
     if (!deleteArmed) {
+      setDeleteConfirmText('');
+      setDeleteSnapshot({
+        userId: editing.id,
+        name: editing.name,
+        loginId: (editing.loginId ?? '').trim(),
+        email: editing.email,
+      });
       setDeleteArmed(true);
       return;
     }
-    const expected = editName.trim();
-    if (!expected) {
-      setEditError('請先填寫「使用者名稱」再執行刪除。');
+    const snap = deleteSnapshot;
+    if (!snap || snap.userId !== editing.id) {
+      setEditError('刪除確認狀態已過期，請關閉後重新開啟編輯，再按一次「刪除此帳號」。');
+      setDeleteArmed(false);
+      setDeleteSnapshot(null);
+      setDeleteConfirmText('');
       return;
     }
-    if (deleteConfirmName.trim() !== expected) {
-      setEditError('二次確認姓名不符：請輸入與上方「使用者名稱」欄位完全相同（含空格需一致，建議直接複製貼上）。');
+    if (!deleteConfirmMatches(snap, deleteConfirmText)) {
+      setEditError(
+        '確認文字不符：請輸入與下方「登入帳號」「使用者名稱」「電子信箱」三者之一完全相同的內容（登入帳號不分大小寫；名稱與信箱需與紀錄一致）。',
+      );
       return;
     }
     setEditError(null);
     setEditSaving(true);
     try {
-      const ok = await accounts.removeUser(editing.id);
+      const ok = await accounts.removeUser(snap.userId);
       if (!ok) {
         setEditError('刪除失敗：找不到此帳號或資料已變更，請關閉視窗後重新整理再試。');
         return;
       }
-      setDeleteArmed(false);
-      setDeleteConfirmName('');
-      setEditing(null);
+      closeEditModal();
       await refreshUsers();
     } catch (e) {
       setEditError(e instanceof Error ? e.message : '刪除失敗');
@@ -240,6 +333,46 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
 
   const onSaveStoreCode = () => void storeSettings.setStoreCode3(storeDraft);
 
+  const submitPwdReset = async () => {
+    if (!pwdResetFor?.loginId) {
+      setPwdResetErr('此使用者尚未設定登入帳號，請先於「編輯」中補上。');
+      return;
+    }
+    setPwdResetErr(null);
+    if (pwdResetNew !== pwdResetNew2) {
+      setPwdResetErr('兩次新密碼輸入不一致。');
+      return;
+    }
+    if (pwdResetNew.length < 4) {
+      setPwdResetErr('新密碼至少需 4 個字元。');
+      return;
+    }
+    setPwdResetBusy(true);
+    try {
+      await accounts.setUserPassword(pwdResetFor.loginId, pwdResetNew);
+      setPwdResetFor(null);
+      setPwdResetNew('');
+      setPwdResetNew2('');
+    } catch (e) {
+      setPwdResetErr(e instanceof Error ? e.message : '重設失敗');
+    } finally {
+      setPwdResetBusy(false);
+    }
+  };
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/40 px-6 py-16 text-center">
+        <ShieldAlert className="mb-4 text-amber-500" size={48} />
+        <p className="text-lg font-semibold text-[#f5f2ed]">無權限瀏覽此頁面</p>
+        <p className="mt-2 max-w-sm text-sm text-zinc-500">
+          僅主要超級管理員（登入帳號 <span className="font-mono text-zinc-400">{SUPER_ADMIN_LOGIN_ID}</span>
+          ）可使用權限編輯與建立帳號。
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-24">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -247,7 +380,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
           <h2 className="text-3xl font-bold tracking-tight">權限設定</h2>
           <p className="text-zinc-500 mt-1">管理系統使用者帳號、角色配置與存取權限。</p>
         </div>
-        {isAdmin && (
+        {isSuperAdmin && (
           <button
             type="button"
             onClick={openAddModal}
@@ -266,7 +399,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
             <p className="text-xs text-zinc-500 mt-0.5">訂單單號前綴（3 碼）。</p>
           </div>
         </div>
-        {isAdmin ? (
+        {isSuperAdmin ? (
           <div className="flex items-center gap-2 shrink-0">
             <input
               type="text"
@@ -335,7 +468,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜尋名稱、信箱或電話..."
+                placeholder="搜尋名稱、登入帳號、信箱或電話..."
                 className="w-full pl-10 pr-4 py-2 border border-zinc-700 bg-zinc-900 rounded-full focus:outline-none focus:border-amber-500 transition-colors text-sm text-zinc-300 placeholder-zinc-500"
               />
             </div>
@@ -357,6 +490,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
             <thead>
               <tr className="text-zinc-500 text-xs uppercase border-b border-zinc-800">
                 <th className="py-4 px-6 font-medium whitespace-nowrap">使用者名稱</th>
+                <th className="py-4 px-6 font-medium whitespace-nowrap">登入帳號</th>
                 <th className="py-4 px-6 font-medium whitespace-nowrap">角色權限</th>
                 <th className="py-4 px-6 font-medium whitespace-nowrap">信箱帳號</th>
                 <th className="py-4 px-6 font-medium whitespace-nowrap">聯絡電話</th>
@@ -367,7 +501,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
             <tbody className="text-sm">
               {listLoading ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-zinc-500">
+                  <td colSpan={7} className="py-12 text-center text-zinc-500">
                     載入使用者清單…
                   </td>
                 </tr>
@@ -387,6 +521,9 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                         </div>
                         <span className="font-medium text-[#f5f2ed]">{u.name}</span>
                       </div>
+                    </td>
+                    <td className="py-4 px-6 font-mono text-sm text-amber-200/90 whitespace-nowrap">
+                      {u.loginId ?? '—'}
                     </td>
                     <td className="py-4 px-6 whitespace-nowrap">
                       <span
@@ -419,8 +556,8 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                       </span>
                     </td>
                     <td className="py-4 px-6 text-right whitespace-nowrap">
-                      {isAdmin ? (
-                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {isSuperAdmin ? (
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => openEdit(u)}
@@ -431,11 +568,12 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
-                              window.alert(
-                                '本機版尚未連線認證後台；重設密碼將於後端 API（Cloud Run）上線後開放。'
-                              )
-                            }
+                            onClick={() => {
+                              setPwdResetErr(null);
+                              setPwdResetNew('');
+                              setPwdResetNew2('');
+                              setPwdResetFor(u);
+                            }}
                             className="p-1.5 text-zinc-500 hover:text-amber-500 hover:bg-zinc-800 rounded-lg transition-colors"
                             title="重設密碼"
                           >
@@ -457,7 +595,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
         )}
       </div>
 
-      {isAddModalOpen && isAdmin && (
+      {isAddModalOpen && isSuperAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center p-6 border-b border-zinc-800">
@@ -492,6 +630,29 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-1.5">登入帳號（英數）</label>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={addLoginId}
+                    onChange={(e) => setAddLoginId(e.target.value)}
+                    placeholder="例如：store01"
+                    className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 font-mono text-sm text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-1.5">初始密碼（至少 4 碼）</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={addInitialPassword}
+                    onChange={(e) => setAddInitialPassword(e.target.value)}
+                    className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-1.5">角色權限</label>
                   <select
                     value={addRole}
@@ -507,7 +668,6 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                   >
                     <option value="franchisee">加盟主</option>
                     <option value="employee">員工</option>
-                    <option value="admin">超級管理員</option>
                   </select>
                 </div>
                 <div>
@@ -563,7 +723,7 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-400 mb-1.5">電子信箱 (登入帳號)</label>
+                <label className="block text-sm font-medium text-zinc-400 mb-1.5">電子信箱</label>
                 <input
                   type="email"
                   value={addEmail}
@@ -593,14 +753,14 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
         </div>
       )}
 
-      {editing && isAdmin && (
+      {editing && isSuperAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center p-6 border-b border-zinc-800">
               <h3 className="text-xl font-bold text-[#f5f2ed]">編輯使用者</h3>
               <button
                 type="button"
-                onClick={() => setEditing(null)}
+                onClick={closeEditModal}
                 className="text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 <X size={24} />
@@ -625,11 +785,30 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                   className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-1.5">登入帳號</label>
+                {isEditingPrimarySuper ? (
+                  <input
+                    type="text"
+                    readOnly
+                    value={SUPER_ADMIN_LOGIN_ID}
+                    className="w-full cursor-not-allowed rounded-lg border border-zinc-700 bg-zinc-900/60 px-4 py-2.5 font-mono text-sm text-zinc-400"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={editLoginId}
+                    onChange={(e) => setEditLoginId(e.target.value)}
+                    className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 font-mono text-sm text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
+                  />
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-1.5">角色權限</label>
                   <select
                     value={editRole}
+                    disabled={isEditingPrimarySuper}
                     onChange={(e) => {
                       const nextRole = e.target.value as SystemUserRole;
                       setEditRole(nextRole);
@@ -638,11 +817,16 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                         setEditParentFranchiseeUserId('');
                       }
                     }}
-                    className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors appearance-none"
+                    className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors appearance-none disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <option value="franchisee">加盟主</option>
-                    <option value="employee">員工</option>
-                    <option value="admin">超級管理員</option>
+                    {isEditingPrimarySuper ? (
+                      <option value="admin">超級管理員</option>
+                    ) : (
+                      <>
+                        <option value="franchisee">加盟主</option>
+                        <option value="employee">員工</option>
+                      </>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -650,7 +834,8 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                   <select
                     value={editStatus}
                     onChange={(e) => setEditStatus(e.target.value as SystemUserStatus)}
-                    className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors appearance-none"
+                    disabled={isEditingPrimarySuper}
+                    className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors appearance-none disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <option value="active">啟用中</option>
                     <option value="disabled">停權</option>
@@ -716,36 +901,55 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                 />
               </div>
               <div className="pt-2 flex flex-col gap-3">
-                <button
-                  type="button"
-                  onClick={() => void removeEditingUser()}
-                  disabled={editSaving}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-red-900/50 text-red-400 hover:bg-red-950/30 text-sm font-medium transition-colors disabled:opacity-50"
-                >
-                  <Trash2 size={16} /> 刪除此帳號
-                </button>
-                {deleteArmed && editing && (
-                  <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-3 space-y-2">
-                    <p className="text-xs text-red-300">
-                      二次確認：請輸入與上方「使用者名稱」欄位完全相同的「{editName.trim() || '（請先填寫名稱）'}」後，再按一次「刪除此帳號」。
-                    </p>
-                    <input
-                      type="text"
-                      value={deleteConfirmName}
-                      onChange={(e) => setDeleteConfirmName(e.target.value)}
-                      placeholder={editName.trim() || '與上方名稱欄相同'}
-                      className="w-full bg-zinc-900/70 border border-red-900/50 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-red-500"
-                    />
-                  </div>
+                {!isEditingPrimarySuper ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void removeEditingUser()}
+                      disabled={editSaving}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-red-900/50 text-red-400 hover:bg-red-950/30 text-sm font-medium transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 size={16} /> 刪除此帳號
+                    </button>
+                    {deleteArmed && editing && deleteSnapshot && deleteSnapshot.userId === editing.id && (
+                      <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-3 space-y-2">
+                        <p className="text-xs font-medium text-red-200">二次確認（請擇一完整輸入，與下列紀錄相同）</p>
+                        <ul className="list-inside list-disc space-y-1 text-[0.6875rem] leading-relaxed text-zinc-400">
+                          {deleteSnapshot.loginId ? (
+                            <li>
+                              登入帳號：<span className="font-mono text-amber-200/90">{deleteSnapshot.loginId}</span>
+                            </li>
+                          ) : (
+                            <li>登入帳號：（尚無）— 請改輸入使用者名稱或電子信箱</li>
+                          )}
+                          <li>
+                            使用者名稱：<span className="text-zinc-200">{deleteSnapshot.name}</span>
+                          </li>
+                          <li>
+                            電子信箱：<span className="font-mono text-zinc-300">{deleteSnapshot.email}</span>
+                          </li>
+                        </ul>
+                        <input
+                          type="text"
+                          value={deleteConfirmText}
+                          onChange={(e) => setDeleteConfirmText(e.target.value)}
+                          placeholder="輸入登入帳號、名稱或信箱其中一項"
+                          autoComplete="off"
+                          className="w-full bg-zinc-900/70 border border-red-900/50 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-red-500"
+                        />
+                        <p className="text-[0.625rem] text-zinc-500">輸入後請再按一次「刪除此帳號」。無須先按「儲存變更」。</p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-500">
+                    主要超級管理員帳號不可刪除。
+                  </p>
                 )}
                 <div className="flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      setDeleteArmed(false);
-                      setDeleteConfirmName('');
-                      setEditing(null);
-                    }}
+                    onClick={closeEditModal}
                     className="px-5 py-2.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 font-medium transition-colors"
                   >
                     取消
@@ -760,6 +964,76 @@ export default function Permissions({ userRole }: { userRole: UserRole }) {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {pwdResetFor && (
+        <div className="fixed inset-0 z-[55] flex items-end justify-center bg-black/60 p-4 sm:items-center sm:p-6">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+              <h3 className="text-lg font-bold text-[#f5f2ed]">重設密碼</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setPwdResetFor(null);
+                  setPwdResetErr(null);
+                }}
+                className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-800"
+                aria-label="關閉"
+              >
+                <X size={22} />
+              </button>
+            </div>
+            <div className="space-y-4 px-5 py-5">
+              <p className="text-sm text-zinc-400">
+                使用者：<span className="font-medium text-[#f5f2ed]">{pwdResetFor.name}</span>（
+                <span className="font-mono text-amber-200/90">{pwdResetFor.loginId ?? '尚未設定登入帳號'}</span>）
+              </p>
+              {pwdResetErr && (
+                <p className="rounded-lg border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300">{pwdResetErr}</p>
+              )}
+              <div>
+                <label className="mb-1 block text-sm text-zinc-400">新密碼</label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={pwdResetNew}
+                  onChange={(e) => setPwdResetNew(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2.5 text-[#f5f2ed] outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-zinc-400">確認新密碼</label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={pwdResetNew2}
+                  onChange={(e) => setPwdResetNew2(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2.5 text-[#f5f2ed] outline-none focus:border-amber-500"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPwdResetFor(null);
+                    setPwdResetErr(null);
+                  }}
+                  className="rounded-lg px-4 py-2.5 text-sm text-zinc-400 hover:bg-zinc-800"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={pwdResetBusy}
+                  onClick={() => void submitPwdReset()}
+                  className="rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-bold text-zinc-950 hover:bg-amber-500 disabled:opacity-50"
+                >
+                  {pwdResetBusy ? '處理中…' : '確認重設'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

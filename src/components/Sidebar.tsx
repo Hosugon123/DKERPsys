@@ -25,6 +25,8 @@ interface SidebarProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
   userRole: string;
+  isSuperAdmin: boolean;
+  onLogout: () => void;
 }
 
 const adminItems = [
@@ -77,7 +79,15 @@ function arrayMove<T>(list: T[], from: number, to: number): T[] {
   return next;
 }
 
-export default function Sidebar({ currentView, setCurrentView, isOpen, setIsOpen, userRole }: SidebarProps) {
+export default function Sidebar({
+  currentView,
+  setCurrentView,
+  isOpen,
+  setIsOpen,
+  userRole,
+  isSuperAdmin,
+  onLogout,
+}: SidebarProps) {
   const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
   const [reorderMode, setReorderMode] = useState(false);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -268,7 +278,7 @@ export default function Sidebar({ currentView, setCurrentView, isOpen, setIsOpen
         </nav>
 
         <div className="flex-shrink-0 space-y-1 border-t border-zinc-800 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {userRole === 'admin' && (
+          {isSuperAdmin && (
             <button
               type="button"
               onClick={() => {
@@ -294,6 +304,11 @@ export default function Sidebar({ currentView, setCurrentView, isOpen, setIsOpen
           )}
           <button
             type="button"
+            onClick={() => {
+              if (reorderMode) return;
+              onLogout();
+              setIsOpen(false);
+            }}
             className="w-full flex items-center gap-3 p-3 text-zinc-400 hover:bg-zinc-800 transition-colors duration-200 rounded-lg disabled:opacity-40"
             disabled={reorderMode}
           >
