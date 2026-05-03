@@ -10,7 +10,7 @@ import {
   Plus,
 } from 'lucide-react';
 import type { UserRole } from './Orders';
-import { pricePerPackage, getSupplyItem, isConsumableItem, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
+import { estimatedRetailPerPackage, getSupplyItem, isConsumableItem, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { num, computeLine, aggregateStallKpis, isStallRemainEntryValid } from '../lib/stallMath';
 import {
@@ -22,7 +22,7 @@ import {
   listProcurementOrdersInLastNDays,
   type DaySnapshot,
 } from '../lib/stallInventoryStorage';
-import { orders as ordersApi } from '../services/apiService';
+import { orders as ordersApi, withRemoteStorageWrite } from '../services/apiService';
 import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { saveSalesRecord } from '../lib/salesRecordStorage';
 import { cn } from '../lib/utils';
@@ -126,7 +126,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       aggregateStallKpis(
         stallDisplayItems.map((i) => i.id),
         (id) => snap.lines[id] ?? { out: '', remain: '' },
-        (id) => getSupplyItem(id, supplyRetailView)
+        (id) => getSupplyItem(id, supplyRetailView),
+        { unitBasis: 'retail' }
       ),
     [snap.lines, stallDisplayItems, supplyRetailView]
   );
@@ -164,7 +165,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     () =>
       stallDisplayItems.map((item) => {
         const line = snap.lines[item.id] ?? { out: '', remain: '' };
-        const c = computeLine(line.out, line.remain, item);
+        const c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
         const sug = suggestBringAfterCloseDay(item.id, dateStr, c.remain);
         return { item, c, sug };
       }),
@@ -231,8 +232,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         setTimeout(() => setRecomputeMsg(null), 5000);
         return;
       }
-      saveDay(dateStr, next);
-      saveSalesRecord(dateStr, { ...next, lines: recordLines });
+      await withRemoteStorageWrite(() => {
+        saveDay(dateStr, next);
+        saveSalesRecord(dateStr, { ...next, lines: recordLines });
+      });
       setStallListTick((n) => n + 1);
       setStallCountConfirmOpen(false);
       setSaveFlash(true);
@@ -245,12 +248,15 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       setRecomputeMsg('請先從清單選一筆叫貨訂單，再按「植入訂單」帶入帶出。');
       return;
     }
-    setSnap((prev) =>
-      recomputeStallOutForStallYmdAndOrder(dateStr, viewOrderId, prev, { clearRemain: true })
-    );
-    setStallListTick((n) => n + 1);
-    setRecomputeMsg('已帶入。剩餘貨量請逐格填寫。');
-    setTimeout(() => setRecomputeMsg(null), 5000);
+    void (async () => {
+      const next = await withRemoteStorageWrite(() =>
+        recomputeStallOutForStallYmdAndOrder(dateStr, viewOrderId, snap, { clearRemain: true })
+      );
+      setSnap(next);
+      setStallListTick((n) => n + 1);
+      setRecomputeMsg('已帶入。剩餘貨量請逐格填寫。');
+      setTimeout(() => setRecomputeMsg(null), 5000);
+    })();
   };
 
   return (
@@ -435,7 +441,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               <th className="px-2 py-3 font-medium whitespace-nowrap">剩餘貨量</th>
               <th className="px-2 py-3 font-medium whitespace-nowrap">售出數量</th>
               <th className="px-2 py-3 font-medium text-right whitespace-nowrap">餘貨金額</th>
-              <th className="px-2 py-3 font-medium text-right whitespace-nowrap">單價</th>
+              <th className="px-2 py-3 font-medium text-right whitespace-nowrap">單價（零售）</th>
               <th className="px-2 py-3 font-medium text-right whitespace-nowrap">預估帶出價格</th>
               <th className="px-2 py-3 font-medium whitespace-nowrap">單位</th>
               <th className="px-2 py-3 font-medium text-right whitespace-nowrap">餘貨率</th>
@@ -534,7 +540,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   {c.remainUnfilled ? <span className="text-zinc-600">—</span> : <>$ {money(c.remValue)}</>}
                 </td>
                 <td className="px-2 py-2.5 text-right font-mono text-zinc-400">
-                  {pricePerPackage(item).toLocaleString()}
+                  {estimatedRetailPerPackage(item).toLocaleString()}
                 </td>
                 <td className="px-2 py-2.5 text-right font-mono text-emerald-300/90">
                   $ {money(c.estPrice)}

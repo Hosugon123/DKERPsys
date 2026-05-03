@@ -2,6 +2,7 @@ import { Bell, Settings, Menu, Search, ChevronDown, X } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { changeOwnPassword } from '../lib/authSession';
 import type { UserRole } from '../views/Orders';
+import RemoteSyncIndicator from './RemoteSyncIndicator';
 
 interface TopbarProps {
   isMobileMenuOpen: boolean;
@@ -105,13 +106,19 @@ export default function Topbar({
               />
             </div>
 
-            <button
-              type="button"
-              className="hidden rounded-full p-2 text-zinc-400 transition-colors hover:bg-zinc-800 sm:block"
-              aria-label="通知（尚未啟用）"
-            >
-              <Bell size={20} />
-            </button>
+            <div className="hidden items-center gap-1.5 sm:flex">
+              <RemoteSyncIndicator className="mr-0.5" />
+              <button
+                type="button"
+                className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-zinc-800"
+                aria-label="通知（尚未啟用）"
+              >
+                <Bell size={20} />
+              </button>
+            </div>
+            <div className="flex items-center sm:hidden">
+              <RemoteSyncIndicator className="mr-1" />
+            </div>
             <button
               type="button"
               onClick={openPwd}

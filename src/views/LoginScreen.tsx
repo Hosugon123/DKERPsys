@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Lock, User } from 'lucide-react';
 import { SUPER_ADMIN_LOGIN_ID } from '../lib/authConstants';
 import { tryLogin } from '../lib/authSession';
+import RemoteSyncIndicator from '../components/RemoteSyncIndicator';
 import ForgotPasswordModal from './ForgotPasswordModal';
 
 type LoginScreenProps = {
@@ -26,7 +27,10 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
   };
 
   return (
-    <div className="min-h-[100dvh] flex flex-col items-center justify-center bg-[#0d0d0d] text-[#f5f2ed] px-4 py-10 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+    <div className="relative min-h-[100dvh] flex flex-col items-center justify-center bg-[#0d0d0d] text-[#f5f2ed] px-4 py-10 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <div className="absolute right-4 top-[max(0.75rem,env(safe-area-inset-top))] z-10 flex items-center gap-2">
+        <RemoteSyncIndicator />
+      </div>
       <ForgotPasswordModal open={forgotOpen} onClose={() => setForgotOpen(false)} />
       <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-[#111111] p-8 shadow-xl shadow-black/40">
         <div className="mb-8 text-center">

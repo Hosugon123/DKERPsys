@@ -13,7 +13,9 @@ export function getStorageMode(): StorageMode {
 
 /** 後端 API 根路徑（僅 remote 模式使用） */
 export function getApiBaseUrl(): string {
-  return String(import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+  const raw = String(import.meta.env.VITE_API_URL ?? '').trim();
+  if (!raw) return '/api';
+  return raw.replace(/\/$/, '');
 }
 
 /** 模擬網路延遲（毫秒），0–2000 */
@@ -21,4 +23,9 @@ export function getAsyncStorageDelayMs(): number {
   const n = Number(import.meta.env.VITE_ASYNC_STORAGE_DELAY_MS ?? 0);
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.min(2000, Math.floor(n));
+}
+
+/** 遠端同步用簡易 token（由前端送出 Authorization Bearer）。 */
+export function getApiSyncToken(): string {
+  return String(import.meta.env.VITE_API_SYNC_TOKEN ?? '').trim();
 }

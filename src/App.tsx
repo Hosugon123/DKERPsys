@@ -28,6 +28,9 @@ import {
   validateSession,
   type AuthSession,
 } from './lib/authSession';
+import { serializeDongshanDataBundle } from './lib/appDataBundle';
+import { initRemoteSyncOnAppLoad, pushRemoteIfLocalBundleChangedSince } from './services/apiService';
+import { getStorageMode } from './services/storageMode';
 
 export default function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -40,14 +43,23 @@ export default function App() {
   const isSuperAdmin = session ? isSuperAdminSession(session.loginId) : false;
 
   useEffect(() => {
-    ensureAuthBootstrap();
-    const s = readSession();
-    if (s && validateSession(s)) setSession(s);
-    else {
-      clearSession();
-      setSession(null);
-    }
-    setAuthReady(true);
+    void (async () => {
+      if (getStorageMode() === 'remote') {
+        await initRemoteSyncOnAppLoad();
+      }
+      const bundleBeforeAuth = serializeDongshanDataBundle();
+      ensureAuthBootstrap();
+      if (getStorageMode() === 'remote') {
+        await pushRemoteIfLocalBundleChangedSince(bundleBeforeAuth);
+      }
+      const s = readSession();
+      if (s && validateSession(s)) setSession(s);
+      else {
+        clearSession();
+        setSession(null);
+      }
+      setAuthReady(true);
+    })();
   }, []);
 
   useEffect(() => {

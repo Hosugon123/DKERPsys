@@ -1,6 +1,13 @@
 import type { SupplyItem } from './supplyCatalog';
 import { pricePerPackage, isConsumableItem, estimatedRetailPerPackage } from './supplyCatalog';
 
+/** 攤上單列金額計價基準：批價（進貨）或零售參考。 */
+export type StallLineUnitBasis = 'wholesale' | 'retail';
+
+function unitPricePerPackage(item: SupplyItem, basis: StallLineUnitBasis): number {
+  return basis === 'retail' ? estimatedRetailPerPackage(item) : pricePerPackage(item);
+}
+
 export function num(s: string | undefined) {
   const n = Number(String(s ?? '').replace(/,/g, '').trim());
   return Number.isFinite(n) ? n : 0;
@@ -41,12 +48,14 @@ export function isStallRemainEntryValid(remainS: string | undefined): boolean {
 export function computeLine(
   outS: string,
   remainS: string,
-  item: SupplyItem
+  item: SupplyItem,
+  opts?: { unitBasis?: StallLineUnitBasis }
 ): LineComputed {
+  const basis = opts?.unitBasis ?? 'wholesale';
   const out = num(outS);
   const remainUnfilled = String(remainS ?? '').trim() === '';
   const remain = remainUnfilled ? 0 : num(remainS);
-  const unit = pricePerPackage(item);
+  const unit = unitPricePerPackage(item, basis);
   const sold = remainUnfilled ? 0 : soldFromRow(out, remain);
   return {
     out,
@@ -63,9 +72,12 @@ export function computeLine(
 export type DayKpis = {
   estTotal: number;
   remGoodsValue: number;
-  /** 批价 × 售出量（帳上成本／與帶出同單价基準） */
+  /**
+   * 售出量 × 單價；單價依 {@link aggregateStallKpis} 的 unitBasis：
+   * 預設為批價，攤上盤點頁改為零售參考時即為應有營業額（與實收對帳）。
+   */
   shouldRevenue: number;
-  /** 依本機零售參考 × 售出量（盤點金額） */
+  /** 依本機零售參考 × 售出量；unitBasis 為 retail 時與 shouldRevenue 相同。 */
   soldAtRetail: number;
 };
 
@@ -80,15 +92,17 @@ export type StallKpiSplit = {
 export function aggregateStallKpis(
   itemIds: string[],
   getOutRemain: (id: string) => { out: string; remain: string },
-  getItem: (id: string) => SupplyItem | undefined
+  getItem: (id: string) => SupplyItem | undefined,
+  opts?: { unitBasis?: StallLineUnitBasis }
 ): StallKpiSplit {
+  const basis = opts?.unitBasis ?? 'wholesale';
   const retail: DayKpis = { estTotal: 0, remGoodsValue: 0, shouldRevenue: 0, soldAtRetail: 0 };
   const cons = { estTotal: 0, remGoodsValue: 0, soldVolume: 0 };
   for (const id of itemIds) {
     const it = getItem(id);
     if (!it) continue;
     const { out, remain } = getOutRemain(id);
-    const c = computeLine(out, remain, it);
+    const c = computeLine(out, remain, it, { unitBasis: basis });
     if (isConsumableItem(it)) {
       cons.estTotal += c.estPrice;
       cons.remGoodsValue += c.remValue;
@@ -97,7 +111,11 @@ export function aggregateStallKpis(
       retail.estTotal += c.estPrice;
       retail.remGoodsValue += c.remValue;
       retail.shouldRevenue += c.soldRevenue;
-      retail.soldAtRetail += c.sold * estimatedRetailPerPackage(it);
+      if (basis === 'retail') {
+        retail.soldAtRetail += c.soldRevenue;
+      } else {
+        retail.soldAtRetail += c.sold * estimatedRetailPerPackage(it);
+      }
     }
   }
   retail.soldAtRetail = Math.round(retail.soldAtRetail * 100) / 100;
