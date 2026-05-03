@@ -643,17 +643,30 @@ export default function Accounting({ userRole: _userRole }: { userRole: UserRole
       <section className="rounded-2xl border border-amber-900/20 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-4 md:p-5">
         <div className="flex flex-col gap-3 mb-4">
           {/* 手機：篩選在上；md+：標題在左、篩選在右 */}
-          <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
-            <div className="order-2 md:order-1 min-w-0">
+          <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:items-start md:justify-between md:gap-x-4 md:gap-y-2">
+            <div className="order-2 md:order-1 w-full min-w-0 md:w-auto md:max-w-full md:shrink-0">
               <h3 className="text-lg font-semibold text-zinc-200">支出明細</h3>
-              <p className="text-[0.6875rem] text-zinc-500 mt-0.5 leading-snug">
-                {rangeBounds.lo && rangeBounds.hi
-                  ? `${ymdDashToSlash(rangeBounds.lo)} ～ ${ymdDashToSlash(rangeBounds.hi)} · `
-                  : `全部紀錄 · `}
-                {trimmedQuery
-                  ? `符合「${searchQuery.trim()}」共 ${filtered.length} 筆 / 期間 ${dateFiltered.length} 筆`
-                  : `共 ${filtered.length} 筆`}
-              </p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem] text-zinc-500 leading-snug">
+                <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0 tabular-nums">
+                  {rangeBounds.lo && rangeBounds.hi ? (
+                    <>
+                      <span className="whitespace-nowrap">{ymdDashToSlash(rangeBounds.lo)}</span>
+                      <span className="text-zinc-600">～</span>
+                      <span className="whitespace-nowrap">{ymdDashToSlash(rangeBounds.hi)}</span>
+                    </>
+                  ) : (
+                    <span>全部紀錄</span>
+                  )}
+                </span>
+                <span className="text-zinc-600" aria-hidden>
+                  ·
+                </span>
+                <span className="min-w-0">
+                  {trimmedQuery
+                    ? `符合「${searchQuery.trim()}」共 ${filtered.length} 筆 / 期間 ${dateFiltered.length} 筆`
+                    : `共 ${filtered.length} 筆`}
+                </span>
+              </div>
             </div>
 
             <div
