@@ -202,33 +202,33 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
   const nonAdminSummary = useMemo(() => {
     if (isAdmin) return null;
     const { startYmd, endYmd } = resolveRange(summaryRange);
-    const completed = dashboardOrders.filter((o) => {
-      if (o.status !== '已完成') return false;
-      const ymd = ymdFromIso(o.createdAt);
-      return ymd >= startYmd && ymd <= endYmd;
+    const stallCompleted = dashboardOrders.filter((o) => {
+      if (!o.stallCountCompletedAt) return false;
+      const ymd = stallCountAttributeYmd(o);
+      return Boolean(ymd && ymd >= startYmd && ymd <= endYmd);
     });
-    const revenue = completed.reduce((s, o) => s + o.totalAmount, 0);
-    let cogs = 0;
-    for (const order of completed) {
-      for (const line of order.lines) {
-        const item = getSupplyItem(line.productId);
-        cogs += (item?.pricePerPiece ?? 0) * line.qty;
-      }
-    }
-    const gross = revenue - cogs;
-    const expense = listAccountingLedgerEntries()
+    const revenue = stallCompleted.reduce(
+      (s, o) => s + (getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW) ?? 0),
+      0,
+    );
+    const procurementCost = stallCompleted.reduce((s, o) => s + o.totalAmount, 0);
+    const gross = revenue - procurementCost;
+    const ledgerExpense = listAccountingLedgerEntries()
       .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
       .reduce((s, e) => s + e.amount, 0);
+    const expense = procurementCost + ledgerExpense;
     const net = gross - expense;
     return {
       rangeLabel: summaryRangeLabel(summaryRange),
       revenue,
+      procurementCost,
+      ledgerExpense,
       gross,
       grossRate: pct(gross, revenue),
       expense,
       net,
       netRate: pct(net, revenue),
-      completed,
+      completed: stallCompleted,
     };
   }, [dashboardOrders, isAdmin, summaryRange, financeTick]);
 
@@ -259,8 +259,21 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
   const nonAdminExpenseRows = useMemo(() => {
     if (isAdmin) return [];
     const { startYmd, endYmd } = resolveRange(summaryRange);
-    return aggregateExpenseShareRows(listAccountingLedgerEntries(), startYmd, endYmd);
-  }, [isAdmin, summaryRange, financeTick]);
+    const byName = new Map<string, number>();
+    const procurementCost = nonAdminSummary?.procurementCost ?? 0;
+    if (procurementCost > 0) byName.set('批貨成本', procurementCost);
+    for (const e of listAccountingLedgerEntries()) {
+      if (e.flowType !== 'expense') continue;
+      if (e.dateYmd < startYmd || e.dateYmd > endYmd) continue;
+      const name = e.subCategory?.trim() ? `${e.category} / ${e.subCategory.trim()}` : e.category;
+      byName.set(name, (byName.get(name) ?? 0) + e.amount);
+    }
+    const rows = Array.from(byName.entries())
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+    const total = rows.reduce((s, r) => s + r.amount, 0);
+    return rows.map((r, i) => ({ id: i + 1, name: r.name, amount: r.amount, pct: pct(r.amount, total) }));
+  }, [isAdmin, summaryRange, financeTick, nonAdminSummary]);
 
   const adminSummaryOrders = useMemo(() => {
     if (!isAdmin) return [];
@@ -470,7 +483,9 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                 <h2 className={cn('text-3xl font-light mt-1', (nonAdminSummary?.gross ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
                   {moneyTW(nonAdminSummary?.gross ?? 0)}
                 </h2>
-                <div className="text-xs mt-2 text-zinc-500">毛利率 {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%</div>
+                <div className="text-xs mt-2 text-zinc-500">
+                  營收 - 批貨成本 {moneyTW(nonAdminSummary?.procurementCost ?? 0)}（毛利率 {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%）
+                </div>
               </div>
             </div>
 

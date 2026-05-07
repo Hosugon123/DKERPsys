@@ -1,7 +1,7 @@
 /**
  * 非訂單類流水帳（本機 localStorage）
  */
-import { getDataScopeContext } from './dataScope';
+import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
 
 const STORAGE_KEY = 'dongshan_accounting_ledger_v1';
 export const ACCOUNTING_LEDGER_UPDATED_EVENT = 'accountingLedgerUpdated';
@@ -146,8 +146,8 @@ function loadStore(): StoreV2 {
       }
       return { version: 2, byScope };
     }
-    // v1 migration: 舊資料歸屬目前登入範圍
-    const scopeId = getDataScopeContext().scopeId;
+    // v1 migration: 舊資料統一歸屬總部，避免依當前登入者造成跨帳號外溢
+    const scopeId = HQ_SCOPE_ID;
     const legacyRows = Array.isArray((p as StoreV1).entries)
       ? (p as StoreV1).entries.map((row) => coerceEntry(row as AccountingLedgerEntry))
       : [];
