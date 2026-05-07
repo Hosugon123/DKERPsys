@@ -1,22 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, FileText, Target, Store, HandCoins, Boxes } from 'lucide-react';
+import { TrendingUp, FileText, Target, Store, HandCoins } from 'lucide-react';
 import {
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
 import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
-import { computeAdminDashboardFinance, computeIngredientMonthDashboard, currentYmLocal, stallCountAttributeYmd } from '../lib/financeLib';
+import { computeAdminDashboardFinance, currentYmLocal, stallCountAttributeYmd } from '../lib/financeLib';
 import { ACCOUNTING_LEDGER_UPDATED_EVENT, listAccountingLedgerEntries } from '../lib/accountingLedgerStorage';
 import { getSupplyItem } from '../lib/supplyCatalog';
 import { getStallDisplaySoldAtRetail, getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
@@ -32,8 +29,6 @@ const HQ_STALL_VIEW = 'headquarter' as const;
 const EXPENSE_PIE_COLORS = ['#d97706', '#6366f1', '#10b981', '#f43f5e', '#a855f7', '#06b6d4', '#eab308', '#ec4899', '#84cc16', '#f97316'];
 
 const INGREDIENT_STRUCTURE_PIE_COLORS = ['#ea580c', '#6366f1'];
-
-const INGREDIENT_BAR_COLOR = '#c2410c';
 
 type DashboardOrder = OrderHistoryEntry;
 
@@ -157,11 +152,6 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
     return computeAdminDashboardFinance(currentYmLocal());
-  }, [isAdmin, financeTick]);
-
-  const ingredientMonth = useMemo(() => {
-    if (!isAdmin) return null;
-    return computeIngredientMonthDashboard(currentYmLocal());
   }, [isAdmin, financeTick]);
 
   useEffect(() => {
@@ -801,135 +791,47 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
           )}
       </div>
 
-      {isAdmin && ingredientMonth && (
+      {isAdmin && adminFinance && (
         <div className="bg-zinc-900/40 rounded-2xl p-6 border border-zinc-800">
           <div className="flex items-center gap-2 mb-1 text-amber-500/90">
-            <Boxes size={20} className="shrink-0" />
-            <h3 className="text-lg font-medium text-zinc-100">食材進貨結構（本月）</h3>
+            <TrendingUp size={20} className="shrink-0" />
+            <h3 className="text-lg font-medium text-zinc-100">支出結構表（本月）</h3>
           </div>
           <p className="text-xs text-zinc-500 mb-4">
-            主食材進貨（COGS）僅來自「食材支出」；滷汁成本僅來自流水帳大項「滷料」（與食材支出分開）。主食材含鴨貨、肉類、加工食品、蔬菜等子項。
+            依流水帳支出細項加總，展示本月各支出類別占比。
           </p>
-          <div className="grid xl:grid-cols-2 gap-6 items-stretch">
-            <div className="rounded-xl border border-zinc-800/90 bg-zinc-950/35 p-4 flex flex-col min-h-[260px]">
-              <div className="text-[0.6875rem] text-zinc-500 mb-2">主食材進貨 vs 滷料大項</div>
-              {ingredientMonth.cogsVsSeasoningPie.length === 0 ? (
-                <p className="text-sm text-zinc-500 flex-1 flex items-center justify-center py-10 text-center">
-                  本月尚無主食材（食材支出）或滷料大項紀錄。
-                </p>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400 mb-2">
-                    <span>
-                      COGS{' '}
-                      <span className="text-orange-300 font-semibold tabular-nums">
-                        {moneyTW(ingredientMonth.totalCOGS)}
-                      </span>
-                    </span>
-                    <span>
-                      滷汁成本{' '}
-                      <span className="text-indigo-300 font-semibold tabular-nums">
-                        {moneyTW(ingredientMonth.totalSeasoning)}
-                      </span>
-                    </span>
-                  </div>
-                  <div className={cn('w-full flex-1', isNarrow ? 'h-[220px]' : 'h-[240px]')}>
-                    <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                      <PieChart>
-                        <Pie
-                          data={ingredientMonth.cogsVsSeasoningPie}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={isNarrow ? 40 : 48}
-                          outerRadius={isNarrow ? 78 : 88}
-                          paddingAngle={2}
-                          label={
-                            isNarrow
-                              ? false
-                              : ({ name, percent }) =>
-                                  `${String(name).length > 10 ? String(name).slice(0, 10) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                          }
-                        >
-                          {ingredientMonth.cogsVsSeasoningPie.map((_, i) => (
-                            <Cell
-                              key={i}
-                              fill={INGREDIENT_STRUCTURE_PIE_COLORS[i % INGREDIENT_STRUCTURE_PIE_COLORS.length]}
-                              stroke="#18181b"
-                              strokeWidth={1}
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value: number | undefined) => [moneyTW(value ?? 0), '金額']}
-                          contentStyle={{
-                            borderRadius: '12px',
-                            border: '1px solid #3f3f46',
-                            backgroundColor: '#18181b',
-                            color: '#f5f2ed',
-                            fontSize: isNarrow ? '0.8125rem' : '0.75rem',
-                          }}
-                        />
-                        {!isNarrow && (
-                          <Legend
-                            wrapperStyle={{ fontSize: '0.75rem', color: '#a1a1aa' }}
-                            formatter={(value) => <span className="text-zinc-400">{value}</span>}
-                          />
-                        )}
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="rounded-xl border border-zinc-800/90 bg-zinc-950/35 p-4 flex flex-col min-h-[260px]">
-              <div className="text-[0.6875rem] text-zinc-500 mb-2">進貨明細分析（食材支出子項）</div>
-              <p className="text-[0.625rem] text-zinc-600 mb-2">
-                本月食材支出合計 {moneyTW(ingredientMonth.totalIngredientExpense)}。下列僅「食材支出」子項；滷料請見左圖與「產品與成本庫存」滷料分析。
+          <div className="rounded-xl border border-zinc-800/90 bg-zinc-950/35 p-4">
+            {adminFinance.expenseBreakdown.length === 0 ? (
+              <p className="text-sm text-zinc-500 flex items-center justify-center py-10 text-center">
+                本月尚無支出資料可供分析。
               </p>
-              {ingredientMonth.ingredientDetailRows.length === 0 ? (
-                <p className="text-sm text-zinc-500 flex-1 flex items-center justify-center py-10 text-center">
-                  尚無「食材支出」紀錄可供分析。
-                </p>
-              ) : (
-                <div className={cn('w-full min-h-[200px]', isNarrow ? 'h-[260px]' : 'h-[280px]')}>
+            ) : (
+              <>
+                <div className={cn('w-full', isNarrow ? 'h-[260px]' : 'h-[300px]')}>
                   <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                    <BarChart
-                      layout="vertical"
-                      data={ingredientMonth.ingredientDetailRows.slice(0, 12).map((r) => ({
-                        name: r.name.length > 14 ? `${r.name.slice(0, 14)}…` : r.name,
-                        fullName: r.name,
-                        value: r.value,
-                        pct: r.pctOfIngredient,
-                      }))}
-                      margin={{ top: 4, right: isNarrow ? 8 : 12, left: 4, bottom: 4 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#27272a" />
-                      <XAxis
-                        type="number"
-                        tickFormatter={(v) =>
-                          Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v))
+                    <PieChart>
+                      <Pie
+                        data={adminFinance.expenseBreakdown.map((r) => ({ name: r.name, value: r.value }))}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={isNarrow ? 42 : 56}
+                        outerRadius={isNarrow ? 86 : 110}
+                        paddingAngle={2}
+                        label={
+                          isNarrow
+                            ? false
+                            : ({ name, percent }) =>
+                                `${String(name).length > 10 ? String(name).slice(0, 10) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
                         }
-                        tick={{ fill: '#a1a1aa', fontSize: isNarrow ? '0.75rem' : '0.6875rem' }}
-                      />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        width={isNarrow ? 96 : 100}
-                        tick={{ fill: '#a1a1aa', fontSize: isNarrow ? '0.75rem' : '0.6875rem' }}
-                        tickLine={false}
-                        axisLine={false}
-                      />
+                      >
+                        {adminFinance.expenseBreakdown.map((_, i) => (
+                          <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
+                        ))}
+                      </Pie>
                       <Tooltip
-                        formatter={(value: number | undefined, _name, item) => {
-                          const row = item?.payload as { fullName?: string; pct?: number } | undefined;
-                          const pct = row?.pct != null ? `${row.pct.toFixed(1)}%` : '';
-                          return [`${moneyTW(value ?? 0)}（占食材 ${pct}）`, '採購金額'];
-                        }}
-                        labelFormatter={(_, payload) =>
-                          (payload?.[0]?.payload as { fullName?: string } | undefined)?.fullName ?? ''
-                        }
+                        formatter={(value: number | undefined) => [moneyTW(value ?? 0), '支出']}
                         contentStyle={{
                           borderRadius: '12px',
                           border: '1px solid #3f3f46',
@@ -938,12 +840,21 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                           fontSize: isNarrow ? '0.8125rem' : '0.75rem',
                         }}
                       />
-                      <Bar dataKey="value" name="金額" fill={INGREDIENT_BAR_COLOR} radius={[0, 6, 6, 0]} maxBarSize={isNarrow ? 26 : 22} />
-                    </BarChart>
+                    </PieChart>
                   </ResponsiveContainer>
                 </div>
-              )}
-            </div>
+                <div className="mt-3 space-y-2">
+                  {adminFinance.expenseBreakdown.map((row, idx) => (
+                    <div key={row.name} className="flex justify-between text-xs">
+                      <span className="truncate pr-2 text-zinc-300">{idx + 1}. {row.name}</span>
+                      <span className="text-indigo-200 tabular-nums">
+                        {moneyTW(row.value)} / {row.pctOfExpense.toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
