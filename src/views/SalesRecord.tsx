@@ -59,6 +59,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   }, []);
 
   useEffect(() => {
+    // 首次進入頁面時先載入一次，避免僅靠事件導致列表為空。
+    refreshOrders();
+  }, [refreshOrders]);
+
+  useEffect(() => {
     window.addEventListener('orderHistoryUpdated', refreshOrders);
     window.addEventListener('franchiseManagementOrdersUpdated', refreshOrders);
     window.addEventListener('salesRecordUpdated', refreshOrders);
