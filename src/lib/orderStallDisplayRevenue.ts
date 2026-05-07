@@ -20,20 +20,20 @@ function resolveStallSnapshotForOrder(o: StallFields): SalesRecordDaySnapshot | 
   return null;
 }
 
-function kpiFromOrderSnapshot(
+function stallSnapshotKpis(
   o: FranchiseManagementOrder | OrderHistoryEntry,
-  retailView: SupplyRetailView
+  retailView: SupplyRetailView,
 ) {
   const snap = resolveStallSnapshotForOrder(o);
   if (!snap) return null;
   const itemIds = getAllSupplyItems(retailView)
     .filter((i) => !isConsumableItem(i))
     .map((i) => i.id);
-  return aggregateStallKpis(
-    itemIds,
-    (id) => snap.lines[id] ?? { out: '', remain: '' },
-    (id) => getSupplyItem(id, retailView) ?? undefined
-  ).retail;
+  const getLine = (id: string) => snap.lines[id] ?? { out: '', remain: '' };
+  const getItem = (id: string) => getSupplyItem(id, retailView) ?? undefined;
+  const wholesale = aggregateStallKpis(itemIds, getLine, getItem, { unitBasis: 'wholesale' }).retail;
+  const retailK = aggregateStallKpis(itemIds, getLine, getItem, { unitBasis: 'retail' }).retail;
+  return { wholesaleShouldRevenue: wholesale.shouldRevenue, retailSoldRevenue: retailK.soldAtRetail };
 }
 
 /**
@@ -41,10 +41,10 @@ function kpiFromOrderSnapshot(
  */
 export function getStallDisplayShouldRevenue(
   o: FranchiseManagementOrder | OrderHistoryEntry,
-  retailView: SupplyRetailView
+  retailView: SupplyRetailView,
 ): number | null {
-  const k = kpiFromOrderSnapshot(o, retailView);
-  return k != null ? k.shouldRevenue : null;
+  const k = stallSnapshotKpis(o, retailView);
+  return k != null ? k.wholesaleShouldRevenue : null;
 }
 
 /**
@@ -52,8 +52,8 @@ export function getStallDisplayShouldRevenue(
  */
 export function getStallDisplaySoldAtRetail(
   o: FranchiseManagementOrder | OrderHistoryEntry,
-  retailView: SupplyRetailView
+  retailView: SupplyRetailView,
 ): number | null {
-  const k = kpiFromOrderSnapshot(o, retailView);
-  return k != null ? k.soldAtRetail : null;
+  const k = stallSnapshotKpis(o, retailView);
+  return k != null ? k.retailSoldRevenue : null;
 }

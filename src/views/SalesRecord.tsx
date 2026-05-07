@@ -276,11 +276,20 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           const isStallEditThis = stallEditId === order.id && stallEditDraft !== null;
           const displaySnap =
             isStallEditThis && stallEditDraft ? stallEditDraft : snapshot;
-          const kpi = displaySnap
+          const retailKpi = displaySnap
             ? aggregateStallKpis(
                 stallIds,
                 (id) => displaySnap.lines[id] ?? { out: '', remain: '' },
-                (id) => getSupplyItem(id, supplyRetailView)
+                (id) => getSupplyItem(id, supplyRetailView),
+                { unitBasis: 'retail' }
+              ).retail
+            : { estTotal: 0, remGoodsValue: 0, shouldRevenue: 0, soldAtRetail: 0 };
+          const wholesaleKpi = displaySnap
+            ? aggregateStallKpis(
+                stallIds,
+                (id) => displaySnap.lines[id] ?? { out: '', remain: '' },
+                (id) => getSupplyItem(id, supplyRetailView),
+                { unitBasis: 'wholesale' }
               ).retail
             : { estTotal: 0, remGoodsValue: 0, shouldRevenue: 0, soldAtRetail: 0 };
           const actualRev = displaySnap ? num(displaySnap.actualRevenue) : 0;
@@ -393,13 +402,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         >
                           <div>
                             <p className="text-xs text-zinc-500">盤點金額</p>
-                            <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(kpi.soldAtRetail)}</p>
+                            <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(retailKpi.soldAtRetail)}</p>
                             <p className="text-[0.625rem] text-zinc-600 mt-0.5">依本機零售參考 × 售出量</p>
                           </div>
                           {userRole !== 'employee' && (
                             <div>
                               <p className="text-xs text-zinc-500">成本金額</p>
-                              <p className="text-lg font-semibold text-zinc-300 tabular-nums">$ {money(kpi.shouldRevenue)}</p>
+                              <p className="text-lg font-semibold text-zinc-300 tabular-nums">$ {money(wholesaleKpi.shouldRevenue)}</p>
                               <p className="text-[0.625rem] text-zinc-600 mt-0.5">批價 × 售出量</p>
                             </div>
                           )}
@@ -408,11 +417,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                       <div className="rounded-2xl border border-sky-900/50 bg-sky-950/15 p-4 grid sm:grid-cols-3 gap-4 text-sm">
                         <div>
                           <p className="text-xs text-zinc-500">預估金額</p>
-                          <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(kpi.estTotal)}</p>
+                          <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(retailKpi.estTotal)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-zinc-500">剩餘貨品金額</p>
-                          <p className="text-lg font-semibold text-emerald-400/90 tabular-nums">$ {money(kpi.remGoodsValue)}</p>
+                          <p className="text-lg font-semibold text-emerald-400/90 tabular-nums">$ {money(retailKpi.remGoodsValue)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-zinc-500">登錄實收</p>

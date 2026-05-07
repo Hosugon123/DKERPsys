@@ -16,15 +16,18 @@ import {
 import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
-import { computeAdminDashboardFinance, computeIngredientMonthDashboard, currentYmLocal } from '../lib/financeLib';
+import { computeAdminDashboardFinance, computeIngredientMonthDashboard, currentYmLocal, stallCountAttributeYmd } from '../lib/financeLib';
 import { ACCOUNTING_LEDGER_UPDATED_EVENT, listAccountingLedgerEntries } from '../lib/accountingLedgerStorage';
 import { getSupplyItem } from '../lib/supplyCatalog';
+import { getStallDisplaySoldAtRetail, getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
 import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
   type OrderHistoryEntry,
   type OrderActorRole,
 } from '../lib/orderHistoryStorage';
+
+const HQ_STALL_VIEW = 'headquarter' as const;
 
 const EXPENSE_PIE_COLORS = ['#d97706', '#6366f1', '#10b981', '#f43f5e', '#a855f7', '#06b6d4', '#eab308', '#ec4899', '#84cc16', '#f97316'];
 
@@ -281,29 +284,41 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
 
   const adminRangeSummary = useMemo(() => {
     if (!isAdmin) return null;
-    const directRevenue = adminSummaryOrders
-      .filter((o) => o.actorRole === 'admin' || o.actorRole === 'employee')
-      .reduce((s, o) => s + o.totalAmount, 0);
-    const franchiseRevenue = adminSummaryOrders
-      .filter((o) => o.actorRole === 'franchisee')
-      .reduce((s, o) => s + o.totalAmount, 0);
     const { startYmd, endYmd } = resolveRange(summaryRange);
+
+    let directRevenue = 0;
+    let franchiseRevenue = 0;
+    let directCost = 0;
+    let franchiseCost = 0;
+
+    for (const o of dashboardOrders) {
+      if (o.actorRole === 'admin' || o.actorRole === 'employee') {
+        const stallYmd = stallCountAttributeYmd(o);
+        if (o.stallCountCompletedAt && stallYmd && stallYmd >= startYmd && stallYmd <= endYmd) {
+          const rev = getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW);
+          const cogsRef = getStallDisplayShouldRevenue(o, HQ_STALL_VIEW);
+          if (rev != null) directRevenue += rev;
+          if (cogsRef != null) directCost += cogsRef;
+        }
+      } else if (o.actorRole === 'franchisee' && o.status === '已完成') {
+        const ymd = ymdFromIso(o.createdAt);
+        if (ymd >= startYmd && ymd <= endYmd) {
+          franchiseRevenue += o.totalAmount;
+          let orderCost = 0;
+          for (const line of o.lines) {
+            const item = getSupplyItem(line.productId);
+            const unitCost = item?.pricePerPiece ?? 0;
+            orderCost += unitCost * line.qty;
+          }
+          franchiseCost += orderCost;
+        }
+      }
+    }
+
     const totalExpense = listAccountingLedgerEntries()
       .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
       .reduce((s, e) => s + e.amount, 0);
 
-    let directCost = 0;
-    let franchiseCost = 0;
-    for (const order of adminSummaryOrders) {
-      let orderCost = 0;
-      for (const line of order.lines) {
-        const item = getSupplyItem(line.productId);
-        const unitCost = item?.pricePerPiece ?? 0;
-        orderCost += unitCost * line.qty;
-      }
-      if (order.actorRole === 'admin' || order.actorRole === 'employee') directCost += orderCost;
-      if (order.actorRole === 'franchisee') franchiseCost += orderCost;
-    }
     const directGross = directRevenue - directCost;
     const franchiseGross = franchiseRevenue - franchiseCost;
     const totalRevenue = directRevenue + franchiseRevenue;
@@ -320,7 +335,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       totalGrossRate: pct(totalGross, totalRevenue),
       rangeLabel: summaryRangeLabel(summaryRange),
     };
-  }, [adminSummaryOrders, isAdmin, summaryRange, financeTick]);
+  }, [dashboardOrders, isAdmin, summaryRange, financeTick]);
 
   const adminDirectProducts = useMemo(() => {
     if (!isAdmin) return [];
@@ -337,7 +352,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
 
   const headerSubline =
     isAdmin && adminFinance
-      ? `本月 ${adminFinance.ym.split('-')[0]} 年 ${Number(adminFinance.ym.split('-')[1])} 月 · 依已完成叫貨與流水帳即時計算 | 總管理處`
+      ? `本月 ${adminFinance.ym.split('-')[0]} 年 ${Number(adminFinance.ym.split('-')[1])} 月 · 直營以盤點零售營收、加盟以已完成叫貨；並含流水帳即時資料 | 總管理處`
       : `資料更新時間：${new Date().toLocaleString('zh-TW', { hour12: false })} | ${
           userRole === 'franchisee' ? '加盟體系' : '直營體系'
         }`;
@@ -396,7 +411,13 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
               <div>
                 <h2 className="text-3xl font-light mt-1 text-amber-500 tabular-nums">{moneyTW(adminFinance.revenueTotal)}</h2>
                 <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
-                  加盟主叫貨 {moneyTW(adminFinance.franchiseeOrderTotal)} ＋ 流水帳收入 {moneyTW(adminFinance.ledgerIncomeTotal)}
+                  直營店盤點營收 {moneyTW(adminFinance.directStoreStallRetailTotal)} ＋ 加盟主批貨{' '}
+                  {moneyTW(adminFinance.franchiseeOrderTotal)}
+                  {adminFinance.ledgerIncomeTotal > 0 ? (
+                    <span className="block mt-1 text-zinc-600">
+                      流水帳收入 {moneyTW(adminFinance.ledgerIncomeTotal)}（未計入營收總計）
+                    </span>
+                  ) : null}
                 </p>
               </div>
             </div>
@@ -431,7 +452,9 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   </h2>
                   <div className="text-xs text-zinc-500 shrink-0 text-right">營收 − 支出</div>
                 </div>
-                <p className="text-xs text-zinc-500">僅含「已完成」叫貨單金額與本月流水帳紀錄。</p>
+                <p className="text-xs text-zinc-500">
+                  營收＝直營盤點零售＋加盟叫貨；支出＝本月已完成直營叫貨與流水帳支出。
+                </p>
               </div>
             </div>
           </>
@@ -510,7 +533,9 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
               ))}
             </div>
           </div>
-          <p className="text-xs text-zinc-500 mb-4">直營營收、加盟批貨營收與總支出成本（已套用區間篩選）。</p>
+          <p className="text-xs text-zinc-500 mb-4">
+            直營依盤點日區間加總零售營收（與銷售紀錄盤點金額一致）；加盟依建單日區間之已完成叫貨；右欄為同期流水帳支出。
+          </p>
           <div className="grid lg:grid-cols-3 gap-4">
             <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4">
               <p className="text-xs text-zinc-500">直營店營收</p>
