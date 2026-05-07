@@ -217,7 +217,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
       .reduce((s, e) => s + e.amount, 0);
     const expense = procurementCost + ledgerExpense;
-    const net = gross - expense;
+    // 淨利以「營收 - 總支出」計，避免批貨成本於 gross 與 expense 重複扣減。
+    const net = revenue - expense;
     return {
       rangeLabel: summaryRangeLabel(summaryRange),
       revenue,
