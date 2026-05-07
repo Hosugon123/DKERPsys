@@ -339,6 +339,46 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
   return { ok: false, reason: 'not_found' };
 }
 
+export type UpdateEditableOrderLinesResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'canceled' | 'empty' };
+
+/**
+ * 依單號更新可編輯訂單之品項（允許「待出貨」與「已完成」，禁止「已取消」）。
+ * 用於現場更正已出貨單之實出數量。
+ */
+export function updateEditableOrderLinesById(
+  id: string,
+  nextLines: OrderHistoryLine[]
+): UpdateEditableOrderLinesResult {
+  const { lines, itemCount, totalAmount } = aggregateOrderLinesForSave(nextLines);
+  if (lines.length === 0) return { ok: false, reason: 'empty' };
+
+  const mgmt = loadFranchiseManagementOrders();
+  const mi = mgmt.findIndex((o) => o.id === id);
+  if (mi >= 0) {
+    if (mgmt[mi].status === '已取消') return { ok: false, reason: 'canceled' };
+    const m = [...mgmt];
+    const now = new Date().toISOString();
+    m[mi] = { ...m[mi], lines, itemCount, totalAmount, updatedAt: now };
+    saveFranchiseManagementOrders(m);
+    return { ok: true };
+  }
+
+  const hist = loadOrderHistory();
+  const hi = hist.findIndex((o) => o.id === id);
+  if (hi >= 0) {
+    if (hist[hi].status === '已取消') return { ok: false, reason: 'canceled' };
+    const h = [...hist];
+    const now = new Date().toISOString();
+    h[hi] = { ...h[hi], lines, itemCount, totalAmount, updatedAt: now };
+    saveOrderHistory(h);
+    return { ok: true };
+  }
+
+  return { ok: false, reason: 'not_found' };
+}
+
 /**
  * 超級管理員叫貨 → 訂單管理（專用儲存）；
  * 加盟主／店員叫貨 → 歷史訂單（本清單）。

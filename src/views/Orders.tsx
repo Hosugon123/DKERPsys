@@ -372,7 +372,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     e.stopPropagation();
     setPickingError(null);
     const raw = rawList.find((r) => r.id === orderId);
-    if (!raw || raw.status !== '待出貨' || !canEditOrderInList(raw, userRole)) return;
+    if (!raw || raw.status === '已取消' || !canEditOrderInList(raw, userRole)) return;
     setPickingOrderId(orderId);
     setPickingLines(raw.lines.map((l) => ({ ...l })));
     setPickingOriginal(raw.lines.map((l) => ({ ...l })));
@@ -381,7 +381,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const savePickingEdit = (orderId: string) => {
     setPickingError(null);
     void (async () => {
-      const res = await ordersApi.updatePendingOrderLinesById(orderId, pickingLines);
+      const res = await ordersApi.updateEditableOrderLinesById(orderId, pickingLines);
       if (res.ok === true) {
         exitPickingEdit();
         syncOrders();
@@ -391,8 +391,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         case 'empty':
           setPickingError('實出數全為 0 時，請改為【取消訂單】或至少保留 1 項。');
           break;
-        case 'not_pending':
-          setPickingError('此單已不是待出貨，已結束揀貨模式。');
+        case 'canceled':
+          setPickingError('此單已取消，無法調整貨量。');
           break;
         default:
           setPickingError('找不到此訂單。');
@@ -603,7 +603,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           const canEdit = canEditOrderInList(raw, userRole);
           const isExpanded = expandedOrderId === order.id;
           const isPickingThis =
-            canEdit && pickingOrderId === order.id && order.status === '待出貨';
+            canEdit && pickingOrderId === order.id && order.status !== '已取消';
           const pickKept = isPickingThis ? pickingLines.filter((l) => l.qty > 0) : [];
           const pickTotal = isPickingThis
             ? Math.round(pickKept.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100
@@ -851,12 +851,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   <div className="lg:col-span-2 min-w-0">
                     <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-3">訂單品項明細</h4>
 
-                    {order.status === '待出貨' && canEdit && !isPickingThis && (
+                    {(order.status === '待出貨' || order.status === '已完成') && canEdit && !isPickingThis && (
                       <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-950/25 px-3 py-2.5 text-sm text-sky-100/95">
                         <div className="flex items-start gap-2 min-w-0">
                           <ClipboardList className="shrink-0 mt-0.5 text-sky-400" size={18} aria-hidden />
                           <span className="leading-snug">
-                            實際出貨與下單不同？在標記出貨前請點此修改實出（可增可減；0 表該行短少未出、儲存後會移除此品項）。
+                            實際出貨與下單不同？可直接修改實出（可增可減；0 表該行短少未出、儲存後會移除此品項）。
                           </span>
                         </div>
                         <button

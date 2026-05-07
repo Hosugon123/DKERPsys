@@ -110,6 +110,12 @@ export const orders = {
   ): Promise<orderHistory.UpdateLinesResult> {
     return withRemoteStorageWrite(() => orderHistory.updatePendingOrderLinesById(id, nextLines));
   },
+  async updateEditableOrderLinesById(
+    id: string,
+    nextLines: orderHistory.OrderHistoryLine[],
+  ): Promise<orderHistory.UpdateEditableOrderLinesResult> {
+    return withRemoteStorageWrite(() => orderHistory.updateEditableOrderLinesById(id, nextLines));
+  },
   async appendProcurementOrderEntry(params: {
     lines: orderHistory.OrderHistoryLine[];
     totalAmount: number;
@@ -147,6 +153,7 @@ export type {
   FranchiseOrderStatus,
   OrderActorRole,
   UpdateLinesResult,
+  UpdateEditableOrderLinesResult,
   UpdateStallSnapshotResult,
 } from '../lib/orderHistoryStorage';
 
