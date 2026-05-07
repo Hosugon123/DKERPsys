@@ -81,9 +81,13 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
-    // 切換登入狀態時重置頁面，避免下一位使用者延續上一位停留的視圖。
-    setCurrentView('dashboard');
-  }, [session?.userId]);
+    // 切換登入狀態時重置頁面：員工預設進訂單管理，其餘角色進儀表板。
+    if (!session) {
+      setCurrentView('dashboard');
+      return;
+    }
+    setCurrentView(session.role === 'employee' ? 'orders' : 'dashboard');
+  }, [session]);
 
   useEffect(() => {
     setSupplyCatalogRetailView(userRoleToSupplyRetailView(userRole));
