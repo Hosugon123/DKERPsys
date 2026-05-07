@@ -81,6 +81,11 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
+    // 切換登入狀態時重置頁面，避免下一位使用者延續上一位停留的視圖。
+    setCurrentView('dashboard');
+  }, [session?.userId]);
+
+  useEffect(() => {
     setSupplyCatalogRetailView(userRoleToSupplyRetailView(userRole));
   }, [userRole]);
 

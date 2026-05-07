@@ -1,7 +1,7 @@
 import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
-import { getDataScopeContext } from './dataScope';
+import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
 
 export type OrderActorRole = 'admin' | 'franchisee' | 'employee';
 
@@ -94,7 +94,8 @@ function canAccessOrder(
   if (ctx.isAdmin) return true;
   if (row.scopeId) return row.scopeId === ctx.scopeId;
   if (row.actorUserId) return row.actorUserId === ctx.userId;
-  return false;
+  // 舊資料（尚未有 scope/actor）預設視為總部資料，直營帳號可讀取
+  return ctx.scopeId === HQ_SCOPE_ID;
 }
 
 export function loadOrderHistory(): OrderHistoryEntry[] {
@@ -104,9 +105,8 @@ export function loadOrderHistory(): OrderHistoryEntry[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as (OrderHistoryEntry & { status?: FranchiseOrderStatus })[];
     const list = Array.isArray(parsed) ? parsed : [];
-    // 舊版曾把超級管理員單一併寫入；已改寫入「訂單管理」儲存，此處略過
+    // 舊資料可能含 admin 單；保留並交由 scope/角色層過濾，避免直營員工看不到歷史直營單。
     return list
-      .filter((e) => e.actorRole !== 'admin')
       .filter((e) => canAccessOrder(e, ctx))
       .map((e) => normalizeHistoryEntry(e as OrderHistoryEntry & { status?: FranchiseOrderStatus }));
   } catch {
@@ -135,7 +135,8 @@ export function loadFranchiseManagementOrders(): FranchiseManagementOrder[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as (FranchiseManagementOrder & { updatedAt?: string })[];
     const list = Array.isArray(parsed) ? parsed.map(normalizeFranchiseManagementOrder) : [];
-    return ctx.isAdmin ? list : [];
+    if (ctx.isAdmin) return list;
+    return list.filter((o) => canAccessOrder(o, ctx));
   } catch {
     return [];
   }

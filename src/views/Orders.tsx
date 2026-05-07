@@ -144,7 +144,7 @@ async function loadHistorySliceForRole(role: UserRole): Promise<OrderHistoryEntr
   const all = await ordersApi.loadOrderHistory();
   if (role === 'admin') return all;
   if (role === 'franchisee') return all.filter((e) => e.actorRole === 'franchisee');
-  if (role === 'employee') return all.filter((e) => e.actorRole === 'employee');
+  if (role === 'employee') return all.filter((e) => e.actorRole === 'employee' || e.actorRole === 'admin');
   return [];
 }
 
