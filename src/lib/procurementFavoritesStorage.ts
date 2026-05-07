@@ -1,5 +1,6 @@
 import { getAllSupplyItems } from './supplyCatalog';
 import { roundProcurementQty } from './stallMath';
+import { getDataScopeContext } from './dataScope';
 
 const KEY = 'dongshan_procurement_favorites_v1';
 const MAX_TEMPLATES = 30;
@@ -15,6 +16,7 @@ export type FavoriteOrder = {
 };
 
 type StoreV1 = { version: 1; items: FavoriteOrder[] };
+type StoreV2 = { version: 2; byScope: Record<string, FavoriteOrder[]> };
 
 function genId() {
   return `F${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -24,22 +26,33 @@ function normalizeFavorite(f: FavoriteOrder & { updatedAt?: string }): FavoriteO
   return { ...f, updatedAt: f.updatedAt ?? f.createdAt };
 }
 
-function loadStore(): StoreV1 {
+function loadStore(): StoreV2 {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { version: 1, items: [] };
-    const p = JSON.parse(raw) as StoreV1;
-    if (!p || !Array.isArray(p.items)) return { version: 1, items: [] };
-    return {
-      ...p,
-      items: (p.items as (FavoriteOrder & { updatedAt?: string })[]).map(normalizeFavorite),
-    };
+    if (!raw) return { version: 2, byScope: {} };
+    const p = JSON.parse(raw) as StoreV1 | StoreV2;
+    if (!p || typeof p !== 'object') return { version: 2, byScope: {} };
+    if ('version' in p && p.version === 2 && 'byScope' in p && p.byScope && typeof p.byScope === 'object') {
+      const byScope: Record<string, FavoriteOrder[]> = {};
+      for (const [scopeId, arr] of Object.entries(p.byScope)) {
+        byScope[scopeId] = Array.isArray(arr)
+          ? (arr as (FavoriteOrder & { updatedAt?: string })[]).map(normalizeFavorite)
+          : [];
+      }
+      return { version: 2, byScope };
+    }
+    // v1 migration: 將舊資料歸屬至目前登入範圍
+    const scopeId = getDataScopeContext().scopeId;
+    const legacy = Array.isArray((p as StoreV1).items)
+      ? ((p as StoreV1).items as (FavoriteOrder & { updatedAt?: string })[]).map(normalizeFavorite)
+      : [];
+    return { version: 2, byScope: { [scopeId]: legacy } };
   } catch {
-    return { version: 1, items: [] };
+    return { version: 2, byScope: {} };
   }
 }
 
-function saveStore(s: StoreV1) {
+function saveStore(s: StoreV2) {
   localStorage.setItem(KEY, JSON.stringify(s));
   window.dispatchEvent(new Event('procurementFavoritesUpdated'));
 }
@@ -58,7 +71,8 @@ function sanitizeQ(q: Record<string, number>): Record<string, number> {
 }
 
 export function listProcurementFavorites(): FavoriteOrder[] {
-  return loadStore().items
+  const scopeId = getDataScopeContext().scopeId;
+  return (loadStore().byScope[scopeId] ?? [])
     .map((f) => ({ ...f, quantities: sanitizeQ(f.quantities) }))
     .filter((f) => Object.keys(f.quantities).length > 0);
 }
@@ -69,11 +83,13 @@ export function addProcurementFavorite(name: string, cart: Record<string, number
 
   const trimmed = name.trim() || '未命名常用單';
   const s = loadStore();
-  if (s.items.length >= MAX_TEMPLATES) {
+  const scopeId = getDataScopeContext().scopeId;
+  const current = s.byScope[scopeId] ?? [];
+  if (current.length >= MAX_TEMPLATES) {
     return { ok: false as const, reason: 'limit' };
   }
   const now = new Date().toISOString();
-  s.items = [
+  s.byScope[scopeId] = [
     {
       id: genId(),
       name: trimmed,
@@ -81,7 +97,7 @@ export function addProcurementFavorite(name: string, cart: Record<string, number
       updatedAt: now,
       quantities: { ...quantities },
     },
-    ...s.items,
+    ...current,
   ];
   saveStore(s);
   return { ok: true as const };
@@ -89,7 +105,9 @@ export function addProcurementFavorite(name: string, cart: Record<string, number
 
 export function removeProcurementFavorite(id: string) {
   const s = loadStore();
-  s.items = s.items.filter((x) => x.id !== id);
+  const scopeId = getDataScopeContext().scopeId;
+  const current = s.byScope[scopeId] ?? [];
+  s.byScope[scopeId] = current.filter((x) => x.id !== id);
   saveStore(s);
 }
 

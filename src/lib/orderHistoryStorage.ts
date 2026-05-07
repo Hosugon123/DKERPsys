@@ -1,6 +1,7 @@
 import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
+import { getDataScopeContext } from './dataScope';
 
 export type OrderActorRole = 'admin' | 'franchisee' | 'employee';
 
@@ -33,6 +34,10 @@ export type OrderHistoryEntry = {
   stallCountCompletedAt?: string;
   /** 盤點完成當下寫入之帳上快照 */
   stallCountSnapshot?: SalesRecordDaySnapshot;
+  /** 資料範圍（同店共用）：hq 或 franchisee:<userId> */
+  scopeId?: string;
+  /** 建單帳號 userId（同店多員工仍可共看 scope） */
+  actorUserId?: string;
 };
 
 const STORAGE_KEY = 'dongshan_order_history_v1';
@@ -54,6 +59,8 @@ export type FranchiseManagementOrder = {
   stallCountCompletedAt?: string;
   /** 盤點完成當下寫入之帳上快照 */
   stallCountSnapshot?: SalesRecordDaySnapshot;
+  scopeId?: string;
+  actorUserId?: string;
 };
 
 function newOrderId(): string {
@@ -80,8 +87,19 @@ function normalizeHistoryEntry(
   };
 }
 
+function canAccessOrder(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>,
+  ctx: ReturnType<typeof getDataScopeContext>
+): boolean {
+  if (ctx.isAdmin) return true;
+  if (row.scopeId) return row.scopeId === ctx.scopeId;
+  if (row.actorUserId) return row.actorUserId === ctx.userId;
+  return false;
+}
+
 export function loadOrderHistory(): OrderHistoryEntry[] {
   try {
+    const ctx = getDataScopeContext();
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as (OrderHistoryEntry & { status?: FranchiseOrderStatus })[];
@@ -89,6 +107,7 @@ export function loadOrderHistory(): OrderHistoryEntry[] {
     // 舊版曾把超級管理員單一併寫入；已改寫入「訂單管理」儲存，此處略過
     return list
       .filter((e) => e.actorRole !== 'admin')
+      .filter((e) => canAccessOrder(e, ctx))
       .map((e) => normalizeHistoryEntry(e as OrderHistoryEntry & { status?: FranchiseOrderStatus }));
   } catch {
     return [];
@@ -111,10 +130,12 @@ function normalizeFranchiseManagementOrder(
 
 export function loadFranchiseManagementOrders(): FranchiseManagementOrder[] {
   try {
+    const ctx = getDataScopeContext();
     const raw = localStorage.getItem(FRANCHISE_MGMT_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as (FranchiseManagementOrder & { updatedAt?: string })[];
-    return Array.isArray(parsed) ? parsed.map(normalizeFranchiseManagementOrder) : [];
+    const list = Array.isArray(parsed) ? parsed.map(normalizeFranchiseManagementOrder) : [];
+    return ctx.isAdmin ? list : [];
   } catch {
     return [];
   }
@@ -227,6 +248,8 @@ function appendFranchiseManagementOrderInternal(params: {
     lines,
     storeLabel: '總部／示範門市',
     status: '待出貨',
+    scopeId: getDataScopeContext().scopeId,
+    actorUserId: getDataScopeContext().userId || undefined,
   };
   saveFranchiseManagementOrders([entry, ...loadFranchiseManagementOrders()]);
 }
@@ -325,6 +348,7 @@ export function appendProcurementOrderEntry(params: {
   actorRole: OrderActorRole;
 }): void {
   const { lines, totalAmount, actorRole } = params;
+  const ctx = getDataScopeContext();
   if (actorRole === 'admin') {
     appendFranchiseManagementOrderInternal({ lines, totalAmount });
     return;
@@ -345,6 +369,8 @@ export function appendProcurementOrderEntry(params: {
     actorRole,
     storeLabel,
     status: '待出貨',
+    scopeId: ctx.scopeId,
+    actorUserId: ctx.userId || undefined,
   };
 
   const next = [entry, ...loadOrderHistory()];

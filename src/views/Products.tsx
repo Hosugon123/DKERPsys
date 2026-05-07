@@ -1,5 +1,4 @@
 import { Download } from 'lucide-react';
-import MarinadeCostAnalysis from '../components/MarinadeCostAnalysis';
 import CostStructureTable from '../components/CostStructureTable';
 import { dataBundle } from '../services/apiService';
 
@@ -28,7 +27,7 @@ export default function Products() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">產品與成本庫存</h2>
           <p className="text-zinc-500 mt-1">
-            自訂欄位與品項紀錄成本；僅在「漲縮率」欄有填寫的品項可展開補充「未滷／成品成本」。滷料支出分析見下方，與流水帳連動。
+            自訂欄位與品項紀錄成本；僅在「漲縮率」欄有填寫的品項可展開補充「未滷／成品成本」。
           </p>
         </div>
         <div className="flex gap-2">
@@ -41,8 +40,6 @@ export default function Products() {
           </button>
         </div>
       </div>
-
-      <MarinadeCostAnalysis />
 
       <CostStructureTable />
     </div>

@@ -1,6 +1,7 @@
 /**
  * 非訂單類流水帳（本機 localStorage）
  */
+import { getDataScopeContext } from './dataScope';
 
 const STORAGE_KEY = 'dongshan_accounting_ledger_v1';
 export const ACCOUNTING_LEDGER_UPDATED_EVENT = 'accountingLedgerUpdated';
@@ -73,6 +74,10 @@ type StoreV1 = {
   version: 1;
   entries: AccountingLedgerEntry[];
 };
+type StoreV2 = {
+  version: 2;
+  byScope: Record<string, AccountingLedgerEntry[]>;
+};
 
 function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -126,22 +131,33 @@ function coerceEntry(e: AccountingLedgerEntry & { updatedAt?: string }): Account
   };
 }
 
-function loadStore(): StoreV1 {
+function loadStore(): StoreV2 {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { version: 1, entries: [] };
-    const p = JSON.parse(raw) as StoreV1;
-    if (!p || p.version !== 1 || !Array.isArray(p.entries)) return { version: 1, entries: [] };
-    return {
-      version: 1,
-      entries: p.entries.map((row) => coerceEntry(row as AccountingLedgerEntry)),
-    };
+    if (!raw) return { version: 2, byScope: {} };
+    const p = JSON.parse(raw) as StoreV1 | StoreV2;
+    if (!p || typeof p !== 'object') return { version: 2, byScope: {} };
+    if ('version' in p && p.version === 2 && 'byScope' in p && p.byScope && typeof p.byScope === 'object') {
+      const byScope: Record<string, AccountingLedgerEntry[]> = {};
+      for (const [scopeId, rows] of Object.entries(p.byScope)) {
+        byScope[scopeId] = Array.isArray(rows)
+          ? (rows as AccountingLedgerEntry[]).map((row) => coerceEntry(row as AccountingLedgerEntry))
+          : [];
+      }
+      return { version: 2, byScope };
+    }
+    // v1 migration: 舊資料歸屬目前登入範圍
+    const scopeId = getDataScopeContext().scopeId;
+    const legacyRows = Array.isArray((p as StoreV1).entries)
+      ? (p as StoreV1).entries.map((row) => coerceEntry(row as AccountingLedgerEntry))
+      : [];
+    return { version: 2, byScope: { [scopeId]: legacyRows } };
   } catch {
-    return { version: 1, entries: [] };
+    return { version: 2, byScope: {} };
   }
 }
 
-function saveStore(s: StoreV1) {
+function saveStore(s: StoreV2) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   window.dispatchEvent(new Event(ACCOUNTING_LEDGER_UPDATED_EVENT));
 }
@@ -382,7 +398,13 @@ export function ingredientSubSpendBreakdownForMonth(ym: string): {
 
 /** 所有紀錄（新→舊） */
 export function listAccountingLedgerEntries(): AccountingLedgerEntry[] {
-  return sortEntries(loadStore().entries);
+  const { isAdmin, scopeId } = getDataScopeContext();
+  const s = loadStore();
+  if (isAdmin) {
+    const all = Object.values(s.byScope).flat();
+    return sortEntries(all);
+  }
+  return sortEntries(s.byScope[scopeId] ?? []);
 }
 
 /** 依 YYYY-MM 篩選 */
@@ -402,6 +424,8 @@ export type NewAccountingLedgerInput = {
 
 export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): AccountingLedgerEntry {
   const s = loadStore();
+  const scopeId = getDataScopeContext().scopeId;
+  const rows = s.byScope[scopeId] ?? [];
   const now = new Date().toISOString();
   const entry: AccountingLedgerEntry = {
     id: newId(),
@@ -415,16 +439,33 @@ export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): Ac
     updatedAt: now,
   };
   const finalized = coerceEntry(entry);
-  s.entries.push(finalized);
+  rows.push(finalized);
+  s.byScope[scopeId] = rows;
   saveStore(s);
   return finalized;
 }
 
 export function removeAccountingLedgerEntry(id: string): boolean {
   const s = loadStore();
-  const next = s.entries.filter((e) => e.id !== id);
-  if (next.length === s.entries.length) return false;
-  s.entries = next;
+  const { isAdmin, scopeId } = getDataScopeContext();
+  if (isAdmin) {
+    let changed = false;
+    for (const k of Object.keys(s.byScope)) {
+      const prev = s.byScope[k] ?? [];
+      const next = prev.filter((e) => e.id !== id);
+      if (next.length !== prev.length) {
+        s.byScope[k] = next;
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    saveStore(s);
+    return true;
+  }
+  const prev = s.byScope[scopeId] ?? [];
+  const next = prev.filter((e) => e.id !== id);
+  if (next.length === prev.length) return false;
+  s.byScope[scopeId] = next;
   saveStore(s);
   return true;
 }
@@ -440,11 +481,21 @@ export type AccountingLedgerUpdate = {
 
 export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerUpdate): boolean {
   const s = loadStore();
-  const i = s.entries.findIndex((e) => e.id === id);
-  if (i < 0) return false;
-  const prev = s.entries[i];
+  const { isAdmin, scopeId } = getDataScopeContext();
+  const buckets = isAdmin ? Object.keys(s.byScope) : [scopeId];
+  let foundBucket = '';
+  let i = -1;
+  for (const b of buckets) {
+    i = (s.byScope[b] ?? []).findIndex((e) => e.id === id);
+    if (i >= 0) {
+      foundBucket = b;
+      break;
+    }
+  }
+  if (!foundBucket || i < 0) return false;
+  const prev = s.byScope[foundBucket]![i];
   const now = new Date().toISOString();
-  s.entries[i] = coerceEntry({
+  s.byScope[foundBucket]![i] = coerceEntry({
     ...prev,
     dateYmd: patch.dateYmd,
     flowType: patch.flowType,
