@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Receipt, Search, Package, ChevronDown, ChevronUp, ClipboardList, Trash2, Store } from 'lucide-react';
 import type { UserRole } from './Orders';
 import { getSupplyItem, isConsumableItem, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
-import { getStallDisplaySoldAtRetail } from '../lib/orderStallDisplayRevenue';
+import {
+  getStallDisplayRetailEstAndRemain,
+  getStallDisplayShouldRevenue,
+  getStallDisplaySoldAtRetail,
+} from '../lib/orderStallDisplayRevenue';
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { num, aggregateStallKpis, computeLine, isStallRemainEntryValid } from '../lib/stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
@@ -292,6 +296,12 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                 { unitBasis: 'wholesale' }
               ).retail
             : { estTotal: 0, remGoodsValue: 0, shouldRevenue: 0, soldAtRetail: 0 };
+          const frozenRetailSummary = getStallDisplayRetailEstAndRemain(order, supplyRetailView);
+          const displayRetailEstTotal = frozenRetailSummary?.estTotal ?? retailKpi.estTotal;
+          const displayRetailRemainValue = frozenRetailSummary?.remGoodsValue ?? retailKpi.remGoodsValue;
+          const displayRetailSold = getStallDisplaySoldAtRetail(order, supplyRetailView) ?? retailKpi.soldAtRetail;
+          const displayWholesaleSold =
+            getStallDisplayShouldRevenue(order, supplyRetailView) ?? wholesaleKpi.shouldRevenue;
           const actualRev = displaySnap ? num(displaySnap.actualRevenue) : 0;
           const tableRows = displaySnap
             ? stallDisplayItems
@@ -402,13 +412,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         >
                           <div>
                             <p className="text-xs text-zinc-500">盤點金額</p>
-                            <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(retailKpi.soldAtRetail)}</p>
+                            <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(displayRetailSold)}</p>
                             <p className="text-[0.625rem] text-zinc-600 mt-0.5">依本機零售參考 × 售出量</p>
                           </div>
                           {userRole !== 'employee' && (
                             <div>
                               <p className="text-xs text-zinc-500">成本金額</p>
-                              <p className="text-lg font-semibold text-zinc-300 tabular-nums">$ {money(wholesaleKpi.shouldRevenue)}</p>
+                              <p className="text-lg font-semibold text-zinc-300 tabular-nums">$ {money(displayWholesaleSold)}</p>
                               <p className="text-[0.625rem] text-zinc-600 mt-0.5">批價 × 售出量</p>
                             </div>
                           )}
@@ -417,11 +427,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                       <div className="rounded-2xl border border-sky-900/50 bg-sky-950/15 p-4 grid sm:grid-cols-3 gap-4 text-sm">
                         <div>
                           <p className="text-xs text-zinc-500">預估金額</p>
-                          <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(retailKpi.estTotal)}</p>
+                          <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(displayRetailEstTotal)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-zinc-500">剩餘貨品金額</p>
-                          <p className="text-lg font-semibold text-emerald-400/90 tabular-nums">$ {money(retailKpi.remGoodsValue)}</p>
+                          <p className="text-lg font-semibold text-emerald-400/90 tabular-nums">$ {money(displayRetailRemainValue)}</p>
                         </div>
                         <div>
                           <p className="text-xs text-zinc-500">登錄實收</p>

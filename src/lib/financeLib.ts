@@ -97,7 +97,7 @@ export type AdminDashboardFinance = {
   ledgerIncomeTotal: number;
   /** 營收總計 = 直營店盤點營收 + 加盟主批貨 */
   revenueTotal: number;
-  /** 本月已完成之總部／直營叫貨合計（admin + employee） */
+  /** 本月直營進貨成本（改以流水帳支出認列；不再由叫貨/帶出推估） */
   procurementCostTotal: number;
   /** 本月流水帳「支出」合計 */
   ledgerExpenseTotal: number;
@@ -121,7 +121,7 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
 
   let directStoreStallRetailTotal = 0;
   let franchiseeOrderTotal = 0;
-  let procurementCostTotal = 0;
+  const procurementCostTotal = 0;
 
   for (const o of merged) {
     if (o.actorRole === 'franchisee' && o.status === '已完成' && orderCreatedInYm(o.createdAt, ymKey)) {
@@ -134,13 +134,6 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
     ) {
       const stallRev = getStallDisplaySoldAtRetail(o, HQ_STALL_RETAIL_VIEW);
       if (stallRev != null) directStoreStallRetailTotal += stallRev;
-    }
-    if (
-      (o.actorRole === 'admin' || o.actorRole === 'employee') &&
-      o.status === '已完成' &&
-      orderCreatedInYm(o.createdAt, ymKey)
-    ) {
-      procurementCostTotal += o.totalAmount;
     }
   }
 
@@ -159,13 +152,10 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
   }
 
   const revenueTotal = directStoreStallRetailTotal + franchiseeOrderTotal;
-  const expenseTotal = procurementCostTotal + ledgerExpenseTotal;
+  const expenseTotal = ledgerExpenseTotal;
   const netProfit = revenueTotal - expenseTotal;
 
   const breakdown: { name: string; value: number }[] = [];
-  if (procurementCostTotal > 0) {
-    breakdown.push({ name: PROCUREMENT_LABEL, value: procurementCostTotal });
-  }
   for (const [name, value] of ledgerExpenseByCategory) {
     if (value > 0) breakdown.push({ name, value });
   }

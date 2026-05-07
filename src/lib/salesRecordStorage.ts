@@ -7,6 +7,10 @@ export type SalesRecordDaySnapshot = {
   lines: Record<string, SalesRecordDayLine>;
   actualRevenue: string;
   updatedAt: string;
+  /** 盤點完成當下凍結之零售單價（每品項，避免日後改價影響歷史） */
+  frozenRetailUnitPriceByItem?: Record<string, number>;
+  /** 盤點完成當下凍結之批價單價（每品項，供成本參考） */
+  frozenWholesaleUnitPriceByItem?: Record<string, number>;
 };
 
 const SALES_KEY = 'dongshan_sales_records_v1';

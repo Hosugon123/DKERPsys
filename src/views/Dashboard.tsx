@@ -430,7 +430,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
               <div>
                 <h2 className="text-3xl font-light mt-1 text-[#f5f2ed] tabular-nums">{moneyTW(adminFinance.expenseTotal)}</h2>
                 <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
-                  進貨成本 {moneyTW(adminFinance.procurementCostTotal)} ＋ 流水帳支出 {moneyTW(adminFinance.ledgerExpenseTotal)}
+                  依流水帳支出認列（本月）{moneyTW(adminFinance.ledgerExpenseTotal)}
                 </p>
               </div>
             </div>

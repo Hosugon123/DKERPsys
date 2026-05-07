@@ -10,7 +10,13 @@ import {
   Plus,
 } from 'lucide-react';
 import type { UserRole } from './Orders';
-import { estimatedRetailPerPackage, getSupplyItem, isConsumableItem, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
+import {
+  estimatedRetailPerPackage,
+  getSupplyItem,
+  isConsumableItem,
+  pricePerPackage,
+  userRoleToSupplyRetailView,
+} from '../lib/supplyCatalog';
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { num, computeLine, aggregateStallKpis, isStallRemainEntryValid } from '../lib/stallMath';
 import {
@@ -219,6 +225,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       lines: recordLines,
       actualRevenue: next.actualRevenue,
       updatedAt: completedAt,
+      frozenRetailUnitPriceByItem: Object.fromEntries(
+        stallDisplayItems.map((it) => [it.id, estimatedRetailPerPackage(it)])
+      ),
+      frozenWholesaleUnitPriceByItem: Object.fromEntries(
+        stallDisplayItems.map((it) => [it.id, pricePerPackage(it)])
+      ),
     };
     void (async () => {
       const okStamp = await ordersApi.setOrderStallCountStamp(viewOrderId, {
@@ -234,7 +246,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       }
       await withRemoteStorageWrite(() => {
         saveDay(dateStr, next);
-        saveSalesRecord(dateStr, { ...next, lines: recordLines });
+        saveSalesRecord(dateStr, recordSnap);
       });
       setStallListTick((n) => n + 1);
       setStallCountConfirmOpen(false);
