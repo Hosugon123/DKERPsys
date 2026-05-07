@@ -41,7 +41,7 @@ function ymdFromIso(iso: string): string {
 function roleVisible(actorRole: OrderActorRole, userRole: UserRole): boolean {
   if (userRole === 'admin') return true;
   if (userRole === 'franchisee') return actorRole === 'franchisee';
-  return actorRole === 'admin' || actorRole === 'employee';
+  return actorRole === 'employee';
 }
 
 type ProductRevenueRow = { id: number; name: string; revenue: number; qty: number; pct: number };
@@ -213,9 +213,12 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
     );
     const procurementCost = stallCompleted.reduce((s, o) => s + o.totalAmount, 0);
     const gross = revenue - procurementCost;
-    const ledgerExpense = listAccountingLedgerEntries()
-      .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
-      .reduce((s, e) => s + e.amount, 0);
+    const ledgerExpense =
+      userRole === 'employee'
+        ? 0
+        : listAccountingLedgerEntries()
+            .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
+            .reduce((s, e) => s + e.amount, 0);
     const expense = procurementCost + ledgerExpense;
     // 淨利以「營收 - 總支出」計，避免批貨成本於 gross 與 expense 重複扣減。
     const net = revenue - expense;
@@ -231,7 +234,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       netRate: pct(net, revenue),
       completed: stallCompleted,
     };
-  }, [dashboardOrders, isAdmin, summaryRange, financeTick]);
+  }, [dashboardOrders, isAdmin, summaryRange, financeTick, userRole]);
 
   const topProducts = useMemo(() => {
     const completed =
@@ -259,6 +262,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
 
   const nonAdminExpenseRows = useMemo(() => {
     if (isAdmin) return [];
+    if (userRole === 'employee') return [];
     const { startYmd, endYmd } = resolveRange(summaryRange);
     const byName = new Map<string, number>();
     const procurementCost = nonAdminSummary?.procurementCost ?? 0;
@@ -274,7 +278,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       .sort((a, b) => b.amount - a.amount);
     const total = rows.reduce((s, r) => s + r.amount, 0);
     return rows.map((r, i) => ({ id: i + 1, name: r.name, amount: r.amount, pct: pct(r.amount, total) }));
-  }, [isAdmin, summaryRange, financeTick, nonAdminSummary]);
+  }, [isAdmin, summaryRange, financeTick, nonAdminSummary, userRole]);
 
   const adminSummaryOrders = useMemo(() => {
     if (!isAdmin) return [];
