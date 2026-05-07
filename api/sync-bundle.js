@@ -1,6 +1,37 @@
-import { kv } from '@vercel/kv';
+import { createClient } from 'redis';
 
 const KV_KEY = 'dongshan:data-bundle:v1';
+const REDIS_ENV_KEY = 'REDIS_URL';
+
+/** @type {import('redis').RedisClientType | null} */
+let redisClient = null;
+let redisConnecting = null;
+
+async function getRedis() {
+  if (redisClient && redisClient.isOpen) return redisClient;
+  if (redisConnecting) return redisConnecting;
+
+  const url = String(process.env[REDIS_ENV_KEY] || '').trim();
+  if (!url) {
+    throw new Error(`Missing required environment variable ${REDIS_ENV_KEY}`);
+  }
+
+  const client = createClient({ url });
+  client.on('error', () => {
+    /* 交由呼叫端統一回傳錯誤 */
+  });
+
+  redisConnecting = client.connect().then(() => {
+    redisClient = client;
+    return client;
+  });
+
+  try {
+    return await redisConnecting;
+  } finally {
+    redisConnecting = null;
+  }
+}
 
 function unauthorized(res) {
   return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -46,6 +77,7 @@ function parseJsonBodyMaybe(body) {
 
 export default async function handler(req, res) {
   try {
+    const redis = await getRedis();
     const expected = String(process.env.API_SYNC_TOKEN || '').trim();
     const got = readBearer(req);
     if (!expected || !got || got !== expected) {
@@ -53,7 +85,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-      const stored = await kv.get(KV_KEY);
+      const raw = await redis.get(KV_KEY);
+      const stored = parseJsonBodyMaybe(raw);
       if (stored && typeof stored === 'object') {
         return res.status(200).json({ ok: true, bundle: stored });
       }
@@ -69,7 +102,7 @@ export default async function handler(req, res) {
         return badRequest(res, 'invalid bundle');
       }
 
-      await kv.set(KV_KEY, bundle);
+      await redis.set(KV_KEY, JSON.stringify(bundle));
       return res.status(200).json({ ok: true });
     }
 
