@@ -3,6 +3,7 @@ import { Braces, Download, Upload, AlertTriangle, CheckCircle2 } from 'lucide-re
 import type { UserRole } from './Orders';
 import { DONGSHAN_APP_ID, DONGSHAN_EXPORT_STORAGE_KEYS, parseBundleJson } from '../lib/appDataBundle';
 import { dataBundle } from '../services/apiService';
+import { getApiBaseUrl, getApiSyncToken, getStorageMode } from '../services/storageMode';
 import { cn } from '../lib/utils';
 
 function downloadJson(filename: string, text: string) {
@@ -26,6 +27,8 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
   const isAdmin = userRole === 'admin';
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [syncCheckRunning, setSyncCheckRunning] = useState(false);
+  const [syncCheckReport, setSyncCheckReport] = useState<string[]>([]);
 
   const onExport = useCallback(() => {
     setMessage(null);
@@ -70,6 +73,91 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
       })();
     };
     reader.readAsText(file, 'UTF-8');
+  }, []);
+
+  const onSyncHealthCheck = useCallback(() => {
+    setMessage(null);
+    setSyncCheckReport([]);
+    setSyncCheckRunning(true);
+    void (async () => {
+      const logs: string[] = [];
+      const mode = getStorageMode();
+      const base = getApiBaseUrl();
+      const token = getApiSyncToken();
+
+      logs.push(`儲存模式：${mode}`);
+      logs.push(`API Base：${base}`);
+      logs.push(`前端 Token：${token ? `已設定（長度 ${token.length}）` : '未設定'}`);
+
+      if (mode !== 'remote') {
+        logs.push('中止：VITE_STORAGE_MODE 不是 remote。');
+        setSyncCheckReport(logs);
+        setSyncCheckRunning(false);
+        return;
+      }
+      if (!token) {
+        logs.push('中止：VITE_API_SYNC_TOKEN 未設定。');
+        setSyncCheckReport(logs);
+        setSyncCheckRunning(false);
+        return;
+      }
+
+      try {
+        const getRes = await fetch(`${base}/sync-bundle`, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        logs.push(`GET /sync-bundle：HTTP ${getRes.status}`);
+        const getBodyText = await getRes.text();
+        logs.push(`GET 回應：${getBodyText.slice(0, 280) || '(empty)'}`);
+        if (!getRes.ok) {
+          setSyncCheckReport(logs);
+          setSyncCheckRunning(false);
+          return;
+        }
+
+        let getBody: unknown = null;
+        try {
+          getBody = JSON.parse(getBodyText);
+        } catch {
+          logs.push('中止：GET 回應不是合法 JSON。');
+          setSyncCheckReport(logs);
+          setSyncCheckRunning(false);
+          return;
+        }
+        const bundle = (getBody as { bundle?: unknown })?.bundle;
+        if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+          logs.push('中止：GET 回應缺少合法 bundle。');
+          setSyncCheckReport(logs);
+          setSyncCheckRunning(false);
+          return;
+        }
+
+        const putRes = await fetch(`${base}/sync-bundle`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ bundle }),
+        });
+        logs.push(`PUT /sync-bundle：HTTP ${putRes.status}`);
+        const putBodyText = await putRes.text();
+        logs.push(`PUT 回應：${putBodyText.slice(0, 280) || '(empty)'}`);
+
+        if (putRes.ok) {
+          logs.push('檢查完成：GET/PUT 皆成功，API 路由與授權看起來正常。');
+        } else {
+          logs.push('檢查完成：PUT 失敗，請依上方 HTTP 狀態碼與回應訊息排查。');
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logs.push(`請求失敗：${msg}`);
+      } finally {
+        setSyncCheckReport(logs);
+        setSyncCheckRunning(false);
+      }
+    })();
   }, []);
 
   if (!isAdmin) {
@@ -144,6 +232,34 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
           </button>
         </section>
       </div>
+
+      <section className="rounded-2xl border border-violet-900/40 bg-violet-950/15 p-5 space-y-3">
+        <div>
+          <h3 className="text-base font-semibold text-zinc-100">雲端同步自我檢查（Vercel）</h3>
+          <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+            檢查目前瀏覽器設定是否能成功呼叫 <code className="text-zinc-400">GET/PUT /api/sync-bundle</code>。
+            會顯示 HTTP 狀態碼與回應內容，用來快速定位是 token、路由或 KV 問題。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onSyncHealthCheck}
+          disabled={syncCheckRunning}
+          className={cn(
+            'px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors',
+            syncCheckRunning
+              ? 'bg-zinc-800 text-zinc-500 cursor-wait'
+              : 'bg-violet-700/80 hover:bg-violet-600 text-white'
+          )}
+        >
+          {syncCheckRunning ? '檢查中…' : '開始檢查同步'}
+        </button>
+        {syncCheckReport.length > 0 ? (
+          <pre className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-300 overflow-x-auto whitespace-pre-wrap break-words">
+            {syncCheckReport.join('\n')}
+          </pre>
+        ) : null}
+      </section>
 
       {message ? (
         <div
