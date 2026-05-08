@@ -725,42 +725,42 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   </div>
                 </div>
 
-                <div className="flex items-center sm:items-end justify-end gap-1.5 sm:gap-2 w-full sm:w-auto border-t sm:border-t-0 border-zinc-800 pt-3 sm:pt-0 self-end sm:self-center">
-                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/35 px-3 py-2.5 min-w-[16rem] sm:min-w-[19rem]">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[0.6875rem] sm:text-xs">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-end justify-end gap-2 w-full sm:w-auto border-t sm:border-t-0 border-zinc-800 pt-3 sm:pt-0 self-stretch sm:self-center min-w-0">
+                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/35 px-3 py-2.5 w-full sm:w-auto sm:min-w-[19rem] min-w-0">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.6875rem] sm:text-xs min-w-0">
                       <span className="text-zinc-500">批貨金額</span>
-                      <span className="text-zinc-200 text-right tabular-nums">$ {Math.round(order.procurementAmount).toLocaleString()}</span>
+                      <span className="text-zinc-200 text-right tabular-nums break-all">$ {Math.round(order.procurementAmount).toLocaleString()}</span>
                       <span className="text-zinc-500">自備扣除</span>
-                      <span className="text-zinc-300 text-right tabular-nums">
+                      <span className="text-zinc-300 text-right tabular-nums break-all">
                         {order.selfSuppliedDeduction > 0 ? `$ ${Math.round(order.selfSuppliedDeduction).toLocaleString()}` : '—'}
                       </span>
                       <span className="text-zinc-500">實際應付/應收</span>
-                      <span className="text-amber-300 text-right tabular-nums">
+                      <span className="text-amber-300 text-right tabular-nums break-all">
                         $ {Math.round(order.netPayableAmount).toLocaleString()}
                       </span>
                       <span className="text-zinc-500">預估金額</span>
-                      <span className="text-zinc-300 text-right tabular-nums">
+                      <span className="text-zinc-300 text-right tabular-nums break-all">
                         {order.estimatedAmount == null ? '—' : `$ ${Math.round(order.estimatedAmount).toLocaleString()}`}
                       </span>
                       <span className="text-zinc-500">餘貨金額</span>
-                      <span className="text-zinc-300 text-right tabular-nums">
+                      <span className="text-zinc-300 text-right tabular-nums break-all">
                         {order.remainAmount == null ? '—' : `$ ${Math.round(order.remainAmount).toLocaleString()}`}
                       </span>
                       <span className="text-zinc-500">盤點後營業額</span>
-                      <span className="text-zinc-100 text-right tabular-nums">
+                      <span className="text-zinc-100 text-right tabular-nums break-all">
                         {order.countedRevenueAmount == null ? '—' : `$ ${Math.round(order.countedRevenueAmount).toLocaleString()}`}
                       </span>
                     </div>
                     <div className="mt-2 pt-2 border-t border-zinc-800/80 flex items-end justify-between gap-3">
                       <span className="text-[0.6875rem] sm:text-xs text-zinc-400">實際收入金額</span>
-                      <span className="text-xl sm:text-2xl font-light text-amber-500 tabular-nums">
+                      <span className="text-xl sm:text-2xl font-light text-amber-500 tabular-nums break-all text-right">
                         {order.actualIncomeAmount == null ? '—' : `$ ${Math.round(order.actualIncomeAmount).toLocaleString()}`}
                       </span>
                     </div>
                   </div>
                   <button
                     type="button"
-                    className="p-2 text-zinc-500 rounded-lg hover:bg-zinc-800 hover:text-zinc-300 transition-colors shrink-0"
+                    className="self-end sm:self-auto p-2 text-zinc-500 rounded-lg hover:bg-zinc-800 hover:text-zinc-300 transition-colors shrink-0"
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleOrder(order.id);
