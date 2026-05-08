@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>DKERPsys 達客東山鴨頭</title>
+    <script>
+      // Prevent polyfills (like whatwg-fetch) from crashing the app in iframe environments
+      // where window.fetch is a getter-only property.
+      (function() {
+        try {
+          const originalFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function() { return originalFetch; },
+            set: function(val) {
+              console.warn('Ignored attempt to overwrite window.fetch', val);
+            }
+          });
+        } catch (e) {
+          console.error('Failed to polyfill fetch setter', e);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
