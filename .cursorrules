@@ -1,0 +1,11 @@
+# Cursor / AI 協作憲法（達客 ERP）
+
+## 資料與非同步
+
+- **所有新增或修改、且會改動持久化資料的功能**，必須優先考慮 **SQL／關聯式資料庫的兼容性**（唯一 `id`、`createdAt`、`updatedAt`、外鍵／領域欄位清晰）與 **非同步 I/O**（`async`／`await`、可替換的資料層）。
+- **Views（`src/views/`）與畫面綁定之 Hooks** 應透過 **`src/services/apiService.ts`**（或日後等價之資料閘道）進行讀寫；避免在 View 內直接 `localStorage.setItem`／`getItem`。
+- 純函式、聚合與型別可留在 `src/lib/`；**實際寫入與跨頁同步**應集中由服務層封裝，以便日後切換 `VITE_STORAGE_MODE=remote` 與 `VITE_API_URL`。
+
+## 其他
+
+- 繁體中文 UI；重大架構變更請同步 `agent.md`。
