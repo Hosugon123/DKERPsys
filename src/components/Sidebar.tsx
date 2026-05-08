@@ -4,7 +4,6 @@ import {
   Users,
   ShoppingCart,
   ShoppingBasket,
-  History,
   Receipt,
   Wallet,
   LogOut,
@@ -37,7 +36,6 @@ const adminItems = [
   { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
   { id: 'accounting', label: '流水帳', icon: Wallet },
-  { id: 'orderHistory', label: '歷史訂單', icon: History },
   { id: 'dataHub', label: '數據中心', icon: Database },
 ] as const;
 
@@ -48,14 +46,12 @@ const franchiseeItems = [
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
   { id: 'accounting', label: '流水帳', icon: Wallet },
   { id: 'orders', label: '訂單管理', icon: ListOrdered },
-  { id: 'orderHistory', label: '歷史訂單', icon: History },
 ] as const;
 
 const employeeItems = [
   { id: 'orders', label: '訂單管理', icon: ListOrdered },
   { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
-  { id: 'orderHistory', label: '歷史訂單', icon: History },
 ] as const;
 
 type NavItem =

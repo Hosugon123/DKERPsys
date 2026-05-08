@@ -13,7 +13,6 @@ import Permissions from './views/Permissions';
 import Procurement from './views/Procurement';
 import Orders from './views/Orders';
 import { UserRole } from './views/Orders';
-import OrderHistory from './views/OrderHistory';
 import StallInventory from './views/StallInventory';
 import SalesRecord from './views/SalesRecord';
 import Accounting from './views/Accounting';
@@ -140,6 +139,9 @@ export default function App() {
     if (userRole === 'employee' && currentView === 'accounting') {
       setCurrentView('orders');
     }
+    if (currentView === 'orderHistory') {
+      setCurrentView('orders');
+    }
   }, [userRole, currentView]);
 
   const handleLogout = () => {
@@ -161,8 +163,6 @@ export default function App() {
         return <Permissions userRole={userRole} sessionLoginId={session.loginId} />;
       case 'procurement':
         return <Procurement userRole={userRole} />;
-      case 'orderHistory':
-        return <OrderHistory userRole={userRole} />;
       case 'stallInventory':
         return <StallInventory userRole={userRole} />;
       case 'salesRecord':

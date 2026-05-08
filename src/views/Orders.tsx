@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, useRef, useCallback, type MouseEvent } from 'react';
 import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { orderDateQueryMatches, formatSlashDateTimeFromIso } from '../lib/dateDisplay';
+import { orderDateQueryMatches, formatSlashDateTimeFromIso, orderMatchesActiveWeekdays } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
+import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { orders as ordersApi } from '../services/apiService';
 import type {
   FranchiseManagementOrder,
@@ -169,6 +170,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('所有訂單');
   const [searchQuery, setSearchQuery] = useState('');
+  /** 建單星期篩選（空＝不篩選） */
+  const [activeWeekdays, setActiveWeekdays] = useState<number[]>([]);
   const [datePanelOpen, setDatePanelOpen] = useState(false);
   /** 已套用的訂單日期篩選（含起迄日）；null 表示不篩日期 */
   const [appliedDateRange, setAppliedDateRange] = useState<{ from: string; to: string } | null>(null);
@@ -232,7 +235,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   }, [rawList, userRole]);
 
   const filteredOrders = useMemo(() => {
-    const byStatus = ordersData.filter((order) => {
+    const byWeekday = ordersData.filter((order) => {
+      const o = rawList.find((r) => r.id === order.id);
+      if (!o) return false;
+      return orderMatchesActiveWeekdays(o.createdAt, activeWeekdays);
+    });
+    const byStatus = byWeekday.filter((order) => {
       if (statusFilter === '所有訂單') return true;
       return order.status === statusFilter;
     });
@@ -270,7 +278,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         )
       );
     });
-  }, [statusFilter, searchQuery, appliedDateRange, ordersData, rawList]);
+  }, [activeWeekdays, statusFilter, searchQuery, appliedDateRange, ordersData, rawList]);
 
   useEffect(() => {
     if (expandedOrderId && !filteredOrders.some((o) => o.id === expandedOrderId)) {
@@ -318,6 +326,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setAppliedDateRange(null);
     setDraftFrom('');
     setDraftTo('');
+    setActiveWeekdays([]);
     setDatePanelOpen(false);
   };
 
@@ -540,6 +549,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none"
                     />
                   </label>
+                  <div>
+                    <p className="mb-1 block text-sm text-zinc-400">建單星期</p>
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-2 py-2">
+                      <OrderWeekdayFilter value={activeWeekdays} onChange={setActiveWeekdays} />
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
@@ -591,8 +606,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         {filteredOrders.length === 0 && (
           <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/30 px-6 py-12 text-center text-sm text-zinc-500">
             {searchQuery.trim()
-              ? '沒有符合搜尋條件的訂單，請調整關鍵字或併用狀態／日期篩選。'
-              : '沒有符合目前篩選條件的訂單。請調整狀態分頁、日期範圍或關鍵字搜尋。'}
+              ? '沒有符合搜尋條件的訂單，請調整關鍵字或併用狀態／日期／建單星期篩選。'
+              : '沒有符合目前篩選條件的訂單。請調整狀態分頁、建單星期、日期範圍或關鍵字搜尋。'}
           </div>
         )}
         {filteredOrders.map((order) => {
