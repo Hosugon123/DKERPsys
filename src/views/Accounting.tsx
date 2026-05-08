@@ -446,10 +446,6 @@ export default function Accounting({ userRole: _userRole }: { userRole: UserRole
           <span className="text-sm font-medium tracking-wide">非訂單類</span>
         </div>
         <h2 className="text-3xl font-bold tracking-tight">流水帳</h2>
-        <p className="mt-1.5 text-sm text-zinc-500">
-          紀錄房租、水電、薪資等收支；資料儲存於本機瀏覽器。編輯與刪除會即時同步至總部儀表板之損益計算（依曆法本月匯總）。
-        </p>
-        <p className="mt-1 text-xs text-zinc-600">滷料成本分析（圖表與日均成本）已整合至「產品與成本庫存」頁面。</p>
       </div>
 
       <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-5 md:p-6">

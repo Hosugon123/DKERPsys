@@ -167,7 +167,7 @@ export default function Sidebar({
             東
           </div>
           <div>
-            <h1 className="text-xl font-semibold tracking-wide">東山鴨頭</h1>
+            <h1 className="text-xl font-semibold tracking-wide">達客東山鴨頭</h1>
             <p className="text-[0.625rem] text-zinc-500 uppercase tracking-widest">職人數據管理</p>
           </div>
         </div>

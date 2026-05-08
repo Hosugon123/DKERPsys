@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback, type MouseEvent } from 'react';
-import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, ClipboardList, Trash2 } from 'lucide-react';
+import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { orderDateQueryMatches, formatSlashDateTimeFromIso } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
@@ -473,9 +473,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">訂單管理</h2>
-          {userRole === 'franchisee' && (
-            <p className="mt-1 text-sm text-zinc-500">僅顯示本加盟帳號送出之批貨單，可編輯狀態與實出。</p>
-          )}
           {userRole === 'employee' && (
             <p className="mt-1 text-sm text-zinc-500">
               可檢視總部直營之單與本店帳送出之單；總部單僅能檢視，無法變更出貨或實出。
@@ -784,9 +781,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     ) : (
                       <div>
                         <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-2">本店訂單</h4>
-                        <p className="text-sm text-zinc-500 leading-relaxed">
-                          狀態變更僅本機顯示；實務出貨與帳款請以與總部約定之流程辦理。
-                        </p>
                       </div>
                     )}
 
@@ -852,17 +846,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-3">訂單品項明細</h4>
 
                     {(order.status === '待出貨' || order.status === '已完成') && canEdit && !isPickingThis && (
-                      <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-950/25 px-3 py-2.5 text-sm text-sky-100/95">
-                        <div className="flex items-start gap-2 min-w-0">
-                          <ClipboardList className="shrink-0 mt-0.5 text-sky-400" size={18} aria-hidden />
-                          <span className="leading-snug">
-                            實際出貨與下單不同？可直接修改實出（可增可減；0 表該行短少未出、儲存後會移除此品項）。
-                          </span>
-                        </div>
+                      <div className="mb-3 flex justify-end">
                         <button
                           type="button"
                           onClick={(e) => startPickingEdit(e, order.id)}
-                          className="shrink-0 self-start sm:self-center py-2 px-3 rounded-lg bg-sky-600/90 text-white text-sm font-medium hover:bg-sky-500"
+                          className="min-h-10 py-2 px-3 rounded-lg bg-sky-600/90 text-white text-sm font-medium hover:bg-sky-500"
                         >
                           調整貨量
                         </button>

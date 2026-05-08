@@ -467,9 +467,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
             <CalendarDays className="shrink-0 text-violet-400" size={20} />
             <div className="min-w-0">
               <p className="text-sm font-medium text-violet-200/95">欲扣除餘貨的訂單</p>
-              <p className="text-[0.6875rem] text-violet-300/50 mt-0.5 leading-snug">
-                以該筆已盤點單的帳上剩餘推算補貨，扣庫寫入該單之盤點日（同攤上盤點完成押記），非單看日期。
-              </p>
             </div>
           </div>
           <div className="w-full sm:max-w-md shrink-0 flex flex-col sm:flex-row sm:items-stretch gap-2">

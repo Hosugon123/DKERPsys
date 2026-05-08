@@ -665,18 +665,15 @@ export default function CostStructureTable() {
     <section className="flex min-w-0 flex-col rounded-2xl border border-zinc-800 bg-zinc-900/30">
       <div className="shrink-0 flex flex-col gap-3 rounded-t-2xl border-b border-zinc-800 p-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-          <div>
+          <div className="min-h-10 flex items-center">
             <h3 className="text-base font-semibold text-zinc-100">成本結構表</h3>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              欄位／品項皆可自由增減。漲縮欄請讓標題包含「漲縮」或「脹縮」（例如「漲縮率」）；僅該欄有填寫的品項，可點列首箭頭展開「未滷／成品成本」補充紀錄。
-            </p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             {!columnLayoutEditMode ? (
               <button
                 type="button"
                 onClick={enterColumnLayoutEdit}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 text-xs"
+                className="min-h-10 flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 text-sm"
               >
                 <Settings2 size={14} /> 欄寬設定
               </button>
@@ -685,14 +682,14 @@ export default function CostStructureTable() {
                 <button
                   type="button"
                   onClick={confirmColumnLayoutEdit}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-600 bg-amber-600/25 text-amber-200 hover:bg-amber-600/35 text-xs font-medium"
+                  className="min-h-10 flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-600 bg-amber-600/25 text-amber-200 hover:bg-amber-600/35 text-sm font-medium"
                 >
                   <Check size={14} /> 確認
                 </button>
                 <button
                   type="button"
                   onClick={cancelColumnLayoutEdit}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-600 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 text-xs"
+                  className="min-h-10 flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-600 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 text-sm"
                 >
                   取消
                 </button>
@@ -702,7 +699,7 @@ export default function CostStructureTable() {
               type="button"
               onClick={onColumnAdd}
               disabled={columnLayoutEditMode}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 text-xs disabled:opacity-40 disabled:pointer-events-none"
+              className="min-h-10 flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 text-sm disabled:opacity-40 disabled:pointer-events-none"
             >
               <Plus size={14} /> 新增欄位
             </button>
@@ -710,7 +707,7 @@ export default function CostStructureTable() {
               type="button"
               onClick={() => setItemDialogOpen(true)}
               disabled={columnLayoutEditMode}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-600 bg-amber-600/20 text-amber-300 hover:bg-amber-600/30 text-xs disabled:opacity-40 disabled:pointer-events-none"
+              className="min-h-10 flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-600 bg-amber-600/20 text-amber-300 hover:bg-amber-600/30 text-sm disabled:opacity-40 disabled:pointer-events-none"
             >
               <Plus size={14} /> 新增品項
             </button>

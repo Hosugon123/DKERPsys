@@ -1,6 +1,7 @@
 import { Bell, Settings, Menu, Search, ChevronDown, X } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { changeOwnPassword } from '../lib/authSession';
+import { getUserAvatar, removeUserAvatar, setUserAvatar } from '../lib/userAvatarStorage';
 import type { UserRole } from '../views/Orders';
 import RemoteSyncIndicator from './RemoteSyncIndicator';
 
@@ -19,6 +20,9 @@ export default function Topbar({
   userRole,
   onLogout,
 }: TopbarProps) {
+  const DEFAULT_AVATAR = `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(
+    loginId
+  )}&backgroundColor=27272a`;
   const roleDisplayNames: Record<UserRole, string> = {
     admin: '超級管理員',
     franchisee: '加盟主',
@@ -32,8 +36,17 @@ export default function Topbar({
   const [newPwd2, setNewPwd2] = useState('');
   const [pwdError, setPwdError] = useState<string | null>(null);
   const [pwdBusy, setPwdBusy] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const accountRef = useRef<HTMLDivElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setAvatarUrl(getUserAvatar(loginId));
+    setAvatarError(null);
+  }, [loginId]);
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -76,6 +89,79 @@ export default function Topbar({
     }
   };
 
+  const readFileAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') resolve(reader.result);
+        else reject(new Error('讀取圖片失敗，請稍後再試。'));
+      };
+      reader.onerror = () => reject(new Error('讀取圖片失敗，請稍後再試。'));
+      reader.readAsDataURL(file);
+    });
+
+  const loadImage = (src: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('圖片格式不支援，請改用 JPG / PNG / WEBP。'));
+      img.src = src;
+    });
+
+  const normalizeAvatar = async (file: File): Promise<string> => {
+    const dataUrl = await readFileAsDataUrl(file);
+    const img = await loadImage(dataUrl);
+    const target = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = target;
+    canvas.height = target;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('無法處理圖片，請稍後再試。');
+    const crop = Math.min(img.width, img.height);
+    const sx = Math.floor((img.width - crop) / 2);
+    const sy = Math.floor((img.height - crop) / 2);
+    ctx.drawImage(img, sx, sy, crop, crop, 0, 0, target, target);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  };
+
+  const chooseAvatarFile = () => {
+    setAvatarError(null);
+    avatarInputRef.current?.click();
+  };
+
+  const onAvatarSelected = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.currentTarget.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('請選擇圖片檔案（JPG / PNG / WEBP）。');
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      setAvatarError('圖片過大，請使用 6MB 以下檔案。');
+      return;
+    }
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      const normalized = await normalizeAvatar(file);
+      setUserAvatar(loginId, normalized);
+      setAvatarUrl(normalized);
+      setAccountOpen(false);
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : '上傳失敗，請稍後再試。');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const onRemoveAvatar = () => {
+    removeUserAvatar(loginId);
+    setAvatarUrl(null);
+    setAvatarError(null);
+    setAccountOpen(false);
+  };
+
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-zinc-800 bg-[#111111] pt-[env(safe-area-inset-top)]">
@@ -92,7 +178,7 @@ export default function Topbar({
               <Menu size={24} />
             </button>
             <div className="hidden min-w-0 truncate text-lg font-black tracking-tighter text-[#f5f2ed] sm:block">
-              東山鴨頭職人管理系統
+              達客東山鴨頭管理系統
             </div>
           </div>
 
@@ -129,6 +215,13 @@ export default function Topbar({
             </button>
 
             <div className="relative ml-0 sm:ml-1" ref={accountRef}>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={onAvatarSelected}
+              />
               <button
                 type="button"
                 onClick={() => setAccountOpen((v) => !v)}
@@ -151,6 +244,25 @@ export default function Topbar({
                   <button
                     type="button"
                     role="menuitem"
+                    onClick={chooseAvatarFile}
+                    disabled={avatarBusy}
+                    className="flex w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {avatarBusy ? '上傳中…' : '上傳大頭照'}
+                  </button>
+                  {avatarUrl && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={onRemoveAvatar}
+                      className="flex w-full px-4 py-2.5 text-left text-sm text-zinc-400 hover:bg-zinc-800"
+                    >
+                      移除大頭照
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
                     onClick={openPwd}
                     className="flex w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800"
                   >
@@ -170,10 +282,11 @@ export default function Topbar({
                 </div>
               )}
             </div>
+            {avatarError && <p className="hidden max-w-[11rem] text-[0.6875rem] text-rose-400 sm:block">{avatarError}</p>}
 
             <div className="ml-0.5 hidden h-10 w-10 shrink-0 overflow-hidden rounded-full border border-zinc-700 bg-zinc-800 sm:flex">
               <img
-                src={`https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(loginId)}&backgroundColor=27272a`}
+                src={avatarUrl ?? DEFAULT_AVATAR}
                 alt=""
                 className="h-full w-full object-cover"
               />
