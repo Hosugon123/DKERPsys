@@ -33,6 +33,7 @@ import { saveSalesRecord } from '../lib/salesRecordStorage';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { formatSlashDateTimeFromIso, formatSlashDateTimeWithWeekdayFromIso, ymdDashToSlash } from '../lib/dateDisplay';
+import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
@@ -41,10 +42,6 @@ function money(n: number) {
 /** 叫貨單內部狀態「已完成」在攤上盤點語境顯示為「已出貨」 */
 function procurementStatusDisplay(s: '待出貨' | '已完成' | '已取消') {
   return s === '已完成' ? '已出貨' : s;
-}
-
-function displayStoreLabel(label: string) {
-  return label === '總部／示範門市' || label === '總部 / 示範門市' ? '直營店' : label;
 }
 
 /** ±1 步進後寫入字串，不低於 0；供盤點帶出／剩餘微調。 */
@@ -345,7 +342,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               >
                 {ordersInWindow.map((o) => (
                   <option key={o.id} value={o.id}>
-                    建單 {ymdDashToSlash(ymd(new Date(o.createdAt)))} · {displayStoreLabel(o.storeLabel)} · {o.id.slice(0, 16)}… · {procurementStatusDisplay(o.status)}
+                    建單 {ymdDashToSlash(ymd(new Date(o.createdAt)))} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 16)}… · {procurementStatusDisplay(o.status)}
                   </option>
                 ))}
               </select>
@@ -365,7 +362,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     <span
                       className={cn(
                         'font-medium',
-                        viewOrder.status === '待出貨' ? 'text-sky-400' : 'text-emerald-500/90'
+                        viewOrder.status === '待出貨' ? 'text-amber-400' : 'text-emerald-500/90'
                       )}
                     >
                       {procurementStatusDisplay(viewOrder.status)}
@@ -375,7 +372,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       stallCountCompletedAt={viewOrder.stallCountCompletedAt}
                     />
                     <span>
-                      · {displayStoreLabel(viewOrder.storeLabel)}
+                      · {resolveOrderStoreLabel(viewOrder)}
                     </span>
                   </p>
                   {viewOrder.stallCountCompletedAt && viewOrder.stallCountBasisYmd && (
@@ -394,12 +391,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       <div
-        className="rounded-2xl border-2 border-sky-800/60 bg-sky-950/20 p-4 sm:p-5 grid sm:grid-cols-2 gap-4"
+        className="rounded-2xl border-2 border-amber-800/60 bg-amber-950/20 p-4 sm:p-5 grid sm:grid-cols-2 gap-4"
         role="region"
         aria-label="盤點彙總"
       >
-        <div className="space-y-2 border-b sm:border-b-0 sm:border-r border-sky-900/50 pb-4 sm:pb-0 sm:pr-4">
-          <p className="text-xs text-sky-300/80 uppercase tracking-wider">預估與帳面</p>
+        <div className="space-y-2 border-b sm:border-b-0 sm:border-r border-amber-900/50 pb-4 sm:pb-0 sm:pr-4">
+          <p className="text-xs text-amber-300/80 uppercase tracking-wider">預估與帳面</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
             <div>
               <p className="text-zinc-500">預估金額</p>
@@ -422,7 +419,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           </div>
         </div>
         <div className="space-y-2">
-          <p className="text-xs text-sky-300/80 uppercase tracking-wider">實收對帳</p>
+          <p className="text-xs text-amber-300/80 uppercase tracking-wider">實收對帳</p>
           <div>
             <label className="text-zinc-500 text-sm">盤點後實收（當日現金／收銀）</label>
             <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -594,7 +591,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   按下「確定送出」後，會將本筆盤點寫入
                   <span className="text-zinc-200"> 銷售紀錄</span>，並在
                   <span className="text-zinc-200"> 歷史訂單</span> 的此筆單上顯示
-                  <span className="text-sky-300/90"> 已盤點</span>。此步驟無法在此處還原。
+                  <span className="text-amber-300/90"> 已盤點</span>。此步驟無法在此處還原。
                 </p>
                 <p className="text-xs text-zinc-500 mt-3 font-mono break-all" title={viewOrder.id}>
                   單號 {viewOrder.id}

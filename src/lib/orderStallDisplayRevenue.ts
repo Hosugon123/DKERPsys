@@ -107,3 +107,14 @@ export function getStallDisplayRetailEstAndRemain(
   if (!k) return null;
   return { estTotal: k.retailEstTotal, remGoodsValue: k.retailRemainValue };
 }
+
+/**
+ * 已盤點且可讀到快照時：盤點頁填寫的「實際收入金額」。否則 null。
+ */
+export function getStallDisplayActualRevenue(
+  o: FranchiseManagementOrder | OrderHistoryEntry,
+): number | null {
+  const snap = resolveStallSnapshotForOrder(o);
+  if (!snap) return null;
+  return num(snap.actualRevenue);
+}

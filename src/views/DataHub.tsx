@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type ChangeEvent } from 'react';
-import { Braces, Download, Upload, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Download, Upload, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
 import type { UserRole } from './Orders';
 import { DONGSHAN_APP_ID, DONGSHAN_EXPORT_STORAGE_KEYS, parseBundleJson } from '../lib/appDataBundle';
 import { dataBundle } from '../services/apiService';
@@ -171,15 +171,10 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-16">
       <div>
-        <div className="flex items-center gap-2 text-amber-500/90 mb-1">
-          <Braces size={22} className="shrink-0" />
-          <span className="text-sm font-medium tracking-wide">JSON</span>
-        </div>
-        <h2 className="text-3xl font-bold tracking-tight">數據中心</h2>
-        <p className="mt-2 text-sm text-zinc-500 leading-relaxed">
-          以標準 JSON 匯出／匯入本機資料（訂單、產品庫、流水帳、盤點與偏好設定等）。匯出檔可交給 ChatGPT、Claude
-          等工具分析；匯入會覆寫對應之瀏覽器儲存槽，請先備份。
-        </p>
+        <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+          <Database className="text-amber-500 shrink-0" size={28} />
+          數據中心
+        </h2>
       </div>
 
       <div className="rounded-2xl border border-amber-900/25 bg-amber-950/20 px-4 py-3 flex gap-3 text-sm text-amber-200/90">
@@ -215,7 +210,7 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
         <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 p-5 flex flex-col gap-4">
           <div>
             <h3 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
-              <Upload size={18} className="text-sky-400" />
+              <Upload size={18} className="text-amber-400" />
               匯入 JSON 數據
             </h3>
             <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
@@ -226,14 +221,14 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
           <button
             type="button"
             onClick={onPickFile}
-            className="mt-auto px-4 py-2.5 rounded-xl border border-sky-700/60 bg-sky-950/40 hover:bg-sky-950/60 text-sky-200 text-sm font-semibold transition-colors"
+            className="mt-auto px-4 py-2.5 rounded-xl border border-amber-700/60 bg-amber-950/40 hover:bg-amber-950/60 text-amber-200 text-sm font-semibold transition-colors"
           >
             選擇檔案並匯入
           </button>
         </section>
       </div>
 
-      <section className="rounded-2xl border border-violet-900/40 bg-violet-950/15 p-5 space-y-3">
+      <section className="rounded-2xl border border-amber-900/40 bg-amber-950/15 p-5 space-y-3">
         <div>
           <h3 className="text-base font-semibold text-zinc-100">雲端同步自我檢查（Vercel）</h3>
           <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
@@ -249,7 +244,7 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
             'px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors',
             syncCheckRunning
               ? 'bg-zinc-800 text-zinc-500 cursor-wait'
-              : 'bg-violet-700/80 hover:bg-violet-600 text-white'
+              : 'bg-amber-700/80 hover:bg-amber-600 text-zinc-950'
           )}
         >
           {syncCheckRunning ? '檢查中…' : '開始檢查同步'}

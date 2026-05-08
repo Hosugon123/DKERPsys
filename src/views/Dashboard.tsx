@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, FileText, Target, Store, HandCoins } from 'lucide-react';
+import { TrendingUp, FileText, Target, Store, HandCoins, LayoutDashboard } from 'lucide-react';
 import {
   XAxis,
   YAxis,
@@ -15,7 +15,7 @@ import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { computeAdminDashboardFinance, currentYmLocal, stallCountAttributeYmd } from '../lib/financeLib';
 import { ACCOUNTING_LEDGER_UPDATED_EVENT, listAccountingLedgerEntries } from '../lib/accountingLedgerStorage';
-import { getSupplyItem } from '../lib/supplyCatalog';
+import { getSupplyItem, isFranchiseeSelfSuppliedItem } from '../lib/supplyCatalog';
 import { getStallDisplaySoldAtRetail, getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
 import {
   loadFranchiseManagementOrders,
@@ -52,11 +52,13 @@ const RANK_DEFAULT_LIMIT = 10;
 function aggregateProductRevenue(
   orders: DashboardOrder[],
   predicate: (o: DashboardOrder) => boolean,
+  includeLine?: (o: DashboardOrder, line: DashboardOrder['lines'][number]) => boolean,
 ): ProductRevenueRow[] {
   const byName = new Map<string, { name: string; qty: number; revenue: number }>();
   for (const o of orders) {
     if (!predicate(o)) continue;
     for (const line of o.lines) {
+      if (includeLine && !includeLine(o, line)) continue;
       const prev = byName.get(line.name) ?? { name: line.name, qty: 0, revenue: 0 };
       prev.qty += line.qty;
       prev.revenue += line.qty * line.unitPrice;
@@ -184,6 +186,8 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       updatedAt: m.updatedAt,
       source: m.source,
       totalAmount: m.totalAmount,
+      payableAmount: m.payableAmount ?? m.totalAmount,
+      selfSuppliedCostAmount: m.selfSuppliedCostAmount ?? 0,
       itemCount: m.itemCount,
       lines: m.lines,
       actorRole: 'admin',
@@ -211,7 +215,12 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       (s, o) => s + (getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW) ?? 0),
       0,
     );
-    const procurementCost = stallCompleted.reduce((s, o) => s + o.totalAmount, 0);
+    const procurementCost = stallCompleted.reduce((s, o) => {
+      if (o.actorRole === 'franchisee') {
+        return s + o.totalAmount;
+      }
+      return s + o.totalAmount;
+    }, 0);
     const gross = revenue - procurementCost;
     const ledgerExpense =
       userRole === 'employee'
@@ -266,7 +275,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
     const { startYmd, endYmd } = resolveRange(summaryRange);
     const byName = new Map<string, number>();
     const procurementCost = nonAdminSummary?.procurementCost ?? 0;
-    if (procurementCost > 0) byName.set('批貨成本', procurementCost);
+    if (procurementCost > 0) byName.set('批貨與自備成本', procurementCost);
     for (const e of listAccountingLedgerEntries()) {
       if (e.flowType !== 'expense') continue;
       if (e.dateYmd < startYmd || e.dateYmd > endYmd) continue;
@@ -311,10 +320,12 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       } else if (o.actorRole === 'franchisee' && o.status === '已完成') {
         const ymd = ymdFromIso(o.createdAt);
         if (ymd >= startYmd && ymd <= endYmd) {
-          franchiseRevenue += o.totalAmount;
+          const selfSupplied = o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
+          franchiseRevenue += Math.max(0, o.totalAmount - selfSupplied);
           let orderCost = 0;
           for (const line of o.lines) {
             const item = getSupplyItem(line.productId);
+            if (isFranchiseeSelfSuppliedItem(item)) continue;
             const unitCost = item?.pricePerPiece ?? 0;
             orderCost += unitCost * line.qty;
           }
@@ -355,24 +366,24 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
 
   const adminFranchiseProducts = useMemo(() => {
     if (!isAdmin) return [];
-    return aggregateProductRevenue(adminSummaryOrders, (o) => o.actorRole === 'franchisee');
+    return aggregateProductRevenue(
+      adminSummaryOrders,
+      (o) => o.actorRole === 'franchisee',
+      (_o, line) => {
+        const item = getSupplyItem(line.productId);
+        return !isFranchiseeSelfSuppliedItem(item);
+      },
+    );
   }, [adminSummaryOrders, isAdmin]);
-
-  const headerSubline =
-    isAdmin && adminFinance
-      ? `本月 ${adminFinance.ym.split('-')[0]} 年 ${Number(adminFinance.ym.split('-')[1])} 月 · 直營以盤點零售營收、加盟以已完成叫貨；並含流水帳即時資料 | 總管理處`
-      : `資料更新時間：${new Date().toLocaleString('zh-TW', { hour12: false })} | ${
-          userRole === 'franchisee' ? '加盟體系' : '直營體系'
-        }`;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <LayoutDashboard className="text-amber-500 shrink-0" size={28} />
             {isAdmin ? '總部營運概況' : '我的營運概況'}
           </h2>
-          <p className="text-zinc-500 mt-1">{headerSubline}</p>
         </div>
         <div className="flex gap-2">
           <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 hover:bg-zinc-700 transition-colors font-medium text-xs">
@@ -432,7 +443,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
 
             <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
               <div className="flex items-center gap-2 mb-2 text-zinc-500">
-                <Store size={18} className="text-indigo-400" />
+                <Store size={18} className="text-amber-400" />
                 <p className="text-sm">支出總計（本月）</p>
               </div>
               <div>
@@ -489,7 +500,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   {moneyTW(nonAdminSummary?.gross ?? 0)}
                 </h2>
                 <div className="text-xs mt-2 text-zinc-500">
-                  營收 - 批貨成本 {moneyTW(nonAdminSummary?.procurementCost ?? 0)}（毛利率 {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%）
+                  營收 - 批貨與自備成本 {moneyTW(nonAdminSummary?.procurementCost ?? 0)}（毛利率 {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%）
                 </div>
               </div>
             </div>
@@ -556,7 +567,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
             </div>
             <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4">
               <p className="text-xs text-zinc-500">加盟主批貨營收</p>
-              <p className="text-2xl mt-1 text-indigo-300 tabular-nums">{moneyTW(adminRangeSummary.franchiseRevenue)}</p>
+              <p className="text-2xl mt-1 text-amber-300 tabular-nums">{moneyTW(adminRangeSummary.franchiseRevenue)}</p>
               <p className={cn('text-xs mt-2', adminRangeSummary.franchiseGross >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
                 毛利 {moneyTW(adminRangeSummary.franchiseGross)}（{adminRangeSummary.franchiseGrossRate.toFixed(1)}%）
               </p>
@@ -668,7 +679,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                       {(showAllFranchise ? adminFranchiseProducts : adminFranchiseProducts.slice(0, RANK_DEFAULT_LIMIT)).map((r) => (
                         <div key={`fr-${r.id}`} className="flex justify-between text-xs">
                           <span className="truncate pr-2 text-zinc-300">{r.id}. {r.name}</span>
-                          <span className="text-indigo-200 tabular-nums">{moneyTW(r.revenue)} / {r.pct.toFixed(1)}%</span>
+                          <span className="text-amber-200 tabular-nums">{moneyTW(r.revenue)} / {r.pct.toFixed(1)}%</span>
                         </div>
                       ))}
                     </div>
@@ -789,7 +800,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                       ).map((row) => (
                         <div key={row.id} className="flex justify-between text-xs">
                           <span className="truncate pr-2 text-zinc-300">{row.id}. {row.name}</span>
-                          <span className="text-indigo-200 tabular-nums">
+                          <span className="text-amber-200 tabular-nums">
                             {moneyTW(row.amount)} / {row.pct.toFixed(1)}%
                           </span>
                         </div>
@@ -867,7 +878,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
                   {adminFinance.expenseBreakdown.map((row, idx) => (
                     <div key={row.name} className="flex justify-between text-xs">
                       <span className="truncate pr-2 text-zinc-300">{idx + 1}. {row.name}</span>
-                      <span className="text-indigo-200 tabular-nums">
+                      <span className="text-amber-200 tabular-nums">
                         {moneyTW(row.value)} / {row.pctOfExpense.toFixed(1)}%
                       </span>
                     </div>

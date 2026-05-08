@@ -16,6 +16,8 @@ export type ItemOverride = {
   /** 顯示用計價單位，例：兩、條、份 */
   pieceUnit?: string;
   category?: ItemCategory;
+  /** 加盟主自備：下單時不計入應付貨款，但仍可列入盤點營業額。 */
+  franchiseeSelfSuppliedForPayable?: boolean | null;
 };
 
 type StoreV2 = {

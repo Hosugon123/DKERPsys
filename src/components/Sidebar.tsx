@@ -146,7 +146,7 @@ export default function Sidebar({
         role="presentation"
         aria-hidden={!isOpen}
         className={cn(
-          'fixed inset-0 z-40 touch-none overscroll-none bg-black/50 lg:hidden',
+          'fixed inset-0 z-40 touch-none overscroll-none bg-black/50 md:hidden',
           isOpen ? 'block' : 'hidden',
         )}
         onClick={() => setIsOpen(false)}
@@ -154,13 +154,17 @@ export default function Sidebar({
       <aside
         id="app-sidebar-drawer"
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 max-w-[85vw] flex-col border-r border-zinc-800 bg-[#0f0f0f] py-6 transition-transform duration-200 ease-in-out max-lg:overscroll-y-contain max-lg:pl-[env(safe-area-inset-left)] lg:static lg:max-w-none lg:translate-x-0',
-          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 flex w-64 max-md:max-w-[85vw] flex-col border-r border-zinc-800 bg-[#0f0f0f] py-6 transition-transform duration-200 ease-in-out max-md:overscroll-y-contain max-md:pl-[env(safe-area-inset-left)] md:static md:shrink-0',
+          isOpen ? 'translate-x-0' : 'max-md:-translate-x-full',
         )}
       >
         <div className="flex items-center gap-3 px-4 mb-3">
-          <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center font-bold text-xl shadow-lg shadow-amber-900/20 text-white">
-            東
+          <div className="w-10 h-10 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 shadow-lg shadow-black/30">
+            <img
+              src="/brand-logo-v2.png"
+              alt="達客東山鴨頭 Logo"
+              className="h-full w-full object-cover"
+            />
           </div>
           <div>
             <h1 className="text-xl font-semibold tracking-wide">達客東山鴨頭</h1>

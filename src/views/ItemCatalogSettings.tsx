@@ -15,7 +15,15 @@ import { cn } from '../lib/utils';
 
 async function commitBaseFromForm(
   id: string,
-  p: { name: string; price: string; unit: string; tag: string; category: ItemCategory; retail: string }
+  p: {
+    name: string;
+    price: string;
+    unit: string;
+    tag: string;
+    category: ItemCategory;
+    franchiseeSelfSuppliedForPayable: boolean;
+    retail: string;
+  }
 ) {
   const b = getBaseSupplyItem(id);
   if (!b) return;
@@ -40,6 +48,9 @@ async function commitBaseFromForm(
   if (tagTrim !== bTag) {
     if (tagTrim === '') patch.tag = null;
     else patch.tag = tagTrim;
+  }
+  if (Boolean(st.overrides[id]?.franchiseeSelfSuppliedForPayable) !== p.franchiseeSelfSuppliedForPayable) {
+    patch.franchiseeSelfSuppliedForPayable = p.franchiseeSelfSuppliedForPayable;
   }
   if (Math.abs(retailN - defaultR) < 0.0001) {
     if (hadRetail) patch.retailPerPiece = null;
@@ -223,7 +234,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
             </tbody>
           </table>
         ) : (
-          <table className="w-full min-w-[900px] text-left text-sm">
+          <table className="w-full min-w-[1120px] text-left text-sm">
             <thead>
               <tr className="text-zinc-500 text-xs border-b border-zinc-800">
                 <th className="py-3 px-2 font-medium w-24">編號</th>
@@ -232,6 +243,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
                 <th className="py-3 px-2 font-medium w-24 text-right">零售／份</th>
                 <th className="py-3 px-2 font-medium w-20">單位</th>
                 <th className="py-3 px-2 font-medium w-32">分類</th>
+                <th className="py-3 px-2 font-medium w-24 text-center">加盟主自備</th>
                 <th className="py-3 px-2 font-medium min-w-[5rem]">標籤</th>
                 <th className="py-3 px-2 font-medium text-right w-28">操作</th>
               </tr>
@@ -333,6 +345,7 @@ function ItemRow({
     unit: string;
     tag: string;
     category: ItemCategory;
+    franchiseeSelfSuppliedForPayable: boolean;
     retail: string;
   }) => void;
   onUpdateCustom: (next: Partial<SupplyItem> & { retailPerPiece?: number | null }) => void;
@@ -353,6 +366,9 @@ function ItemRow({
   const [unit, setUnit] = useState(item.pieceUnit);
   const [tag, setTag] = useState(item.tag ?? '');
   const [category, setCategory] = useState<ItemCategory>(item.category);
+  const [franchiseeSelfSuppliedForPayable, setFranchiseeSelfSuppliedForPayable] = useState(
+    !!item.franchiseeSelfSuppliedForPayable
+  );
 
   useEffect(() => {
     setName(item.name);
@@ -367,7 +383,8 @@ function ItemRow({
     setUnit(item.pieceUnit);
     setTag(item.tag ?? '');
     setCategory(item.category);
-  }, [item.id, item.name, item.pricePerPiece, item.pieceUnit, item.tag, item.category, item.retailPerPiece]);
+    setFranchiseeSelfSuppliedForPayable(!!item.franchiseeSelfSuppliedForPayable);
+  }, [item.id, item.name, item.pricePerPiece, item.pieceUnit, item.tag, item.category, item.retailPerPiece, item.franchiseeSelfSuppliedForPayable]);
 
   const doCommit = () => {
     onOtherAction();
@@ -384,6 +401,7 @@ function ItemRow({
         pieceUnit: unit.trim() || '份',
         tag: tag.trim() || undefined,
         category,
+        franchiseeSelfSuppliedForPayable,
       };
       if (Math.abs(retailN - defaultR) < 0.0001) {
         if (item.retailPerPiece != null) patch.retailPerPiece = null;
@@ -392,7 +410,7 @@ function ItemRow({
       }
       onUpdateCustom(patch);
     } else {
-      onPatchBase({ name, price, unit, tag, category, retail });
+      onPatchBase({ name, price, unit, tag, category, franchiseeSelfSuppliedForPayable, retail });
     }
   };
 
@@ -472,6 +490,7 @@ function ItemRow({
                 unit,
                 tag,
                 category: c,
+                franchiseeSelfSuppliedForPayable,
                 retail,
               });
           }}
@@ -484,6 +503,31 @@ function ItemRow({
             </option>
           ))}
         </select>
+      </td>
+      <td className="py-2.5 px-2 align-top text-center">
+        <input
+          type="checkbox"
+          checked={franchiseeSelfSuppliedForPayable}
+          onChange={(e) => {
+            onOtherAction();
+            const checked = e.target.checked;
+            setFranchiseeSelfSuppliedForPayable(checked);
+            if (isCustom) onUpdateCustom({ franchiseeSelfSuppliedForPayable: checked });
+            else
+              onPatchBase({
+                name,
+                price,
+                unit,
+                tag,
+                category,
+                franchiseeSelfSuppliedForPayable: checked,
+                retail,
+              });
+          }}
+          onFocus={onOtherAction}
+          className="h-4 w-4 accent-amber-500"
+          title="勾選後：加盟主叫貨不計貨款，但盤點仍計營業額"
+        />
       </td>
       <td className="py-2.5 px-2 align-top">
         <input

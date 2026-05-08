@@ -25,6 +25,8 @@ export type SupplyItem = {
   status: '庫存充足' | '庫存緊張';
   tag?: string;
   category: ItemCategory;
+  /** 加盟主自備：不計入加盟主叫貨貨款，但盤點可列營業額。 */
+  franchiseeSelfSuppliedForPayable?: boolean;
 };
 
 export const CATEGORY_CHIPS: { id: 'all' | ItemCategory; label: string }[] = [
@@ -141,6 +143,10 @@ function mergeWithOverrides(base: SupplyItem, o?: ItemOverride | null): SupplyIt
         ? String(o.pieceUnit).trim()
         : base.pieceUnit,
     category: normalizeItemCategory(o.category as string | undefined, base.category),
+    franchiseeSelfSuppliedForPayable:
+      o.franchiseeSelfSuppliedForPayable != null
+        ? !!o.franchiseeSelfSuppliedForPayable
+        : base.franchiseeSelfSuppliedForPayable,
   };
 }
 
@@ -288,4 +294,9 @@ export function isConsumableItem(item: SupplyItem | undefined): boolean {
   if (isCustomItemId(item.id)) return false;
   const base = getBaseSupplyItem(item.id);
   return base != null && base.category === 'consumable';
+}
+
+/** 加盟主自備：叫貨貨款排除（不影響盤點營業額計算）。 */
+export function isFranchiseeSelfSuppliedItem(item: SupplyItem | undefined): boolean {
+  return !!item?.franchiseeSelfSuppliedForPayable;
 }

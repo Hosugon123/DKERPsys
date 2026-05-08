@@ -48,6 +48,7 @@ function mergeOrdersForAdminFinance(): OrderHistoryEntry[] {
     updatedAt: m.updatedAt ?? m.createdAt,
     source: m.source,
     totalAmount: m.totalAmount,
+    payableAmount: m.payableAmount ?? m.totalAmount,
     itemCount: m.itemCount,
     lines: m.lines,
     actorRole: 'admin',
@@ -125,7 +126,9 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
 
   for (const o of merged) {
     if (o.actorRole === 'franchisee' && o.status === '已完成' && orderCreatedInYm(o.createdAt, ymKey)) {
-      franchiseeOrderTotal += o.totalAmount;
+      const selfSupplied =
+        o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
+      franchiseeOrderTotal += Math.max(0, o.totalAmount - selfSupplied);
     }
     if (
       (o.actorRole === 'admin' || o.actorRole === 'employee') &&

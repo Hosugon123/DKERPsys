@@ -1,4 +1,4 @@
-import { Download } from 'lucide-react';
+import { Download, Boxes } from 'lucide-react';
 import CostStructureTable from '../components/CostStructureTable';
 import { dataBundle } from '../services/apiService';
 
@@ -25,7 +25,10 @@ export default function Products() {
     <div className="min-w-0 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">產品與成本庫存</h2>
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Boxes className="text-amber-500 shrink-0" size={28} />
+            產品與成本庫存
+          </h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button

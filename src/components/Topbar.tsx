@@ -173,7 +173,7 @@ export default function Topbar({
               aria-label="開啟選單"
               aria-expanded={isMobileMenuOpen}
               aria-controls="app-sidebar-drawer"
-              className="-ml-2 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 lg:hidden"
+              className="-ml-2 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 md:hidden"
             >
               <Menu size={24} />
             </button>

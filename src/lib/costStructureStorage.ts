@@ -63,6 +63,16 @@ type StoreV1 = {
   storeUpdatedAt?: string;
 };
 
+type PresetCostItem = {
+  name: string;
+  unit: string;
+  category: string;
+  cost?: string;
+  wholesale?: string;
+  retail?: string;
+  shrinkage?: string;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -98,13 +108,178 @@ function defaultColumns(): CostColumn[] {
   }));
 }
 
+const PRESET_COST_ITEMS: PresetCostItem[] = [
+  { name: '黑輪', unit: '片', category: '食材', cost: '2.77', wholesale: '3.5', retail: '8.3' },
+  { name: '米血', unit: '片', category: '食材', cost: '3.5', wholesale: '6.0', retail: '15' },
+  { name: '豆皮(未滷)', unit: '斤', category: '食材', cost: '110', shrinkage: '88.54' },
+  { name: '豆皮(成品)', unit: '斤', category: '食材', cost: '58.35', wholesale: '100', retail: '240', shrinkage: '88.54' },
+  { name: '雞皮(未滷)', unit: '斤', category: '食材', cost: '32', shrinkage: '-33.30' },
+  { name: '雞皮(成品)', unit: '斤', category: '食材', cost: '48', wholesale: '80', retail: '240', shrinkage: '-33.30' },
+  { name: '樓梯(未滷)', unit: '斤', category: '食材', cost: '120', shrinkage: '48.00' },
+  { name: '樓梯(成品)', unit: '斤', category: '食材', cost: '81.01', wholesale: '130', retail: '320', shrinkage: '48.00' },
+  { name: '海帶', unit: '片', category: '食材', cost: '1.5', wholesale: '5.5', retail: '10' },
+  { name: '鴨脆腸', unit: '條', category: '食材', wholesale: '3.0', retail: '8.3' },
+  { name: '鴨皮', unit: '片', category: '食材', cost: '2', wholesale: '5.0', retail: '15' },
+  { name: '大腸(未滷)', unit: '斤', category: '食材', cost: '95', shrinkage: '-38.38' },
+  { name: '大腸(成品)', unit: '斤', category: '食材', cost: '153.5', wholesale: '220', retail: '560', shrinkage: '-38.38' },
+  { name: '鳥蛋', unit: '顆', category: '食材', cost: '1.3125', wholesale: '2.2', retail: '5' },
+  { name: '腳輪', unit: '斤', category: '食材', wholesale: '150', retail: '315' },
+  { name: '鴨胗', unit: '顆', category: '食材', wholesale: '15.0', retail: '25' },
+  { name: '豬頭皮', unit: '斤', category: '食材', cost: '74.6', wholesale: '128.0', retail: '240' },
+  { name: '豬耳朵', unit: '斤', category: '食材', cost: '135.7', wholesale: '160.0', retail: '320' },
+  { name: '屁股', unit: '顆', category: '食材', wholesale: '15.0', retail: '30' },
+  { name: '豆包', unit: '片', category: '食材', wholesale: '9.0', retail: '20' },
+  { name: '鴨肉丸', unit: '顆', category: '食材', wholesale: '15.0', retail: '30' },
+  { name: '鴨心', unit: '顆', category: '食材', wholesale: '17.0', retail: '30' },
+  { name: '鴨脖子(箱)', unit: '根', category: '食材', cost: '6.11', wholesale: '15.0', retail: '35' },
+  { name: '鴨脖子', unit: '根', category: '食材', cost: '4.67', wholesale: '15.0', retail: '35' },
+  { name: '鴨頭', unit: '支', category: '食材', cost: '10', wholesale: '22.0', retail: '55' },
+  { name: '鴨頭殼', unit: '顆', category: '食材', cost: '3.33', wholesale: '9.0', retail: '25' },
+  { name: '豆干', unit: '片', category: '食材', cost: '9', wholesale: '12.0', retail: '25' },
+  { name: '鴨翅', unit: '支', category: '食材', cost: '9', wholesale: '15.0', retail: '27' },
+  { name: '鴨舌', unit: '根', category: '食材', cost: '3.5', wholesale: '8.0', retail: '12' },
+  { name: '百頁', unit: '條', category: '食材', cost: '6.875', wholesale: '20.0', retail: '20' },
+  { name: '熱狗', unit: '條', category: '食材', cost: '2.4', wholesale: '2.4', retail: '5' },
+  { name: '芋粿', unit: '條', category: '食材', cost: '5.3', wholesale: '5.3', retail: '15' },
+  { name: '四季豆', unit: '把', category: '食材', retail: '35' },
+  { name: '玉米筍', unit: '盒', category: '食材', cost: '24', wholesale: '24.0', retail: '40' },
+  { name: '節瓜', unit: '兩', category: '食材', retail: '10' },
+  { name: '辣粉(重)', unit: '包', category: '消耗品', cost: '100' },
+  { name: '辣粉(翠)', unit: '包', category: '消耗品', cost: '700' },
+  { name: '胡椒(大)', unit: '包', category: '消耗品', cost: '640' },
+  { name: '胡椒(小)', unit: '包', category: '消耗品', cost: '160' },
+  { name: '竹籤', unit: '包', category: '消耗品', cost: '45' },
+  { name: '紙袋(大)', unit: '綑', category: '消耗品', cost: '40' },
+  { name: '紙袋(中)', unit: '綑', category: '消耗品', cost: '40' },
+  { name: '紙袋(小)', unit: '綑', category: '消耗品', cost: '40' },
+  { name: '四兩袋', unit: '包', category: '消耗品' },
+  { name: '半斤袋', unit: '包', category: '消耗品' },
+  { name: '三斤袋', unit: '包', category: '消耗品' },
+  { name: '一斤袋', unit: '包', category: '消耗品' },
+  { name: '垃圾袋', unit: '個', category: '消耗品' },
+  { name: '醬油', unit: '罐', category: '調味料', cost: '48.3' },
+  { name: '糖', unit: '斤', category: '調味料', cost: '15' },
+  { name: '味精', unit: '盒', category: '調味料' },
+  { name: '房租', unit: '月', category: '固定支出', cost: '14000' },
+  { name: '水費', unit: '月', category: '固定支出' },
+  { name: '電費', unit: '月', category: '固定支出' },
+  { name: '加油費', unit: '月', category: '固定支出' },
+  { name: '稅金', unit: '月', category: '固定支出' },
+  { name: '驗車', unit: '月', category: '固定支出' },
+  { name: '桂皮', unit: '斤', category: '香料' },
+  { name: '八角', unit: '斤', category: '香料' },
+  { name: '甘草', unit: '斤', category: '香料' },
+  { name: '統慶薪水', unit: '月', category: '人事' },
+  { name: '棋聖薪水', unit: '月', category: '人事' },
+  { name: '媽媽薪水', unit: '月', category: '人事' },
+  { name: '純宜薪水', unit: '月', category: '人事' },
+  { name: '小鴨便當', unit: '次', category: '人事' },
+  { name: '小鴨鴨薪', unit: '次', category: '人事' },
+  { name: '飲料', unit: '月', category: '雜支' },
+  { name: '礦泉水', unit: '月', category: '雜支' },
+];
+
+function toNum(raw?: string): number | null {
+  if (!raw) return null;
+  const n = parseFloat(String(raw).replace(/[^\d.\-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function setIfValue(values: Record<string, string>, colId: string | undefined, raw?: string) {
+  if (!colId || raw == null || raw.trim() === '') return;
+  values[colId] = raw;
+}
+
+function applyPresetRows(store: StoreV1): boolean {
+  if (store.columns.length === 0) return false;
+  const cols = [...store.columns].sort((a, b) => a.order - b.order);
+  const findColId = (keyword: string) =>
+    cols.find((c) => c.label.replace(/\s/g, '').includes(keyword))?.id;
+
+  const costColId = findColId('成本');
+  const wholesaleColId = findColId('批發價');
+  const retailColId = findColId('零售價');
+  const shrinkColId = findColId('漲縮');
+  const wholesaleRateColId = findColId('批發毛利率');
+  const wholesaleGrossColId = findColId('批發毛利');
+  const retailRateColId = findColId('零售毛利率');
+  const retailGrossColId = findColId('零售毛利');
+
+  let changed = false;
+  const now = nowIso();
+  const byName = new Map(store.items.map((it) => [it.name.trim(), it]));
+  let maxOrder = store.items.reduce((m, it) => Math.max(m, it.order), -1);
+
+  for (const row of PRESET_COST_ITEMS) {
+    const existing = byName.get(row.name);
+    const values = existing ? { ...existing.values } : {};
+    setIfValue(values, costColId, row.cost);
+    setIfValue(values, wholesaleColId, row.wholesale);
+    setIfValue(values, retailColId, row.retail);
+    setIfValue(values, shrinkColId, row.shrinkage);
+
+    const cost = toNum(row.cost);
+    const wholesale = toNum(row.wholesale);
+    const retail = toNum(row.retail);
+    if (cost != null && wholesale != null && wholesale > 0) {
+      setIfValue(values, wholesaleGrossColId, (wholesale - cost).toFixed(2));
+      setIfValue(values, wholesaleRateColId, (((wholesale - cost) / wholesale) * 100).toFixed(2));
+    }
+    if (cost != null && retail != null && retail > 0) {
+      setIfValue(values, retailGrossColId, (retail - cost).toFixed(2));
+      setIfValue(values, retailRateColId, (((retail - cost) / retail) * 100).toFixed(2));
+    }
+
+    if (existing) {
+      const nextUnit = row.unit || existing.unit;
+      const nextCategory = row.category || existing.category;
+      const sameValues = JSON.stringify(existing.values) === JSON.stringify(values);
+      const sameUnit = existing.unit === nextUnit;
+      const sameCategory = (existing.category ?? '') === (nextCategory ?? '');
+      if (sameValues && sameUnit && sameCategory) continue;
+      const next: CostItem = {
+        ...existing,
+        unit: nextUnit,
+        category: nextCategory,
+        values,
+        updatedAt: now,
+      };
+      const idx = store.items.findIndex((it) => it.id === existing.id);
+      if (idx >= 0) {
+        store.items[idx] = next;
+        changed = true;
+      }
+      continue;
+    }
+
+    maxOrder += 1;
+    store.items.push({
+      id: newId('itm'),
+      name: row.name,
+      unit: row.unit,
+      category: row.category,
+      note: undefined,
+      values,
+      hasShrinkage: false,
+      order: maxOrder,
+      createdAt: now,
+      updatedAt: now,
+    });
+    changed = true;
+  }
+
+  return changed;
+}
+
 function emptyStore(): StoreV1 {
-  return {
+  const s: StoreV1 = {
     version: 1,
     columns: defaultColumns(),
     items: [],
     storeUpdatedAt: nowIso(),
   };
+  applyPresetRows(s);
+  return s;
 }
 
 function notify(): void {
@@ -150,7 +325,11 @@ function loadStore(): StoreV1 {
         createdAt: it.createdAt || nowIso(),
         updatedAt: it.updatedAt || it.createdAt || nowIso(),
       }));
-    return { version: 1, columns, items, storeUpdatedAt: parsed.storeUpdatedAt };
+    const loaded: StoreV1 = { version: 1, columns, items, storeUpdatedAt: parsed.storeUpdatedAt };
+    if (applyPresetRows(loaded)) {
+      saveStore(loaded);
+    }
+    return loaded;
   } catch {
     return emptyStore();
   }

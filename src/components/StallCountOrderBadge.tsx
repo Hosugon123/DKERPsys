@@ -3,7 +3,7 @@ import { isOrderStallCountDone } from '../lib/salesRecordStorage';
 import { cn } from '../lib/utils';
 
 const badgeClass =
-  'px-2 py-0.5 rounded text-[0.625rem] font-medium border bg-sky-600/10 text-sky-300 border-sky-500/30';
+  'px-2 py-0.5 rounded text-[0.625rem] font-medium border bg-amber-600/10 text-amber-300 border-amber-500/30';
 
 type Props = {
   /** 訂單建立時間 ISO 字串 */

@@ -119,6 +119,8 @@ export const orders = {
   async appendProcurementOrderEntry(params: {
     lines: orderHistory.OrderHistoryLine[];
     totalAmount: number;
+    payableAmount?: number;
+    selfSuppliedCostAmount?: number;
     actorRole: orderHistory.OrderActorRole;
   }): Promise<void> {
     return withRemoteStorageWrite(() => {

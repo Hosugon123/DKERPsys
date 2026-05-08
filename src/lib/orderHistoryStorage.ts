@@ -2,6 +2,7 @@ import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './sale
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
 import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
+import { getSupplyItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
 
 export type OrderActorRole = 'admin' | 'franchisee' | 'employee';
 
@@ -22,6 +23,10 @@ export type OrderHistoryEntry = {
   updatedAt: string;
   source: 'procurement';
   totalAmount: number;
+/** 應付貨款（展示用總額）；舊單缺值時以 totalAmount 相容。 */
+  payableAmount?: number;
+  /** 加盟主自備成本（不計入貨款，但計入成本/毛利）。 */
+  selfSuppliedCostAmount?: number;
   itemCount: number;
   lines: OrderHistoryLine[];
   actorRole: OrderActorRole;
@@ -49,6 +54,10 @@ export type FranchiseManagementOrder = {
   updatedAt: string;
   source: 'procurement';
   totalAmount: number;
+  /** 應付貨款（管理端預設同 totalAmount） */
+  payableAmount?: number;
+  /** 管理端預設為 0。 */
+  selfSuppliedCostAmount?: number;
   itemCount: number;
   lines: OrderHistoryLine[];
   storeLabel: string;
@@ -84,6 +93,10 @@ function normalizeHistoryEntry(
     ...e,
     status: e.status ?? '待出貨',
     updatedAt: e.updatedAt ?? createdAt,
+    payableAmount: e.payableAmount ?? e.totalAmount,
+    selfSuppliedCostAmount:
+      e.selfSuppliedCostAmount ??
+      Math.max(0, e.totalAmount - (e.payableAmount ?? e.totalAmount)),
   };
 }
 
@@ -125,6 +138,8 @@ function normalizeFranchiseManagementOrder(
   return {
     ...m,
     updatedAt: m.updatedAt ?? m.createdAt,
+    payableAmount: m.payableAmount ?? m.totalAmount,
+    selfSuppliedCostAmount: m.selfSuppliedCostAmount ?? 0,
   };
 }
 
@@ -154,6 +169,8 @@ function franchiseMgmtToHistoryEntry(m: FranchiseManagementOrder): OrderHistoryE
     updatedAt: m.updatedAt ?? m.createdAt,
     source: m.source,
     totalAmount: m.totalAmount,
+    payableAmount: m.payableAmount ?? m.totalAmount,
+    selfSuppliedCostAmount: m.selfSuppliedCostAmount ?? 0,
     itemCount: m.itemCount,
     lines: m.lines,
     storeLabel: m.storeLabel,
@@ -235,8 +252,10 @@ export function deleteOrderByIdFromAnyStore(orderId: string): boolean {
 function appendFranchiseManagementOrderInternal(params: {
   lines: OrderHistoryLine[];
   totalAmount: number;
+  payableAmount?: number;
+  selfSuppliedCostAmount?: number;
 }): void {
-  const { lines, totalAmount } = params;
+  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount } = params;
   const itemCount = roundProcurementQty(lines.reduce((s, l) => s + l.qty, 0));
   const now = new Date().toISOString();
   const entry: FranchiseManagementOrder = {
@@ -245,6 +264,8 @@ function appendFranchiseManagementOrderInternal(params: {
     updatedAt: now,
     source: 'procurement',
     totalAmount,
+    payableAmount: payableAmount ?? totalAmount,
+    selfSuppliedCostAmount: selfSuppliedCostAmount ?? 0,
     itemCount,
     lines,
     storeLabel: '直營店',
@@ -290,6 +311,17 @@ function roundMoney(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+function calculateSelfSuppliedCostAmount(lines: OrderHistoryLine[], actorRole: OrderActorRole): number {
+  if (actorRole !== 'franchisee') return 0;
+  return roundMoney(
+    lines.reduce((s, l) => {
+      const item = getSupplyItem(l.productId, 'franchisee');
+      if (!isFranchiseeSelfSuppliedItem(item)) return s;
+      return s + l.unitPrice * l.qty;
+    }, 0)
+  );
+}
+
 /**
  * 待出貨時調整實出：重算小計與訂單總額。每列 0～99999（可小數，與叫貨一致）；0 則刪除該列。
  */
@@ -320,7 +352,15 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
     if (mgmt[mi].status !== '待出貨') return { ok: false, reason: 'not_pending' };
     const m = [...mgmt];
     const now = new Date().toISOString();
-    m[mi] = { ...m[mi], lines, itemCount, totalAmount, updatedAt: now };
+    m[mi] = {
+      ...m[mi],
+      lines,
+      itemCount,
+      totalAmount,
+      payableAmount: totalAmount,
+      selfSuppliedCostAmount: 0,
+      updatedAt: now,
+    };
     saveFranchiseManagementOrders(m);
     return { ok: true };
   }
@@ -331,7 +371,9 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
     if (hist[hi].status !== '待出貨') return { ok: false, reason: 'not_pending' };
     const h = [...hist];
     const now = new Date().toISOString();
-    h[hi] = { ...h[hi], lines, itemCount, totalAmount, updatedAt: now };
+    const payableAmount = totalAmount;
+    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, h[hi].actorRole);
+    h[hi] = { ...h[hi], lines, itemCount, totalAmount, payableAmount, selfSuppliedCostAmount, updatedAt: now };
     saveOrderHistory(h);
     return { ok: true };
   }
@@ -360,7 +402,15 @@ export function updateEditableOrderLinesById(
     if (mgmt[mi].status === '已取消') return { ok: false, reason: 'canceled' };
     const m = [...mgmt];
     const now = new Date().toISOString();
-    m[mi] = { ...m[mi], lines, itemCount, totalAmount, updatedAt: now };
+    m[mi] = {
+      ...m[mi],
+      lines,
+      itemCount,
+      totalAmount,
+      payableAmount: totalAmount,
+      selfSuppliedCostAmount: 0,
+      updatedAt: now,
+    };
     saveFranchiseManagementOrders(m);
     return { ok: true };
   }
@@ -371,7 +421,9 @@ export function updateEditableOrderLinesById(
     if (hist[hi].status === '已取消') return { ok: false, reason: 'canceled' };
     const h = [...hist];
     const now = new Date().toISOString();
-    h[hi] = { ...h[hi], lines, itemCount, totalAmount, updatedAt: now };
+    const payableAmount = totalAmount;
+    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, h[hi].actorRole);
+    h[hi] = { ...h[hi], lines, itemCount, totalAmount, payableAmount, selfSuppliedCostAmount, updatedAt: now };
     saveOrderHistory(h);
     return { ok: true };
   }
@@ -386,12 +438,19 @@ export function updateEditableOrderLinesById(
 export function appendProcurementOrderEntry(params: {
   lines: OrderHistoryLine[];
   totalAmount: number;
+  payableAmount?: number;
+  selfSuppliedCostAmount?: number;
   actorRole: OrderActorRole;
 }): void {
-  const { lines, totalAmount, actorRole } = params;
+  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount, actorRole } = params;
   const ctx = getDataScopeContext();
   if (actorRole === 'admin') {
-    appendFranchiseManagementOrderInternal({ lines, totalAmount });
+    appendFranchiseManagementOrderInternal({
+      lines,
+      totalAmount,
+      payableAmount: payableAmount ?? totalAmount,
+      selfSuppliedCostAmount: selfSuppliedCostAmount ?? 0,
+    });
     return;
   }
 
@@ -405,6 +464,8 @@ export function appendProcurementOrderEntry(params: {
     updatedAt: now,
     source: 'procurement',
     totalAmount,
+    payableAmount: payableAmount ?? totalAmount,
+    selfSuppliedCostAmount: selfSuppliedCostAmount ?? calculateSelfSuppliedCostAmount(lines, actorRole),
     itemCount,
     lines,
     actorRole,

@@ -445,7 +445,10 @@ export default function Accounting({ userRole: _userRole }: { userRole: UserRole
           <Wallet size={22} className="shrink-0" />
           <span className="text-sm font-medium tracking-wide">非訂單類</span>
         </div>
-        <h2 className="text-3xl font-bold tracking-tight">流水帳</h2>
+        <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+          <Wallet className="text-amber-500 shrink-0" size={28} />
+          流水帳
+        </h2>
       </div>
 
       <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-5 md:p-6">

@@ -17,6 +17,7 @@ import { formatSlashDateTimeFromIso, formatSlashDateTimeWithWeekdayFromIso, orde
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
+import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
@@ -33,10 +34,6 @@ function orderSalesOutletChannel(o: OrderHistoryEntry): 'franchise' | 'direct' {
 
 type OutletFilter = 'all' | 'direct' | 'franchise';
 const STALL_MAX_Q = 99_999;
-
-function displayStoreLabel(label: string) {
-  return label === '總部／示範門市' || label === '總部 / 示範門市' ? '直營店' : label;
-}
 
 function parseStallQty(s: string) {
   return Math.max(0, Math.min(STALL_MAX_Q, Math.floor(parseInt(s.replace(/[^\d]/g, ''), 10) || 0)));
@@ -131,7 +128,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     if (!q) return byOutlet;
     return byOutlet.filter((o) => {
       if (o.id.toLowerCase().includes(q)) return true;
-      if (displayStoreLabel(o.storeLabel).toLowerCase().includes(q)) return true;
+      if (resolveOrderStoreLabel(o).toLowerCase().includes(q)) return true;
       if (o.stallCountBasisYmd?.toLowerCase().includes(q)) return true;
       if (
         orderDateQueryMatches(o.createdAt, {
@@ -245,16 +242,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     <div className="space-y-6 pb-24 max-w-[1400px] mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-amber-500/90 mb-1">
-            <Receipt size={22} className="shrink-0" />
-            <span className="text-sm font-medium tracking-wide">已完成盤點訂單</span>
-          </div>
-          <h2 className="text-3xl font-bold tracking-tight">銷售紀錄</h2>
-          {isSuperAdmin && (
-            <p className="mt-1.5 text-sm text-zinc-500 max-w-2xl">
-              可檢視全店盤點之銷售資料（含總部直營、直營門市與加盟送單）。下方可篩選僅看直營或加盟。
-            </p>
-          )}
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Receipt className="text-amber-500 shrink-0" size={28} />
+            銷售紀錄
+          </h2>
         </div>
         <div className="relative w-full sm:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
@@ -321,7 +312,12 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
       <div className="space-y-3">
         {filtered.map((order) => {
           const listStallRetail = getStallDisplaySoldAtRetail(order, supplyRetailView);
-          const listAmount = listStallRetail != null ? listStallRetail : order.totalAmount;
+          const listAmount =
+            listStallRetail != null
+              ? listStallRetail
+              : order.actorRole === 'franchisee'
+                ? (order.payableAmount ?? order.totalAmount)
+                : order.totalAmount;
           const listAmountLabel = listStallRetail != null ? '盤點金額' : '叫貨金額';
           const open = expandedId === order.id;
           const snapshot = resolveRecordSnapshot(order);
@@ -379,13 +375,14 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs text-zinc-500 font-mono truncate">{order.id}</p>
-                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                      <p className="text-base font-semibold text-[#f5f2ed] break-words leading-tight">{displayStoreLabel(order.storeLabel)}</p>
+                    <div className="mt-0.5">
+                      <p className="text-base font-semibold text-[#f5f2ed] break-words leading-tight">{resolveOrderStoreLabel(order)}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span
                         className={cn(
                           'px-2 py-0.5 rounded text-[0.625rem] font-medium border',
                           order.status === '待出貨'
-                            ? 'bg-sky-600/10 text-sky-400 border-sky-600/25'
+                            ? 'bg-amber-600/10 text-amber-400 border-amber-600/25'
                             : 'bg-emerald-600/10 text-emerald-400 border-emerald-600/25'
                         )}
                       >
@@ -395,18 +392,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         createdAtIso={order.createdAt}
                         stallCountCompletedAt={order.stallCountCompletedAt}
                       />
-                      {isSuperAdmin && (
-                        <span
-                          className={cn(
-                            'px-2 py-0.5 rounded text-[0.625rem] font-medium border',
-                            orderSalesOutletChannel(order) === 'franchise'
-                              ? 'bg-violet-600/10 text-violet-300 border-violet-600/30'
-                              : 'bg-sky-600/10 text-sky-300 border-sky-600/25'
-                          )}
-                        >
-                          {orderSalesOutletChannel(order) === 'franchise' ? '加盟' : '直營'}
-                        </span>
-                      )}
+                      </div>
                     </div>
                     <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}</p>
                     {order.stallCountBasisYmd && order.stallCountCompletedAt && (
@@ -471,7 +457,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                           )}
                         </div>
                       </div>
-                      <div className="rounded-2xl border border-sky-900/50 bg-sky-950/15 p-4 grid sm:grid-cols-3 gap-4 text-sm">
+                      <div className="rounded-2xl border border-amber-900/50 bg-amber-950/15 p-4 grid sm:grid-cols-3 gap-4 text-sm">
                         <div>
                           <p className="text-xs text-zinc-500">預估金額</p>
                           <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(displayRetailEstTotal)}</p>
@@ -501,9 +487,9 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         </div>
                       </div>
                       {snapshot && !isStallEditThis && (
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-950/25 px-3 py-2.5 text-sm text-sky-100/95">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-950/25 px-3 py-2.5 text-sm text-amber-100/95">
                           <div className="flex items-start gap-2 min-w-0">
-                            <ClipboardList className="shrink-0 mt-0.5 text-sky-400" size={18} aria-hidden />
+                            <ClipboardList className="shrink-0 mt-0.5 text-amber-400" size={18} aria-hidden />
                             <span className="leading-snug">
                               盤點數字有誤或收攤後仍有銷售？可在此修改帶出／剩餘與登錄實收（與訂單管理「調整貨量」相同：先進入編輯再儲存）。
                             </span>
@@ -511,7 +497,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                           <button
                             type="button"
                             onClick={() => startStallEdit(order)}
-                            className="shrink-0 self-start sm:self-center py-2 px-3 rounded-lg bg-sky-600/90 text-white text-sm font-medium hover:bg-sky-500"
+                            className="shrink-0 self-start sm:self-center py-2 px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500"
                           >
                             調整盤點
                           </button>

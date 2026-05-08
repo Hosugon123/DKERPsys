@@ -29,6 +29,7 @@ import {
   estimatedRetailPerPackage,
   CATEGORY_CHIPS,
   getSupplyItem,
+  isFranchiseeSelfSuppliedItem,
   isConsumableItem,
   userRoleToSupplyRetailView,
   type ItemCategory,
@@ -46,6 +47,7 @@ import {
 } from '../lib/stallInventoryStorage';
 import { computeLine, aggregateStallKpis, roundProcurementQty, PROCUREMENT_QTY_MAX } from '../lib/stallMath';
 import { formatSlashDateTimeFromIso } from '../lib/dateDisplay';
+import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import ItemCatalogSettings from './ItemCatalogSettings';
 
 function normalizeQ(s: string) {
@@ -194,6 +196,16 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     return rows.sort((a, b) => b.c.sold - a.c.sold);
   }, [stallTick, catalogItems, stallBasisOrderId, supplyRetailView]);
 
+  const carryoverRemainByItem = useMemo(() => {
+    const snap = loadDayForProcurementFromOrder(stallBasisOrderId);
+    const m: Record<string, number> = {};
+    for (const item of catalogItems) {
+      const line = snap.lines[item.id] ?? { out: '', remain: '' };
+      m[item.id] = Math.max(0, roundProcurementQty(Number(line.remain) || 0));
+    }
+    return m;
+  }, [stallBasisOrderId, catalogItems, stallTick]);
+
   const visibleItems = useMemo(() => {
     const q = normalizeQ(searchQuery);
     return catalogItems.filter((item) => {
@@ -238,15 +250,22 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const totalCount = roundProcurementQty(
     (Object.values(cart) as number[]).reduce((a, b) => a + b, 0)
   );
-  const totalCountDisplay = totalCount.toLocaleString('zh-TW', {
-    maximumFractionDigits: 3,
-    minimumFractionDigits: 0,
-  });
   const totalPrice = Object.entries(cart).reduce((total, [id, n]) => {
     const item = getSupplyItem(id, supplyRetailView);
     const q = Number(n);
     return total + (item && q > 0 ? pricePerPackage(item) * q : 0);
   }, 0);
+  const totalPayablePrice = totalPrice;
+  const totalSelfSuppliedCost = Object.entries(cart).reduce((total, [id, n]) => {
+    const item = getSupplyItem(id, supplyRetailView);
+    const q = Number(n);
+    if (!item || q <= 0) return total;
+    if (userRole === 'franchisee' && isFranchiseeSelfSuppliedItem(item)) return total + pricePerPackage(item) * q;
+    return total;
+  }, 0);
+  const payableTitle = userRole === 'franchisee' ? '貨款總額' : '批貨成本';
+  const selfSuppliedDeduction = Math.round(totalSelfSuppliedCost * 100) / 100;
+  const franchiseeNetPayable = Math.max(0, Math.round((totalPrice - selfSuppliedDeduction) * 100) / 100);
   const totalRetailEstimate = Object.entries(cart).reduce((total, [id, n]) => {
     const item = getSupplyItem(id, supplyRetailView);
     const q = Number(n);
@@ -282,6 +301,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       return;
     }
     const amount = lines.reduce((s, l) => s + l.unitPrice * l.qty, 0);
+    const payableAmount = amount;
+    const selfSuppliedCostAmount = lines.reduce((s, l) => {
+      const item = getSupplyItem(l.productId, supplyRetailView);
+      if (userRole === 'franchisee' && isFranchiseeSelfSuppliedItem(item)) return s + l.unitPrice * l.qty;
+      return s;
+    }, 0);
     setSubmitModalOpen(false);
 
     const toDeduct: Record<string, number> = {};
@@ -292,13 +317,19 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     }
 
     void (async () => {
-      await ordersApi.appendProcurementOrderEntry({ lines, totalAmount: amount, actorRole: userRole });
+      await ordersApi.appendProcurementOrderEntry({
+        lines,
+        totalAmount: amount,
+        payableAmount,
+        selfSuppliedCostAmount,
+        actorRole: userRole,
+      });
       setOrderSuccess(true);
       setCart({});
       setQtyInputDraft({});
       setTimeout(() => setOrderSuccess(false), 3000);
     })();
-  }, [buildLinesFromCart, stallBasisOrderId, userRole]);
+  }, [buildLinesFromCart, stallBasisOrderId, supplyRetailView, userRole]);
 
   const applyFavoriteReplace = (f: FavoriteOrder) => {
     setFavoriteError('');
@@ -350,7 +381,10 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     return (
       <div className="space-y-3 pb-36 max-w-3xl mx-auto lg:max-w-none">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">批貨與下單</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
+            <ShoppingBasket className="text-amber-500 shrink-0" size={26} />
+            批貨與下單
+          </h2>
           <div className="flex rounded-xl border border-zinc-700 bg-zinc-900/80 p-1 w-full sm:w-auto">
             <button
               type="button"
@@ -379,7 +413,10 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     return (
       <div className="space-y-3 pb-36 max-w-3xl mx-auto lg:max-w-none">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">批貨與下單</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
+            <ShoppingBasket className="text-amber-500 shrink-0" size={26} />
+            批貨與下單
+          </h2>
           <div className="flex rounded-xl border border-zinc-700 bg-zinc-900/80 p-1 w-full sm:w-auto">
             <button
               type="button"
@@ -405,7 +442,10 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     <div className="space-y-3 pb-36 max-w-3xl mx-auto lg:max-w-none">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">批貨與下單</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
+            <ShoppingBasket className="text-amber-500 shrink-0" size={26} />
+            批貨與下單
+          </h2>
           {!showProcurementCost && (
             <p className="text-sm text-zinc-500 mt-1.5 max-w-xl leading-relaxed">
               品項與合計僅顯示<strong className="text-zinc-400">零售預估</strong>（依單價推估售完面額），不顯示進貨成本；實際售價以門市為準。
@@ -461,12 +501,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         ) : null}
       </div>
 
-      <div className="rounded-2xl border border-violet-900/50 bg-violet-950/20 px-4 py-3 space-y-2">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 space-y-2">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <CalendarDays className="shrink-0 text-violet-400" size={20} />
+            <CalendarDays className="shrink-0 text-amber-400" size={20} />
             <div className="min-w-0">
-              <p className="text-sm font-medium text-violet-200/95">欲扣除餘貨的訂單</p>
+              <p className="text-sm font-medium text-zinc-200">欲扣除餘貨的訂單</p>
             </div>
           </div>
           <div className="w-full sm:max-w-md shrink-0 flex flex-col sm:flex-row sm:items-stretch gap-2">
@@ -483,7 +523,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   setPreferredProcurementBasisOrderId(v);
                 }}
                 disabled={basisOrders.length === 0}
-                className="w-full min-h-11 rounded-xl border-2 border-violet-800/60 bg-zinc-900/90 px-3 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full min-h-11 rounded-xl border-2 border-zinc-700 bg-zinc-900/90 px-3 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {basisOrders.length === 0 ? (
                   <option value="">尚無可選單</option>
@@ -492,7 +532,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     <option value="">（不指定，下單不扣盤點剩餘）</option>
                     {basisOrders.map((o) => (
                       <option key={o.id} value={o.id}>
-                        建單 {formatSlashDateTimeFromIso(o.createdAt) ?? o.createdAt} · {o.storeLabel} · {o.id.slice(0, 12)}…
+                        建單 {formatSlashDateTimeFromIso(o.createdAt) ?? o.createdAt} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 12)}…
                         {o.stallCountBasisYmd
                           ? ` · 盤點 ${formatYmdWithWeekday(o.stallCountBasisYmd)}`
                           : ''}
@@ -509,7 +549,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 setPreferredProcurementBasisOrderId('');
               }}
               disabled={basisOrders.length === 0 || !stallBasisOrderId}
-              className="shrink-0 min-h-11 px-3 rounded-xl border border-violet-600/50 bg-violet-950/40 text-violet-200 text-sm font-medium hover:bg-violet-900/50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="shrink-0 min-h-11 px-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-300 text-sm font-medium hover:border-amber-600/50 hover:text-amber-200 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               清空
             </button>
@@ -561,7 +601,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 {Math.round(stallDayKpi.shouldRevenue).toLocaleString()} · 帶出 ${' '}
                 {Math.round(stallDayKpi.estTotal).toLocaleString()}
                 {(stallConsKpi.soldVolume > 0 || stallConsKpi.estTotal > 0) && (
-                  <span className="text-violet-400/80"> · 耗材 售出 {stallConsKpi.soldVolume} 單位</span>
+                  <span className="text-amber-400/80"> · 耗材 售出 {stallConsKpi.soldVolume} 單位</span>
                 )}
               </p>
             </div>
@@ -584,7 +624,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     <span className="min-w-0 font-medium text-rose-200/90 inline-flex items-center gap-1.5 flex-wrap">
                       {item.name}
                       {isConsumableItem(item) && (
-                        <span className="text-[0.5625rem] font-semibold text-violet-300/90 border border-violet-800/50 rounded px-1">
+                        <span className="text-[0.5625rem] font-semibold text-amber-300/90 border border-amber-800/50 rounded px-1">
                           消耗品
                         </span>
                       )}
@@ -599,7 +639,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       <span>
                         售出 <span className="text-amber-300/90 font-medium">{c.sold.toLocaleString()}</span> {item.pieceUnit}
                       </span>
-                      <span className={cn('text-zinc-400', isConsumableItem(item) && 'text-violet-400/80')}>
+                      <span className={cn('text-zinc-400', isConsumableItem(item) && 'text-amber-400/80')}>
                         {`售出面額 $ ${Math.round(c.soldRevenue).toLocaleString()}`}
                       </span>
                     </div>
@@ -613,7 +653,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         )}
       </div>
 
-      <div className="rounded-2xl border border-amber-900/40 bg-amber-950/15 px-4 py-3 space-y-3">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/35 px-4 py-3 space-y-3">
         <div className="flex items-center gap-2 text-amber-200/90">
           <Bookmark size={18} className="shrink-0 text-amber-500" />
           <h3 className="text-sm font-semibold">常用訂單</h3>
@@ -654,6 +694,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   const item = getSupplyItem(id, supplyRetailView);
                   const q = Number(qty) || 0;
                   if (!item || q <= 0) return sum;
+                  if (userRole === 'franchisee' && isFranchiseeSelfSuppliedItem(item)) return sum;
                   return sum + pricePerPackage(item) * q;
                 },
                 0
@@ -682,7 +723,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     <div className="mt-1 space-y-0.5 text-xs tabular-nums">
                       {showProcurementCost && (
                         <p className="text-amber-400/90 font-medium">
-                          批貨成本 ${' '}
+                          {payableTitle} ${' '}
                           {(Math.round(favoriteLineTotal * 100) / 100).toLocaleString('zh-TW', {
                             maximumFractionDigits: 2,
                             minimumFractionDigits: 0,
@@ -805,7 +846,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 q > 0
                   ? 'border-amber-500/50 bg-amber-600/10 ring-1 ring-amber-600/20'
                   : isConsumableItem(item)
-                    ? 'border-violet-900/50 bg-violet-950/20'
+                    ? 'border-amber-900/50 bg-amber-950/20'
                     : 'border-zinc-800/90 bg-zinc-900/40'
               )}
             >
@@ -815,7 +856,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 </h3>
                 <div className="flex flex-col items-end gap-0.5 shrink-0">
                   {isConsumableItem(item) && (
-                    <span className="text-[0.5rem] sm:text-[0.5625rem] font-bold bg-violet-800/50 text-violet-200 border border-violet-600/50 px-1 py-0.5 rounded leading-none">
+                    <span className="text-[0.5rem] sm:text-[0.5625rem] font-bold bg-amber-800/50 text-amber-200 border border-amber-600/50 px-1 py-0.5 rounded leading-none">
                       消耗品
                     </span>
                   )}
@@ -844,6 +885,26 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
                   </span>
                 )}
+              </div>
+              <div className="mt-1.5 rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-2 py-1.5 text-[0.6875rem] sm:text-[0.72rem] text-zinc-400 space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span>昨日剩貨</span>
+                  <span className="tabular-nums text-zinc-300">
+                    {(carryoverRemainByItem[item.id] ?? 0).toLocaleString()} {item.pieceUnit}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span>建議叫貨</span>
+                  <span className="tabular-nums text-amber-300">
+                    {q.toLocaleString()} {item.pieceUnit}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span>明日預計帶出</span>
+                  <span className="tabular-nums text-emerald-300">
+                    {roundProcurementQty((carryoverRemainByItem[item.id] ?? 0) + q).toLocaleString()} {item.pieceUnit}
+                  </span>
+                </div>
               </div>
 
               <div className="mt-2.5 flex items-stretch rounded-lg border border-zinc-700/80 bg-zinc-950/60 overflow-hidden min-h-[2.75rem] sm:min-h-12">
@@ -934,20 +995,27 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
             <div className="flex items-center gap-3 min-w-0">
               <div className="relative shrink-0">
                 <ShoppingBasket className="text-amber-500" size={28} />
-                <span className="absolute -top-1.5 -right-1.5 min-w-[1.1rem] h-[1.1rem] flex items-center justify-center bg-amber-600 text-[0.625rem] font-bold text-zinc-900 rounded-full px-0.5">
-                  {totalCountDisplay}
-                </span>
               </div>
               <div className="min-w-0">
                 {showProcurementCost ? (
-                  <div className="flex flex-row flex-wrap items-end gap-5 sm:gap-7">
-                    <div className="min-w-0">
-                      <p className="text-xs text-zinc-500">批貨成本</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5 min-w-[15rem] sm:min-w-[26rem]">
+                    <div className="min-w-0 sm:pr-2">
+                      <p className="text-xs text-zinc-500">{payableTitle}</p>
                       <p className="text-lg sm:text-xl font-semibold text-amber-400 tabular-nums">
-                        $ {totalPrice.toLocaleString()}
+                        $ {totalPayablePrice.toLocaleString()}
                       </p>
+                      {userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
+                        <p className="text-[11px] text-zinc-500 mt-0.5">
+                          扣除自備品項 $ {Math.round(selfSuppliedDeduction).toLocaleString()} 後，實際應付 $ {Math.round(franchiseeNetPayable).toLocaleString()}
+                        </p>
+                      )}
+                      {userRole === 'franchisee' && totalSelfSuppliedCost > 0 && (
+                        <p className="text-[11px] text-zinc-500">
+                          自備成本（計入支出）$ {Math.round(totalSelfSuppliedCost).toLocaleString()}
+                        </p>
+                      )}
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 sm:pl-2 sm:border-l sm:border-zinc-800/70">
                       <p className="text-xs text-zinc-500">零售預估（售完參考）</p>
                       <p className="text-lg sm:text-xl font-semibold text-emerald-400 tabular-nums">
                         $ {totalRetailEstimate.toLocaleString()}
@@ -1005,10 +1073,30 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <p className="text-sm text-zinc-500 mt-2">
                   {showProcurementCost ? (
                     <>
-                      批貨成本{' '}
+                      {payableTitle}{' '}
                       <span className="text-amber-400 font-semibold tabular-nums">
-                        $ {totalPrice.toLocaleString()}
+                        $ {totalPayablePrice.toLocaleString()}
                       </span>
+                      {userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
+                        <>
+                          {' '}・ 扣除自備{' '}
+                          <span className="text-zinc-300 font-semibold tabular-nums">
+                            $ {Math.round(selfSuppliedDeduction).toLocaleString()}
+                          </span>
+                          {' '}・ 實際應付{' '}
+                          <span className="text-amber-300 font-semibold tabular-nums">
+                            $ {Math.round(franchiseeNetPayable).toLocaleString()}
+                          </span>
+                        </>
+                      )}
+                      {userRole === 'franchisee' && totalSelfSuppliedCost > 0 && (
+                        <>
+                          {' '}・ 自備成本{' '}
+                          <span className="text-zinc-300 font-semibold tabular-nums">
+                            $ {Math.round(totalSelfSuppliedCost).toLocaleString()}
+                          </span>
+                        </>
+                      )}
                       ・ 零售預估{' '}
                       <span className="text-emerald-400 font-semibold tabular-nums">
                         $ {totalRetailEstimate.toLocaleString()}
@@ -1022,7 +1110,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       </span>
                     </>
                   )}
-                  ・ 共 {totalCountDisplay} 數量
                 </p>
               </div>
               <button

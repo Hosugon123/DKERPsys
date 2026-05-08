@@ -14,10 +14,7 @@ import {
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
 import { userRoleToSupplyRetailView } from '../lib/supplyCatalog';
-
-function displayStoreLabel(label: string) {
-  return label === '總部／示範門市' || label === '總部 / 示範門市' ? '直營店' : label;
-}
+import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 
 export default function OrderHistory({ userRole }: { userRole: UserRole }) {
   const isSuperAdmin = userRole === 'admin';
@@ -59,7 +56,7 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
     if (!q) return byWeek;
     return byWeek.filter((o) => {
       if (o.id.toLowerCase().includes(q)) return true;
-      if (displayStoreLabel(o.storeLabel).toLowerCase().includes(q)) return true;
+      if (resolveOrderStoreLabel(o).toLowerCase().includes(q)) return true;
       if (
         orderDateQueryMatches(o.createdAt, {
           stallCountBasisYmd: o.stallCountBasisYmd,
@@ -85,7 +82,10 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
             <History size={22} className="shrink-0" />
             <span className="text-sm font-medium tracking-wide">本機歷程</span>
           </div>
-          <h2 className="text-3xl font-bold tracking-tight">歷史訂單</h2>
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <History className="text-amber-500 shrink-0" size={28} />
+            歷史訂單
+          </h2>
           {userRole === 'employee' && (
             <p className="text-sm text-zinc-500 mt-1.5">僅顯示直營相關單據（總部＋本店帳下單），不含加盟主單。</p>
           )}
@@ -113,7 +113,12 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
       <div className="space-y-3">
         {filtered.map((order) => {
           const listStallRev = getStallDisplayShouldRevenue(order, supplyRetailView);
-          const listAmount = listStallRev != null ? listStallRev : order.totalAmount;
+          const listAmount =
+            listStallRev != null
+              ? listStallRev
+              : order.actorRole === 'franchisee'
+                ? (order.payableAmount ?? order.totalAmount)
+                : order.totalAmount;
           const listAmountLabel = listStallRev != null ? '盤點營業額' : '訂單金額';
           const open = expandedId === order.id;
           return (
@@ -133,15 +138,17 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs text-zinc-500 font-mono truncate">{order.id}</p>
-                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                      <p className="text-base font-semibold text-[#f5f2ed] break-words leading-tight">{displayStoreLabel(order.storeLabel)}</p>
-                      <span className="px-2 py-0.5 rounded text-[0.625rem] font-medium border bg-emerald-600/10 text-emerald-400 border-emerald-600/25">
-                        已出貨
-                      </span>
-                      <StallCountOrderBadge
-                        createdAtIso={order.createdAt}
-                        stallCountCompletedAt={order.stallCountCompletedAt}
-                      />
+                    <div className="mt-0.5">
+                      <p className="text-base font-semibold text-[#f5f2ed] break-words leading-tight">{resolveOrderStoreLabel(order)}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <span className="px-2 py-0.5 rounded text-[0.625rem] font-medium border bg-emerald-600/10 text-emerald-400 border-emerald-600/25">
+                          已出貨
+                        </span>
+                        <StallCountOrderBadge
+                          createdAtIso={order.createdAt}
+                          stallCountCompletedAt={order.stallCountCompletedAt}
+                        />
+                      </div>
                     </div>
                     <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}</p>
                     {order.stallCountBasisYmd && order.stallCountCompletedAt && (

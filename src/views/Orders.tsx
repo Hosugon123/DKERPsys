@@ -1,16 +1,22 @@
 import { useState, useMemo, useEffect, useRef, useCallback, type MouseEvent } from 'react';
-import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2 } from 'lucide-react';
+import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2, ListOrdered } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { orderDateQueryMatches, formatSlashDateTimeWithWeekdayFromIso, orderMatchesActiveWeekdays } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { orders as ordersApi } from '../services/apiService';
+import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import type {
   FranchiseManagementOrder,
   OrderHistoryEntry,
   OrderHistoryLine,
 } from '../lib/orderHistoryStorage';
-import { getStallDisplayRetailEstAndRemain, getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
+import {
+  getStallDisplayRetailEstAndRemain,
+  getStallDisplayShouldRevenue,
+  getStallDisplaySoldAtRetail,
+  getStallDisplayActualRevenue,
+} from '../lib/orderStallDisplayRevenue';
 import { userRoleToSupplyRetailView } from '../lib/supplyCatalog';
 
 function orderTimeToYmdKey(iso: string): string | null {
@@ -38,33 +44,41 @@ type OrderRow = {
   itemLines: { name: string; unit: string; qty: number; price: number }[];
   /** 下單／叫貨合計（明細、揀貨合計用） */
   amount: number;
-  /** 列表主數字：盤點帳上營業額或與叫貨合計 */
-  listDisplayAmount: number;
-  listDisplayLabel: string;
-  /** 盤點摘要（有盤點資料時顯示） */
-  stallRemainAmount: number | null;
-  stallEstimatedAmount: number | null;
+  procurementAmount: number;
+  selfSuppliedDeduction: number;
+  netPayableAmount: number;
+  estimatedAmount: number | null;
+  remainAmount: number | null;
+  countedRevenueAmount: number | null;
+  actualIncomeAmount: number | null;
   status: '待出貨' | '已完成' | '已取消';
+};
+
+type OrderFinancialSummary = {
+  procurementAmount: number;
+  selfSuppliedDeduction: number;
+  netPayableAmount: number;
+  estimatedAmount: number | null;
+  remainAmount: number | null;
+  countedRevenueAmount: number | null;
+  actualIncomeAmount: number | null;
 };
 
 function formatOrderWhen(iso: string) {
   return formatSlashDateTimeWithWeekdayFromIso(iso) || iso;
 }
 
-function displayStoreLabel(label: string) {
-  return label === '總部／示範門市' || label === '總部 / 示範門市' ? '直營店' : label;
-}
-
 function toOrderRowFromMgmt(
   o: FranchiseManagementOrder,
-  listDisplayAmount: number,
-  listDisplayLabel: string,
-  stallRemainAmount: number | null,
-  stallEstimatedAmount: number | null
+  financials: OrderFinancialSummary
 ): OrderRow {
   return {
     id: o.id,
-    franchisee: displayStoreLabel(o.storeLabel),
+    franchisee: resolveOrderStoreLabel({
+      storeLabel: o.storeLabel,
+      actorRole: 'admin',
+      actorUserId: o.actorUserId,
+    }),
     contact: '—',
     phone: '—',
     address: '—',
@@ -76,24 +90,24 @@ function toOrderRowFromMgmt(
       price: l.unitPrice * l.qty,
     })),
     amount: o.totalAmount,
-    listDisplayAmount,
-    listDisplayLabel,
-    stallRemainAmount,
-    stallEstimatedAmount,
+    procurementAmount: financials.procurementAmount,
+    selfSuppliedDeduction: financials.selfSuppliedDeduction,
+    netPayableAmount: financials.netPayableAmount,
+    estimatedAmount: financials.estimatedAmount,
+    remainAmount: financials.remainAmount,
+    countedRevenueAmount: financials.countedRevenueAmount,
+    actualIncomeAmount: financials.actualIncomeAmount,
     status: o.status,
   };
 }
 
 function toOrderRowFromHistory(
   o: OrderHistoryEntry,
-  listDisplayAmount: number,
-  listDisplayLabel: string,
-  stallRemainAmount: number | null,
-  stallEstimatedAmount: number | null
+  financials: OrderFinancialSummary
 ): OrderRow {
   return {
     id: o.id,
-    franchisee: displayStoreLabel(o.storeLabel),
+    franchisee: resolveOrderStoreLabel(o),
     contact: '—',
     phone: '—',
     address: '—',
@@ -105,10 +119,13 @@ function toOrderRowFromHistory(
       price: l.unitPrice * l.qty,
     })),
     amount: o.totalAmount,
-    listDisplayAmount,
-    listDisplayLabel,
-    stallRemainAmount,
-    stallEstimatedAmount,
+    procurementAmount: financials.procurementAmount,
+    selfSuppliedDeduction: financials.selfSuppliedDeduction,
+    netPayableAmount: financials.netPayableAmount,
+    estimatedAmount: financials.estimatedAmount,
+    remainAmount: financials.remainAmount,
+    countedRevenueAmount: financials.countedRevenueAmount,
+    actualIncomeAmount: financials.actualIncomeAmount,
     status: o.status,
   };
 }
@@ -240,15 +257,28 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     const view = userRoleToSupplyRetailView(userRole);
     return rawList.map((r) => {
       const stallRev = getStallDisplayShouldRevenue(r, view);
+      const countedRevenue = getStallDisplaySoldAtRetail(r, view);
+      const actualRevenue = getStallDisplayActualRevenue(r);
       const stallRetailSummary = getStallDisplayRetailEstAndRemain(r, view);
-      const useStall = stallRev != null;
-      const listDisplayAmount = useStall ? stallRev! : r.totalAmount;
-      const listDisplayLabel = useStall ? '盤點營業額' : '訂單總額';
-      const stallRemainAmount = stallRetailSummary?.remGoodsValue ?? null;
-      const stallEstimatedAmount = stallRetailSummary?.estTotal ?? null;
+      const payable = r.totalAmount;
+      const selfSuppliedDeduction = isOrderHistoryEntry(r) && r.actorRole === 'franchisee'
+        ? (r.selfSuppliedCostAmount ?? Math.max(0, r.totalAmount - (r.payableAmount ?? r.totalAmount)))
+        : 0;
+      const netPayableAmount = Math.max(0, payable - selfSuppliedDeduction);
+      const remainAmount = stallRetailSummary?.remGoodsValue ?? null;
+      const estimatedAmount = stallRetailSummary?.estTotal ?? null;
+      const financials: OrderFinancialSummary = {
+        procurementAmount: payable,
+        selfSuppliedDeduction,
+        netPayableAmount,
+        estimatedAmount,
+        remainAmount,
+        countedRevenueAmount: countedRevenue ?? stallRev ?? null,
+        actualIncomeAmount: actualRevenue,
+      };
       return isFranchiseManagementOrder(r)
-        ? toOrderRowFromMgmt(r, listDisplayAmount, listDisplayLabel, stallRemainAmount, stallEstimatedAmount)
-        : toOrderRowFromHistory(r, listDisplayAmount, listDisplayLabel, stallRemainAmount, stallEstimatedAmount);
+        ? toOrderRowFromMgmt(r, financials)
+        : toOrderRowFromHistory(r, financials);
     });
   }, [rawList, userRole]);
 
@@ -499,14 +529,14 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     <div className="space-y-6 pb-24">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">訂單管理</h2>
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <ListOrdered className="text-amber-500 shrink-0" size={28} />
+            訂單管理
+          </h2>
           {userRole === 'employee' && (
             <p className="mt-1 text-sm text-zinc-500">
               可檢視總部直營之單與本店帳送出之單；總部單僅能檢視，無法變更出貨或實出。
             </p>
-          )}
-          {isHeadquarters && (
-            <p className="mt-1 text-sm text-zinc-500">顯示全店（總部＋加盟／直營）本機訂單，並可同步操作。</p>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -696,17 +726,37 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                 </div>
 
                 <div className="flex items-center sm:items-end justify-end gap-1.5 sm:gap-2 w-full sm:w-auto border-t sm:border-t-0 border-zinc-800 pt-3 sm:pt-0 self-end sm:self-center">
-                  <div className="text-left sm:text-right min-w-0 max-w-[9rem] sm:max-w-none">
-                    <div className="text-xs text-zinc-500">{order.listDisplayLabel}</div>
-                    <div className="text-lg sm:text-xl font-light text-amber-500 tabular-nums break-all">
-                      $ {order.listDisplayAmount.toLocaleString()}
+                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/35 px-3 py-2.5 min-w-[16rem] sm:min-w-[19rem]">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[0.6875rem] sm:text-xs">
+                      <span className="text-zinc-500">批貨金額</span>
+                      <span className="text-zinc-200 text-right tabular-nums">$ {Math.round(order.procurementAmount).toLocaleString()}</span>
+                      <span className="text-zinc-500">自備扣除</span>
+                      <span className="text-zinc-300 text-right tabular-nums">
+                        {order.selfSuppliedDeduction > 0 ? `$ ${Math.round(order.selfSuppliedDeduction).toLocaleString()}` : '—'}
+                      </span>
+                      <span className="text-zinc-500">實際應付/應收</span>
+                      <span className="text-amber-300 text-right tabular-nums">
+                        $ {Math.round(order.netPayableAmount).toLocaleString()}
+                      </span>
+                      <span className="text-zinc-500">預估金額</span>
+                      <span className="text-zinc-300 text-right tabular-nums">
+                        {order.estimatedAmount == null ? '—' : `$ ${Math.round(order.estimatedAmount).toLocaleString()}`}
+                      </span>
+                      <span className="text-zinc-500">餘貨金額</span>
+                      <span className="text-zinc-300 text-right tabular-nums">
+                        {order.remainAmount == null ? '—' : `$ ${Math.round(order.remainAmount).toLocaleString()}`}
+                      </span>
+                      <span className="text-zinc-500">盤點後營業額</span>
+                      <span className="text-zinc-100 text-right tabular-nums">
+                        {order.countedRevenueAmount == null ? '—' : `$ ${Math.round(order.countedRevenueAmount).toLocaleString()}`}
+                      </span>
                     </div>
-                    {order.listDisplayLabel === '盤點營業額' && order.stallRemainAmount != null && order.stallEstimatedAmount != null && (
-                      <div className="mt-1.5 flex flex-wrap items-center justify-start sm:justify-end gap-x-2 gap-y-0.5 text-[0.6875rem] sm:text-xs text-zinc-400">
-                        <div className="whitespace-nowrap">剩貨餘額 $ {Math.round(order.stallRemainAmount).toLocaleString()}</div>
-                        <div className="whitespace-nowrap">預估金額 $ {Math.round(order.stallEstimatedAmount).toLocaleString()}</div>
-                      </div>
-                    )}
+                    <div className="mt-2 pt-2 border-t border-zinc-800/80 flex items-end justify-between gap-3">
+                      <span className="text-[0.6875rem] sm:text-xs text-zinc-400">實際收入金額</span>
+                      <span className="text-xl sm:text-2xl font-light text-amber-500 tabular-nums">
+                        {order.actualIncomeAmount == null ? '—' : `$ ${Math.round(order.actualIncomeAmount).toLocaleString()}`}
+                      </span>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -848,7 +898,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                         <button
                           type="button"
                           onClick={(e) => startPickingEdit(e, order.id)}
-                          className="h-9 w-full sm:w-auto px-3 rounded-lg bg-sky-600/90 text-white text-sm font-medium hover:bg-sky-500 shrink-0"
+                          className="h-9 w-full sm:w-auto px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500 shrink-0"
                         >
                           調整貨量
                         </button>

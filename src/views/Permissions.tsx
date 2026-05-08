@@ -377,7 +377,10 @@ export default function Permissions({
     <div className="space-y-6 pb-24">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">權限設定</h2>
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <ShieldAlert className="text-amber-500 shrink-0" size={28} />
+            權限設定
+          </h2>
           <p className="text-zinc-500 mt-1">管理系統使用者帳號、角色配置與存取權限。</p>
         </div>
         {isSuperAdmin && (
@@ -442,7 +445,7 @@ export default function Permissions({
         </div>
         <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 flex flex-col gap-2">
           <div className="flex items-center gap-2 text-zinc-500">
-            <Store size={20} className="text-indigo-500" />
+            <Store size={20} className="text-amber-500" />
             <span className="font-medium text-sm">加盟主帳號</span>
           </div>
           <div className="text-3xl font-light text-[#f5f2ed]">{listLoading ? '…' : stats.franchisees}</div>
@@ -530,7 +533,7 @@ export default function Permissions({
                         className={cn(
                           'inline-flex items-center px-2.5 py-1 rounded border text-xs font-medium',
                           u.role === 'admin' && 'bg-amber-600/10 border-amber-600/30 text-amber-500',
-                          u.role === 'franchisee' && 'bg-indigo-600/10 border-indigo-600/30 text-indigo-400',
+                          u.role === 'franchisee' && 'bg-amber-600/10 border-amber-600/30 text-amber-300',
                           u.role === 'employee' && 'bg-zinc-800 border-zinc-700 text-zinc-400'
                         )}
                       >

@@ -70,6 +70,57 @@ function placeholderForKind(kind: CostFieldKind): string {
   }
 }
 
+function hasMeaningfulValue(v: string | undefined): boolean {
+  return String(v ?? '').trim().length > 0;
+}
+
+function pickCoreColumnIds(columns: CostColumn[]): {
+  costColId: string | null;
+  wholesaleColId: string | null;
+  retailColId: string | null;
+} {
+  let costColId: string | null = null;
+  let wholesaleColId: string | null = null;
+  let retailColId: string | null = null;
+
+  for (const c of columns) {
+    const n = c.label.replace(/\s/g, '');
+    if (!costColId && n.includes('成本')) costColId = c.id;
+    if (!wholesaleColId && n.includes('批發價')) wholesaleColId = c.id;
+    if (!retailColId && n.includes('零售價')) retailColId = c.id;
+  }
+
+  return { costColId, wholesaleColId, retailColId };
+}
+
+function itemMissingCoreFields(
+  item: CostItem,
+  coreCols: { costColId: string | null; wholesaleColId: string | null; retailColId: string | null },
+): string[] {
+  const out: string[] = [];
+  if (!hasMeaningfulValue(item.name)) out.push('品名');
+  if (!hasMeaningfulValue(item.unit)) out.push('單位');
+  if (coreCols.costColId && !hasMeaningfulValue(item.values[coreCols.costColId])) out.push('成本');
+  if (coreCols.wholesaleColId && !hasMeaningfulValue(item.values[coreCols.wholesaleColId])) out.push('批發價');
+  if (coreCols.retailColId && !hasMeaningfulValue(item.values[coreCols.retailColId])) out.push('零售價');
+  return out;
+}
+
+const CATEGORY_PRIORITY: Record<string, number> = {
+  食材: 0,
+  消耗品: 1,
+  香料: 2,
+  固定支出: 3,
+  人事: 4,
+  雜支: 5,
+};
+
+function categoryRank(category?: string): number {
+  if (!category) return 999;
+  const n = CATEGORY_PRIORITY[category.trim()];
+  return Number.isFinite(n) ? n : 999;
+}
+
 /* ───────────────────── EditableCell ───────────────────── */
 
 type EditableCellProps = {
@@ -123,7 +174,7 @@ function EditableCell({ value, kind, placeholder, onSave, className, ariaLabel }
         onKeyDown={onKey}
         aria-label={ariaLabel}
         className={cn(
-          'w-full min-h-10 rounded-md border border-transparent bg-transparent px-1.5 py-2 text-base text-zinc-200 placeholder-zinc-600 sm:min-h-0 sm:py-0.5 sm:text-xs',
+          'w-full min-h-10 rounded-md border border-transparent bg-transparent px-2 py-2 text-sm text-zinc-200 placeholder-zinc-600',
           'hover:border-zinc-700 focus:border-amber-600 focus:outline-none transition-colors',
           align,
           showPrefix && 'pl-5 sm:pl-5',
@@ -486,6 +537,10 @@ export default function CostStructureTable() {
   const [columnLayoutEditMode, setColumnLayoutEditMode] = useState(false);
   const [layoutDraft, setLayoutDraft] = useState<number[] | null>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
+  const bottomScrollRef = useRef<HTMLDivElement>(null);
+  const tableElRef = useRef<HTMLTableElement>(null);
+  const syncingScrollRef = useRef<null | 'table' | 'bottom'>(null);
+  const [scrollMetrics, setScrollMetrics] = useState({ clientWidth: 0, scrollWidth: 0 });
 
   const colSig = useMemo(() => costTableColumnSignature(snapshot.columns), [snapshot.columns]);
 
@@ -611,8 +666,9 @@ export default function CostStructureTable() {
   }, [snapshot.items]);
 
   const shrinkColId = useMemo(() => findShrinkageRateColumnId(snapshot.columns), [snapshot.columns]);
+  const coreCols = useMemo(() => pickCoreColumnIds(snapshot.columns), [snapshot.columns]);
 
-  const filteredItems: CostItem[] = useMemo(() => {
+  const searchFilteredItems: CostItem[] = useMemo(() => {
     const q = search.trim().toLowerCase();
     return snapshot.items.filter((it: CostItem) => {
       if (categoryFilter && (it.category ?? '') !== categoryFilter) return false;
@@ -631,6 +687,21 @@ export default function CostStructureTable() {
       return hay.includes(q);
     });
   }, [snapshot.items, search, categoryFilter]);
+
+  const filteredItems: CostItem[] = useMemo(
+    () =>
+      [...searchFilteredItems].sort((a, b) => {
+        const diff = categoryRank(a.category) - categoryRank(b.category);
+        if (diff !== 0) return diff;
+        return b.order - a.order;
+      }),
+    [searchFilteredItems],
+  );
+
+  const totalIncompleteCount = useMemo(
+    () => snapshot.items.filter((it) => itemMissingCoreFields(it, coreCols).length > 0).length,
+    [snapshot.items, coreCols],
+  );
 
   const onColumnEdit = (col: CostColumn) => setColumnDialog({ open: true, column: col });
   const onColumnAdd = () => setColumnDialog({ open: true, column: null });
@@ -660,6 +731,49 @@ export default function CostStructureTable() {
         <span className="h-full w-0.5 max-lg:w-1 rounded-full bg-amber-500/80 hover:bg-amber-400" />
       </div>
     ) : null;
+
+  useEffect(() => {
+    const wrap = tableWrapRef.current;
+    const table = tableElRef.current;
+    if (!wrap || !table) return;
+
+    const updateMetrics = () => {
+      setScrollMetrics({
+        clientWidth: wrap.clientWidth,
+        scrollWidth: Math.max(wrap.scrollWidth, table.scrollWidth),
+      });
+    };
+
+    updateMetrics();
+    const ro = new ResizeObserver(updateMetrics);
+    ro.observe(wrap);
+    ro.observe(table);
+    window.addEventListener('resize', updateMetrics);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateMetrics);
+    };
+  }, [snapshot.columns.length, snapshot.items.length, filteredItems.length]);
+
+  const onTableScroll = useCallback(() => {
+    const wrap = tableWrapRef.current;
+    const bottom = bottomScrollRef.current;
+    if (!wrap || !bottom) return;
+    if (syncingScrollRef.current === 'bottom') return;
+    syncingScrollRef.current = 'table';
+    bottom.scrollLeft = wrap.scrollLeft;
+    syncingScrollRef.current = null;
+  }, []);
+
+  const onBottomScroll = useCallback(() => {
+    const wrap = tableWrapRef.current;
+    const bottom = bottomScrollRef.current;
+    if (!wrap || !bottom) return;
+    if (syncingScrollRef.current === 'table') return;
+    syncingScrollRef.current = 'bottom';
+    wrap.scrollLeft = bottom.scrollLeft;
+    syncingScrollRef.current = null;
+  }, []);
 
   return (
     <section className="flex min-w-0 flex-col rounded-2xl border border-zinc-800 bg-zinc-900/30">
@@ -751,6 +865,17 @@ export default function CostStructureTable() {
             ))}
           </select>
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-[0.6875rem]">
+          <span className="rounded-md border border-zinc-800 bg-zinc-950/70 px-2 py-1 text-zinc-400">
+            總品項 {snapshot.items.length}
+          </span>
+          <span className="rounded-md border border-amber-900/50 bg-amber-950/20 px-2 py-1 text-amber-200/90">
+            待補 {totalIncompleteCount}
+          </span>
+          <span className="rounded-md border border-zinc-800 bg-zinc-950/70 px-2 py-1 text-zinc-400">
+            目前顯示 {filteredItems.length}
+          </span>
+        </div>
         {search.trim() && (
           <div className="text-[0.6875rem] text-zinc-500">
             符合「{search.trim()}」共 {filteredItems.length} 筆
@@ -762,10 +887,11 @@ export default function CostStructureTable() {
         下方表格可<strong className="font-semibold">左右滑動</strong>；必要時可拖曳底部橫向捲軸。
       </p>
       <div
-        className="max-w-full min-w-0 flex-1 touch-pan-x overflow-x-scroll overscroll-x-contain rounded-b-2xl [-webkit-overflow-scrolling:touch] lg:overflow-x-auto"
+        className="cost-table-scroll max-w-full min-w-0 flex-1 touch-pan-x overscroll-x-contain rounded-b-2xl pb-2 [-webkit-overflow-scrolling:touch]"
         ref={tableWrapRef}
+        onScroll={onTableScroll}
       >
-        <table className="w-full min-w-[1000px] table-fixed border-collapse text-left lg:min-w-0">
+        <table ref={tableElRef} className="w-full min-w-[1900px] table-fixed border-collapse text-left">
           <colgroup>
             {activeColPercents.slice(0, 4).map((p, i) => (
               <col key={['expand', 'name', 'unit', 'category'][i]} style={{ width: `${p.toFixed(2)}%` }} />
@@ -776,10 +902,10 @@ export default function CostStructureTable() {
             <col style={{ width: `${activeColPercents[activeColPercents.length - 1]!.toFixed(2)}%` }} />
           </colgroup>
           <thead>
-            <tr className="text-zinc-500 text-[0.6875rem] uppercase border-b border-zinc-800 bg-zinc-950/50">
+            <tr className="text-zinc-400 text-xs uppercase border-b border-zinc-800 bg-zinc-950/50">
               <th
                 className={cn(
-                  'py-1.5 px-1 font-medium text-center border-b border-zinc-800',
+                  'py-2.5 px-2 font-medium text-center border-b border-zinc-800',
                   columnLayoutEditMode && 'relative',
                 )}
               >
@@ -787,7 +913,7 @@ export default function CostStructureTable() {
               </th>
               <th
                 className={cn(
-                  'py-1.5 px-1.5 font-medium text-left border-b border-zinc-800',
+                  'py-2.5 px-3 font-medium text-left border-b border-zinc-800 min-w-[8rem]',
                   columnLayoutEditMode && 'relative',
                 )}
               >
@@ -796,7 +922,7 @@ export default function CostStructureTable() {
               </th>
               <th
                 className={cn(
-                  'py-1.5 px-1.5 font-medium text-left border-b border-zinc-800',
+                  'py-2.5 px-3 font-medium text-left border-b border-zinc-800 min-w-[5.5rem]',
                   columnLayoutEditMode && 'relative',
                 )}
               >
@@ -805,7 +931,7 @@ export default function CostStructureTable() {
               </th>
               <th
                 className={cn(
-                  'py-1.5 px-1.5 font-medium text-left border-b border-zinc-800',
+                  'py-2.5 px-3 font-medium text-left border-b border-zinc-800 min-w-[6rem]',
                   columnLayoutEditMode && 'relative',
                 )}
               >
@@ -816,7 +942,7 @@ export default function CostStructureTable() {
                 <th
                   key={col.id}
                   className={cn(
-                    'py-1.5 px-1 font-medium group border-b border-zinc-800 min-w-0',
+                    'py-2.5 px-2 font-medium group border-b border-zinc-800 min-w-[10rem]',
                     alignClassForKind(col.kind),
                     columnLayoutEditMode && 'relative',
                   )}
@@ -827,7 +953,7 @@ export default function CostStructureTable() {
                       col.kind === 'text' ? 'justify-start' : 'justify-end',
                     )}
                   >
-                    <span className="min-w-0 truncate" title={col.label}>
+                    <span className="min-w-0 whitespace-normal break-normal [word-break:keep-all] leading-tight" title={col.label}>
                       {col.label}
                     </span>
                     <div
@@ -867,10 +993,10 @@ export default function CostStructureTable() {
                   {columnResizeHandleEl(4 + idx, `調整「${col.label}」與右側欄寬度`)}
                 </th>
               ))}
-              <th className="py-1.5 px-1 font-medium text-center border-b border-zinc-800">操作</th>
+              <th className="py-2.5 px-2 font-medium text-center border-b border-zinc-800">操作</th>
             </tr>
           </thead>
-          <tbody className="text-xs">
+          <tbody className="text-sm">
             {filteredItems.length === 0 && (
               <tr>
                 <td
@@ -893,6 +1019,7 @@ export default function CostStructureTable() {
                   item={item}
                   columns={cols}
                   categories={categories}
+                  coreCols={coreCols}
                   showShrinkageDetail={showDetail}
                   detailExpanded={expanded}
                   onToggleDetail={() =>
@@ -904,6 +1031,18 @@ export default function CostStructureTable() {
           </tbody>
         </table>
       </div>
+      {scrollMetrics.scrollWidth > scrollMetrics.clientWidth + 1 && (
+        <div className="border-t border-zinc-800/80 bg-zinc-950/60 px-2 py-1.5">
+          <div
+            ref={bottomScrollRef}
+            onScroll={onBottomScroll}
+            className="cost-table-scroll overflow-x-auto overflow-y-hidden"
+            aria-label="成本表水平捲動拉桿"
+          >
+            <div style={{ width: `${scrollMetrics.scrollWidth}px`, height: '1px' }} />
+          </div>
+        </div>
+      )}
 
       <ColumnDialog
         open={columnDialog.open}
@@ -925,6 +1064,7 @@ type RowProps = {
   item: CostItem;
   columns: CostColumn[];
   categories: string[];
+  coreCols: { costColId: string | null; wholesaleColId: string | null; retailColId: string | null };
   showShrinkageDetail: boolean;
   detailExpanded: boolean;
   onToggleDetail: () => void;
@@ -934,17 +1074,25 @@ const Row: FC<RowProps> = ({
   item,
   columns,
   categories,
+  coreCols,
   showShrinkageDetail,
   detailExpanded,
   onToggleDetail,
 }) => {
   const [confirmDel, setConfirmDel] = useState(false);
   const detailColSpan = 4 + columns.length + 1;
+  const missingFields = itemMissingCoreFields(item, coreCols);
+  const isIncomplete = missingFields.length > 0;
 
   return (
     <>
-      <tr className="border-b border-zinc-800/50 hover:bg-white/[0.02] transition-colors">
-        <td className="py-1.5 px-1 text-center align-middle">
+      <tr
+        className={cn(
+          'border-b border-zinc-800/50 hover:bg-white/[0.02] transition-colors',
+          isIncomplete && 'bg-amber-950/10',
+        )}
+      >
+        <td className="py-2.5 px-2 text-center align-middle">
           {showShrinkageDetail ? (
             <button
               type="button"
@@ -958,7 +1106,7 @@ const Row: FC<RowProps> = ({
             <span className="inline-block w-4" aria-hidden />
           )}
         </td>
-        <td className="py-1.5 px-1.5 align-middle min-w-0">
+        <td className="py-2.5 px-3 align-middle min-w-0">
           <EditableCell
             value={item.name}
             kind="text"
@@ -972,7 +1120,7 @@ const Row: FC<RowProps> = ({
             </div>
           )}
         </td>
-        <td className="py-1.5 px-1 align-middle min-w-0">
+        <td className="py-2.5 px-2 align-middle min-w-0">
           <EditableCell
             value={item.unit}
             kind="text"
@@ -981,7 +1129,7 @@ const Row: FC<RowProps> = ({
             ariaLabel="單位"
           />
         </td>
-        <td className="py-1.5 px-1.5 align-middle min-w-0">
+        <td className="py-2.5 px-3 align-middle min-w-0">
           <input
             type="text"
             list={`cat-${item.id}`}
@@ -990,7 +1138,7 @@ const Row: FC<RowProps> = ({
             onBlur={(e) =>
               void products.cost.updateCostItem(item.id, { category: e.target.value || null })
             }
-            className="min-h-10 w-full rounded-md border border-transparent bg-transparent px-1.5 py-2 text-base text-zinc-300 placeholder-zinc-600 hover:border-zinc-700 focus:border-amber-600 focus:outline-none sm:min-h-0 sm:py-0.5 sm:text-xs"
+            className="min-h-10 w-full rounded-md border border-transparent bg-transparent px-2 py-2 text-sm text-zinc-300 placeholder-zinc-600 hover:border-zinc-700 focus:border-amber-600 focus:outline-none"
           />
           <datalist id={`cat-${item.id}`}>
             {categories.map((c) => (
@@ -1001,7 +1149,7 @@ const Row: FC<RowProps> = ({
         {columns.map((col) => (
           <td
             key={col.id}
-            className={cn('py-1.5 px-1 align-middle min-w-0', alignClassForKind(col.kind))}
+            className={cn('py-2.5 px-2 align-middle min-w-0', alignClassForKind(col.kind))}
           >
             <EditableCell
               value={item.values[col.id] ?? ''}
@@ -1012,7 +1160,7 @@ const Row: FC<RowProps> = ({
             />
           </td>
         ))}
-        <td className="py-1.5 px-1 text-center align-middle">
+        <td className="py-2.5 px-2 text-center align-middle">
           <button
             type="button"
             onClick={() => {
