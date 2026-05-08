@@ -23,7 +23,6 @@ import {
   ymd,
   loadDay,
   saveDay,
-  suggestBringAfterCloseDay,
   recomputeStallOutForStallYmdAndOrder,
   listProcurementOrdersInLastNDays,
   type DaySnapshot,
@@ -33,7 +32,7 @@ import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { saveSalesRecord } from '../lib/salesRecordStorage';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
-import { formatSlashDateTimeFromIso, ymdDashToSlash } from '../lib/dateDisplay';
+import { formatSlashDateTimeFromIso, formatSlashDateTimeWithWeekdayFromIso, ymdDashToSlash } from '../lib/dateDisplay';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
@@ -42,6 +41,10 @@ function money(n: number) {
 /** 叫貨單內部狀態「已完成」在攤上盤點語境顯示為「已出貨」 */
 function procurementStatusDisplay(s: '待出貨' | '已完成' | '已取消') {
   return s === '已完成' ? '已出貨' : s;
+}
+
+function displayStoreLabel(label: string) {
+  return label === '總部／示範門市' || label === '總部 / 示範門市' ? '直營店' : label;
 }
 
 /** ±1 步進後寫入字串，不低於 0；供盤點帶出／剩餘微調。 */
@@ -163,7 +166,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     [ordersInWindow, viewOrderId]
   );
 
-  const formatOrderTime = (iso: string) => formatSlashDateTimeFromIso(iso) || iso;
+  const formatOrderTime = (iso: string) => formatSlashDateTimeWithWeekdayFromIso(iso) || iso;
 
   const formatStallCountStamp = (iso: string) => formatSlashDateTimeFromIso(iso) || iso;
 
@@ -172,8 +175,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       stallDisplayItems.map((item) => {
         const line = snap.lines[item.id] ?? { out: '', remain: '' };
         const c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
-        const sug = suggestBringAfterCloseDay(item.id, dateStr, c.remain);
-        return { item, c, sug };
+        return { item, c };
       }),
     [snap.lines, dateStr, stallDisplayItems]
   );
@@ -280,21 +282,23 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             攤上盤點
           </h2>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 rounded-xl border-2 border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-300">
-            <CalendarDays size={18} className="text-amber-500" />
-            <span>盤點日</span>
+        <div className="w-full sm:w-auto grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-2">
+          <label className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 rounded-xl border-2 border-zinc-700 bg-zinc-900/80 px-3 py-2.5 text-sm text-zinc-300">
+            <span className="inline-flex items-center gap-2 shrink-0">
+              <CalendarDays size={18} className="text-amber-500" />
+              <span>盤點日</span>
+            </span>
             <input
               type="date"
               value={dateStr}
               onChange={(e) => setDateStr(e.target.value)}
-              className="bg-transparent text-amber-400 font-medium focus:outline-none [color-scheme:dark]"
+              className="min-w-0 bg-transparent text-right sm:text-left text-amber-400 font-medium focus:outline-none [color-scheme:dark]"
             />
           </label>
           <button
             type="button"
             onClick={requestInventoryComplete}
-            className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-xl bg-amber-600 text-zinc-950 font-semibold text-sm hover:bg-amber-500"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-xl bg-amber-600 text-zinc-950 font-semibold text-sm hover:bg-amber-500"
           >
             <CheckCircle2 size={18} />
             盤點完成
@@ -341,7 +345,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               >
                 {ordersInWindow.map((o) => (
                   <option key={o.id} value={o.id}>
-                    建單 {ymdDashToSlash(ymd(new Date(o.createdAt)))} · {o.storeLabel} · {o.id.slice(0, 16)}… · {procurementStatusDisplay(o.status)} · {o.itemCount} 件
+                    建單 {ymdDashToSlash(ymd(new Date(o.createdAt)))} · {displayStoreLabel(o.storeLabel)} · {o.id.slice(0, 16)}… · {procurementStatusDisplay(o.status)}
                   </option>
                 ))}
               </select>
@@ -371,7 +375,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       stallCountCompletedAt={viewOrder.stallCountCompletedAt}
                     />
                     <span>
-                      · {viewOrder.storeLabel}
+                      · {displayStoreLabel(viewOrder.storeLabel)}
                     </span>
                   </p>
                   {viewOrder.stallCountCompletedAt && viewOrder.stallCountBasisYmd && (
@@ -381,7 +385,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   )}
                 </div>
                 <div className="shrink-0 text-zinc-400 text-sm tabular-nums">
-                  共 {viewOrder.itemCount} 件 · $ {money(viewOrder.totalAmount)}
+                  $ {money(viewOrder.totalAmount)}
                 </div>
               </div>
             )}
@@ -444,10 +448,9 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950/40 -mx-1 px-1">
-        <table className="w-full min-w-[960px] text-left text-sm">
+        <table className="w-full min-w-[860px] text-left text-sm">
           <thead>
             <tr className="text-zinc-500 text-xs border-b border-zinc-800 bg-zinc-900/50">
-              <th className="px-2 py-3 font-medium whitespace-nowrap">明日建議帶出</th>
               <th className="px-2 py-3 font-medium">品項</th>
               <th className="px-2 py-3 font-medium whitespace-nowrap">帶出貨量</th>
               <th className="px-2 py-3 font-medium whitespace-nowrap">剩餘貨量</th>
@@ -460,17 +463,11 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ item, c, sug }) => (
+            {rows.map(({ item, c }) => (
               <tr
                 key={item.id}
                 className="border-b border-zinc-800/70 hover:bg-white/[0.02] text-zinc-200"
               >
-                <td className="px-2 py-2.5 text-amber-200 font-mono tabular-nums text-xs sm:text-sm">
-                  {sug.suggest}
-                  {sug.sampleCount > 0 && (
-                    <span className="text-zinc-600 text-[0.625rem] block">n={sug.sampleCount}</span>
-                  )}
-                </td>
                 <td className="px-2 py-2.5 text-rose-300 font-medium whitespace-nowrap">
                   {item.name}
                 </td>

@@ -247,7 +247,7 @@ function appendFranchiseManagementOrderInternal(params: {
     totalAmount,
     itemCount,
     lines,
-    storeLabel: '總部／示範門市',
+    storeLabel: '直營店',
     status: '待出貨',
     scopeId: getDataScopeContext().scopeId,
     actorUserId: getDataScopeContext().userId || undefined,

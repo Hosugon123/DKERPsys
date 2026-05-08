@@ -41,6 +41,16 @@ export function formatSlashDateTimeFromIso(iso: string): string {
   return `${date} ${hh}:${mm}`;
 }
 
+export function formatSlashDateTimeWithWeekdayFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const date = formatSlashDateFromDate(d);
+  const weekday = d.toLocaleDateString('zh-TW', { weekday: 'short' });
+  const hh = pad2(d.getHours());
+  const mm = pad2(d.getMinutes());
+  return `${date}（${weekday}） ${hh}:${mm}`;
+}
+
 /**
  * 彙整可搜尋之日期變體：2026/4/25、2026-04-25、2026/4、20260425
  */

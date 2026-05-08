@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Receipt, Search, Package, ChevronDown, ChevronUp, ClipboardList, Trash2, Store } from 'lucide-react';
+import { Receipt, Search, Package, ChevronDown, ChevronUp, ClipboardList, Trash2, Store, Minus, Plus } from 'lucide-react';
 import type { UserRole } from './Orders';
 import { getSupplyItem, isConsumableItem, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
 import {
@@ -13,7 +13,7 @@ import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapsho
 import { formatYmdWithWeekday } from '../lib/stallInventoryStorage';
 import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry, UpdateStallSnapshotResult } from '../lib/orderHistoryStorage';
-import { formatSlashDateTimeFromIso, orderDateQueryMatches, orderMatchesActiveWeekdays } from '../lib/dateDisplay';
+import { formatSlashDateTimeFromIso, formatSlashDateTimeWithWeekdayFromIso, orderDateQueryMatches, orderMatchesActiveWeekdays } from '../lib/dateDisplay';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
@@ -32,6 +32,15 @@ function orderSalesOutletChannel(o: OrderHistoryEntry): 'franchise' | 'direct' {
 }
 
 type OutletFilter = 'all' | 'direct' | 'franchise';
+const STALL_MAX_Q = 99_999;
+
+function displayStoreLabel(label: string) {
+  return label === '總部／示範門市' || label === '總部 / 示範門市' ? '直營店' : label;
+}
+
+function parseStallQty(s: string) {
+  return Math.max(0, Math.min(STALL_MAX_Q, Math.floor(parseInt(s.replace(/[^\d]/g, ''), 10) || 0)));
+}
 
 function resolveRecordSnapshot(order: OrderHistoryEntry) {
   if (order.stallCountSnapshot) {
@@ -122,7 +131,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     if (!q) return byOutlet;
     return byOutlet.filter((o) => {
       if (o.id.toLowerCase().includes(q)) return true;
-      if (o.storeLabel.toLowerCase().includes(q)) return true;
+      if (displayStoreLabel(o.storeLabel).toLowerCase().includes(q)) return true;
       if (o.stallCountBasisYmd?.toLowerCase().includes(q)) return true;
       if (
         orderDateQueryMatches(o.createdAt, {
@@ -191,6 +200,45 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           break;
       }
     })();
+  };
+
+  const bumpStallLineValue = (itemId: string, field: 'out' | 'remain', delta: number) => {
+    setStallEditDraft((prev) => {
+      if (!prev) return prev;
+      const current = parseStallQty(String(num(prev.lines[itemId]?.[field])));
+      const next = Math.max(0, Math.min(STALL_MAX_Q, current + delta));
+      return {
+        ...prev,
+        lines: {
+          ...prev.lines,
+          [itemId]: {
+            ...prev.lines[itemId],
+            out: prev.lines[itemId]?.out ?? '',
+            remain: prev.lines[itemId]?.remain ?? '',
+            [field]: String(next),
+          },
+        },
+      };
+    });
+  };
+
+  const setStallLineQtyInput = (itemId: string, field: 'out' | 'remain', raw: string) => {
+    const next = parseStallQty(raw);
+    setStallEditDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        lines: {
+          ...prev.lines,
+          [itemId]: {
+            ...prev.lines[itemId],
+            out: prev.lines[itemId]?.out ?? '',
+            remain: prev.lines[itemId]?.remain ?? '',
+            [field]: String(next),
+          },
+        },
+      };
+    });
   };
 
   return (
@@ -319,20 +367,20 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
               key={order.id}
               className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden"
             >
-              <div className="flex min-w-0 w-full">
+              <div className="flex min-w-0 w-full flex-col sm:flex-row">
               <button
                 type="button"
                 onClick={() => setExpandedId(open ? null : order.id)}
-                className="min-w-0 flex-1 p-4 sm:p-5 flex items-start sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
+                className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
               >
                 <div className="flex items-start gap-4 min-w-0">
                   <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 flex-shrink-0">
                     <Package size={22} className="text-amber-500/80" />
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs text-zinc-500 font-mono truncate">{order.id}</p>
                     <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                      <p className="text-base font-semibold text-[#f5f2ed]">{order.storeLabel}</p>
+                      <p className="text-base font-semibold text-[#f5f2ed] break-words leading-tight">{displayStoreLabel(order.storeLabel)}</p>
                       <span
                         className={cn(
                           'px-2 py-0.5 rounded text-[0.625rem] font-medium border',
@@ -360,23 +408,22 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeFromIso(order.createdAt)}</p>
+                    <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}</p>
                     {order.stallCountBasisYmd && order.stallCountCompletedAt && (
                       <p className="text-xs text-amber-200/75 mt-1">
                         盤點 {formatYmdWithWeekday(order.stallCountBasisYmd)} · 完成 {formatSlashDateTimeFromIso(order.stallCountCompletedAt)}
                       </p>
                     )}
-                    <p className="text-xs text-zinc-600 mt-1">
+                    <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
                       身分：
                       {order.actorRole === 'admin' ? '超級管理員' : order.actorRole === 'franchisee' ? '加盟主' : '店員'}
-                      ・共 {order.itemCount} 件
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center sm:items-end justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-start sm:self-center">
-                  <div className="text-right min-w-0 max-w-[9rem] sm:max-w-none">
+                <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch sm:self-center">
+                  <div className="text-left sm:text-right min-w-0 sm:max-w-none">
                     <p className="text-xs text-zinc-500">{listAmountLabel}</p>
-                    <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums break-all">
+                    <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums whitespace-nowrap">
                       $ {listAmount.toLocaleString()}
                     </p>
                   </div>
@@ -384,11 +431,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                 </div>
               </button>
               {isSuperAdmin && (
-                <div className="flex items-stretch border-l border-zinc-800/80 bg-zinc-900/30">
+                <div className="flex items-stretch border-t sm:border-t-0 sm:border-l border-zinc-800/80 bg-zinc-900/30">
                   <button
                     type="button"
                     onClick={() => setDeleteModalId(order.id)}
-                    className="flex w-12 sm:w-12 flex-col items-center justify-center gap-0.5 text-rose-400/85 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors"
+                    className="flex w-full h-10 sm:h-auto sm:w-12 flex-row sm:flex-col items-center justify-center gap-1 sm:gap-0.5 text-rose-400/85 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors"
                     title="刪除本筆訂單（不須展開明細）"
                     aria-label="刪除本筆訂單"
                   >
@@ -473,7 +520,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                       {isStallEditThis && stallEditDraft && (
                         <div className="space-y-2">
                           <p className="text-xs text-amber-500/90 font-medium">
-                            編輯盤點：每列剩餘須為 ≥0 之數字（可小數）；已售完請填 0。
+                            編輯盤點：可用＋/－或直接輸入；每列 0～{STALL_MAX_Q.toLocaleString()}。
                           </p>
                           {stallEditError && (
                             <p className="text-sm text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
@@ -540,76 +587,71 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                     <tr key={item.id} className="border-b border-zinc-800/60">
                                       <td className="px-3 py-2 text-zinc-200 whitespace-nowrap">{item.name}</td>
                                       <td className="px-2 py-2 p-0">
-                                        <input
-                                          value={line.out}
-                                          onChange={(e) =>
-                                            setStallEditDraft((p) => {
-                                              if (!p) return p;
-                                              const lines = {
-                                                ...p.lines,
-                                                [item.id]: {
-                                                  ...p.lines[item.id],
-                                                  out: e.target.value,
-                                                  remain: p.lines[item.id]?.remain ?? '',
-                                                },
-                                              };
-                                              return { ...p, lines };
-                                            })
-                                          }
-                                          className="w-24 min-h-9 bg-zinc-900/80 border border-zinc-700 rounded px-1.5 text-amber-100 font-mono text-sm"
-                                          inputMode="decimal"
-                                          aria-label={`${item.name} 帶出`}
-                                        />
-                                      </td>
-                                      <td className="px-2 py-2 p-0">
-                                        <div className="flex items-center gap-1 flex-nowrap min-w-0">
+                                        <div className="flex items-center justify-center gap-0.5 max-w-[9rem] mx-auto">
+                                          <button
+                                            type="button"
+                                            onClick={() => bumpStallLineValue(item.id, 'out', -1)}
+                                            disabled={parseStallQty(line.out) <= 0}
+                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                            aria-label={`${item.name} 帶出減一`}
+                                          >
+                                            <Minus size={16} />
+                                          </button>
                                           <input
-                                            value={line.remain}
-                                            onChange={(e) =>
-                                              setStallEditDraft((p) => {
-                                                if (!p) return p;
-                                                const lines = {
-                                                  ...p.lines,
-                                                  [item.id]: {
-                                                    ...p.lines[item.id],
-                                                    out: p.lines[item.id]?.out ?? '',
-                                                    remain: e.target.value,
-                                                  },
-                                                };
-                                                return { ...p, lines };
-                                              })
-                                            }
-                                            placeholder="必填"
-                                            className={cn(
-                                              'w-[4.5rem] min-w-0 min-h-9 bg-zinc-900/80 border rounded px-1.5 font-mono text-sm',
-                                              c.remainUnfilled
-                                                ? 'border-amber-800/50 border-dashed text-zinc-400 placeholder:text-zinc-600'
-                                                : c.remain > 0
-                                                  ? 'border-rose-800/60 text-rose-300'
-                                                  : 'border-zinc-700 text-zinc-300'
-                                            )}
-                                            inputMode="decimal"
-                                            aria-label={`${item.name} 剩餘`}
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={String(parseStallQty(line.out))}
+                                            onChange={(e) => setStallLineQtyInput(item.id, 'out', e.target.value)}
+                                            onFocus={(e) => e.target.select()}
+                                            className="w-12 min-w-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1"
+                                            aria-label={`${item.name} 帶出數量，0～${STALL_MAX_Q.toLocaleString()}`}
                                           />
                                           <button
                                             type="button"
-                                            onClick={() =>
-                                              setStallEditDraft((p) => {
-                                                if (!p) return p;
-                                                const lines = {
-                                                  ...p.lines,
-                                                  [item.id]: {
-                                                    ...p.lines[item.id],
-                                                    out: p.lines[item.id]?.out ?? '',
-                                                    remain: '0',
-                                                  },
-                                                };
-                                                return { ...p, lines };
-                                              })
-                                            }
-                                            className="shrink-0 rounded border border-zinc-600 bg-zinc-800/60 px-1.5 py-1 text-[0.625rem] sm:text-xs text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
+                                            onClick={() => bumpStallLineValue(item.id, 'out', 1)}
+                                            disabled={parseStallQty(line.out) >= STALL_MAX_Q}
+                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                            aria-label={`${item.name} 帶出加一`}
                                           >
-                                            已售完
+                                            <Plus size={16} />
+                                          </button>
+                                        </div>
+                                      </td>
+                                      <td className="px-2 py-2 p-0">
+                                        <div className="flex items-center justify-center gap-0.5 max-w-[9rem] mx-auto">
+                                          <button
+                                            type="button"
+                                            onClick={() => bumpStallLineValue(item.id, 'remain', -1)}
+                                            disabled={parseStallQty(line.remain) <= 0}
+                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                            aria-label={`${item.name} 剩餘減一`}
+                                          >
+                                            <Minus size={16} />
+                                          </button>
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={String(parseStallQty(line.remain))}
+                                            onChange={(e) => setStallLineQtyInput(item.id, 'remain', e.target.value)}
+                                            onFocus={(e) => e.target.select()}
+                                            className={cn(
+                                              'w-12 min-w-0 text-center text-base font-bold tabular-nums bg-zinc-900/80 border rounded py-1',
+                                              c.remainUnfilled
+                                                ? 'border-amber-800/50 border-dashed text-zinc-400'
+                                                : c.remain > 0
+                                                  ? 'border-rose-800/60 text-rose-300'
+                                                  : 'border-zinc-600 text-zinc-300'
+                                            )}
+                                            aria-label={`${item.name} 剩餘數量，0～${STALL_MAX_Q.toLocaleString()}`}
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => bumpStallLineValue(item.id, 'remain', 1)}
+                                            disabled={parseStallQty(line.remain) >= STALL_MAX_Q}
+                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                            aria-label={`${item.name} 剩餘加一`}
+                                          >
+                                            <Plus size={16} />
                                           </button>
                                         </div>
                                       </td>

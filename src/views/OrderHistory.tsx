@@ -6,6 +6,7 @@ import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 import {
   formatSlashDateTimeFromIso,
+  formatSlashDateTimeWithWeekdayFromIso,
   ymdDashToSlash,
   orderDateQueryMatches,
   orderMatchesActiveWeekdays,
@@ -13,6 +14,10 @@ import {
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
 import { userRoleToSupplyRetailView } from '../lib/supplyCatalog';
+
+function displayStoreLabel(label: string) {
+  return label === '總部／示範門市' || label === '總部 / 示範門市' ? '直營店' : label;
+}
 
 export default function OrderHistory({ userRole }: { userRole: UserRole }) {
   const isSuperAdmin = userRole === 'admin';
@@ -54,7 +59,7 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
     if (!q) return byWeek;
     return byWeek.filter((o) => {
       if (o.id.toLowerCase().includes(q)) return true;
-      if (o.storeLabel.toLowerCase().includes(q)) return true;
+      if (displayStoreLabel(o.storeLabel).toLowerCase().includes(q)) return true;
       if (
         orderDateQueryMatches(o.createdAt, {
           stallCountBasisYmd: o.stallCountBasisYmd,
@@ -116,20 +121,20 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
               key={order.id}
               className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden"
             >
-              <div className="flex min-w-0 w-full">
+              <div className="flex min-w-0 w-full flex-col sm:flex-row">
               <button
                 type="button"
                 onClick={() => setExpandedId(open ? null : order.id)}
-                className="min-w-0 flex-1 p-4 sm:p-5 flex items-start sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
+                className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
               >
                 <div className="flex items-start gap-4 min-w-0">
                   <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 flex-shrink-0">
                     <Package size={22} className="text-amber-500/80" />
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs text-zinc-500 font-mono truncate">{order.id}</p>
                     <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                      <p className="text-base font-semibold text-[#f5f2ed]">{order.storeLabel}</p>
+                      <p className="text-base font-semibold text-[#f5f2ed] break-words leading-tight">{displayStoreLabel(order.storeLabel)}</p>
                       <span className="px-2 py-0.5 rounded text-[0.625rem] font-medium border bg-emerald-600/10 text-emerald-400 border-emerald-600/25">
                         已出貨
                       </span>
@@ -138,22 +143,21 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
                         stallCountCompletedAt={order.stallCountCompletedAt}
                       />
                     </div>
-                    <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeFromIso(order.createdAt)}</p>
+                    <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}</p>
                     {order.stallCountBasisYmd && order.stallCountCompletedAt && (
                       <p className="text-xs text-amber-200/75 mt-1">
                         盤點：{ymdDashToSlash(order.stallCountBasisYmd)} · {formatSlashDateTimeFromIso(order.stallCountCompletedAt)}
                       </p>
                     )}
-                    <p className="text-xs text-zinc-600 mt-1">
+                    <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
                       身分：{order.actorRole === 'admin' ? '超級管理員' : order.actorRole === 'franchisee' ? '加盟主' : '店員'}
-                      ・共 {order.itemCount} 件
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center sm:items-end justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-start sm:self-center">
-                  <div className="text-right min-w-0 max-w-[9rem] sm:max-w-none">
+                <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch sm:self-center">
+                  <div className="text-left sm:text-right min-w-0 sm:max-w-none">
                     <p className="text-xs text-zinc-500">{listAmountLabel}</p>
-                    <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums break-all">
+                    <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums whitespace-nowrap">
                       $ {listAmount.toLocaleString()}
                     </p>
                   </div>
@@ -161,11 +165,11 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
                 </div>
               </button>
               {isSuperAdmin && (
-                <div className="flex items-stretch border-l border-zinc-800/80 bg-zinc-900/30">
+                <div className="flex items-stretch border-t sm:border-t-0 sm:border-l border-zinc-800/80 bg-zinc-900/30">
                   <button
                     type="button"
                     onClick={() => setDeleteModalId(order.id)}
-                    className="flex w-12 sm:w-12 flex-col items-center justify-center gap-0.5 text-rose-400/85 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors"
+                    className="flex w-full h-10 sm:h-auto sm:w-12 flex-row sm:flex-col items-center justify-center gap-1 sm:gap-0.5 text-rose-400/85 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors"
                     title="永久刪除此筆歷史訂單（不須展開明細）"
                     aria-label="刪除本筆訂單"
                   >
