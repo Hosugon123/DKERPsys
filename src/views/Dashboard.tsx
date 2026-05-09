@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, FileText, Target, Store, HandCoins, LayoutDashboard } from 'lucide-react';
+import { TrendingUp, FileText, Target, Store, HandCoins, LayoutDashboard, ChevronRight, ArrowLeft, Eye, X } from 'lucide-react';
 import {
   XAxis,
   YAxis,
@@ -14,9 +14,14 @@ import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { computeAdminDashboardFinance, currentYmLocal, stallCountAttributeYmd } from '../lib/financeLib';
-import { ACCOUNTING_LEDGER_UPDATED_EVENT, listAccountingLedgerEntries } from '../lib/accountingLedgerStorage';
+import {
+  ACCOUNTING_LEDGER_UPDATED_EVENT,
+  listAccountingLedgerEntries,
+  listAccountingLedgerEntriesForScopeId,
+} from '../lib/accountingLedgerStorage';
 import { getSupplyItem, isFranchiseeSelfSuppliedItem } from '../lib/supplyCatalog';
 import { getStallDisplaySoldAtRetail, getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
+import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
@@ -134,9 +139,26 @@ function pct(numerator: number, denominator: number): number {
   return (numerator / denominator) * 100;
 }
 
-export default function Dashboard({ userRole }: { userRole: UserRole }) {
+export type DashboardViewAsTarget = { userId: string; label: string };
+
+export default function Dashboard({
+  userRole,
+  viewAsFranchisee = null,
+  onSelectFranchisee,
+  onExitViewAs,
+}: {
+  userRole: UserRole;
+  /** 總部以「另存身份」檢視某加盟店的營運概況；非 null 時整頁切換為加盟主視角 */
+  viewAsFranchisee?: DashboardViewAsTarget | null;
+  /** 點擊「各加盟店」入口卡時觸發；由 App 切換 viewAsFranchisee */
+  onSelectFranchisee?: (target: DashboardViewAsTarget) => void;
+  /** 點「返回總部概況」時清除 viewAsFranchisee */
+  onExitViewAs?: () => void;
+}) {
   const isNarrow = useIsNarrowScreen();
-  const isAdmin = userRole === 'admin';
+  const realIsAdmin = userRole === 'admin';
+  /** 「實際渲染時」的 admin 身份：總部本人＋未進入 view-as 才為 true */
+  const isAdmin = realIsAdmin && !viewAsFranchisee;
   const [financeTick, setFinanceTick] = useState(0);
   const [orderTick, setOrderTick] = useState(0);
   const [summaryRange, setSummaryRange] = useState<SummaryRangeKey>('month');
@@ -144,12 +166,29 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
   const [showAllFranchise, setShowAllFranchise] = useState(false);
   const [showAllSelf, setShowAllSelf] = useState(false);
   const [showAllExpenseSelf, setShowAllExpenseSelf] = useState(false);
+  /** 各加盟店挑選浮層；點頂端按鈕才顯示，不佔主頁版面 */
+  const [franchisePickerOpen, setFranchisePickerOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin && summaryRange === 'year') {
       setSummaryRange('month');
     }
   }, [isAdmin, summaryRange]);
+
+  useEffect(() => {
+    if (!isAdmin && franchisePickerOpen) {
+      setFranchisePickerOpen(false);
+    }
+  }, [isAdmin, franchisePickerOpen]);
+
+  useEffect(() => {
+    if (!franchisePickerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFranchisePickerOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [franchisePickerOpen]);
 
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
@@ -203,10 +242,31 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
     return all;
   }, [userRole, orderTick]);
 
+  /**
+   * 「實際渲染」用的訂單清單：view-as 時限縮為該加盟主之單，其他情境同 dashboardOrders。
+   * 與 view-as 對應的下方營收／支出計算皆改用此清單，確保與該加盟主自身 Dashboard 一致。
+   */
+  const effectiveOrders = useMemo(() => {
+    if (!viewAsFranchisee) return dashboardOrders;
+    return dashboardOrders.filter(
+      (o) => o.actorRole === 'franchisee' && o.actorUserId === viewAsFranchisee.userId,
+    );
+  }, [dashboardOrders, viewAsFranchisee]);
+
+  /**
+   * 「實際渲染」用之流水帳：view-as 改讀指定加盟店 scope 的紀錄；其餘沿用目前登入身份的 scope。
+   */
+  const ledgerForView = useMemo(() => {
+    if (viewAsFranchisee) {
+      return listAccountingLedgerEntriesForScopeId(`scope:franchisee:${viewAsFranchisee.userId}`);
+    }
+    return listAccountingLedgerEntries();
+  }, [viewAsFranchisee, financeTick, userRole]);
+
   const nonAdminSummary = useMemo(() => {
     if (isAdmin) return null;
     const { startYmd, endYmd } = resolveRange(summaryRange);
-    const stallCompleted = dashboardOrders.filter((o) => {
+    const stallCompleted = effectiveOrders.filter((o) => {
       if (!o.stallCountCompletedAt) return false;
       const ymd = stallCountAttributeYmd(o);
       return Boolean(ymd && ymd >= startYmd && ymd <= endYmd);
@@ -222,10 +282,11 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       return s + o.totalAmount;
     }, 0);
     const gross = revenue - procurementCost;
+    // employee 自身視角不計流水帳；總部以加盟主視角檢視時，直接讀該加盟店流水帳（admin 權限）。
     const ledgerExpense =
-      userRole === 'employee'
+      userRole === 'employee' && !viewAsFranchisee
         ? 0
-        : listAccountingLedgerEntries()
+        : ledgerForView
             .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
             .reduce((s, e) => s + e.amount, 0);
     const expense = procurementCost + ledgerExpense;
@@ -243,12 +304,12 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       netRate: pct(net, revenue),
       completed: stallCompleted,
     };
-  }, [dashboardOrders, isAdmin, summaryRange, financeTick, userRole]);
+  }, [effectiveOrders, ledgerForView, isAdmin, summaryRange, userRole, viewAsFranchisee]);
 
   const topProducts = useMemo(() => {
     const completed =
       isAdmin || !nonAdminSummary
-        ? dashboardOrders.filter((o) => o.status === '已完成')
+        ? effectiveOrders.filter((o) => o.status === '已完成')
         : nonAdminSummary.completed;
     const byName = new Map<string, { name: string; sales: number; revenue: number }>();
     for (const o of completed) {
@@ -262,7 +323,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
     return Array.from(byName.values())
       .sort((a, b) => (b.revenue === a.revenue ? b.sales - a.sales : b.revenue - a.revenue))
       .map((r, i) => ({ id: i + 1, ...r }));
-  }, [dashboardOrders, isAdmin, nonAdminSummary]);
+  }, [effectiveOrders, isAdmin, nonAdminSummary]);
 
   const topProductsTotalRevenue = useMemo(
     () => topProducts.reduce((s, p) => s + p.revenue, 0),
@@ -271,12 +332,13 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
 
   const nonAdminExpenseRows = useMemo(() => {
     if (isAdmin) return [];
-    if (userRole === 'employee') return [];
+    // employee 自身視角不顯示流水帳支出佔比；總部以加盟主視角檢視時直接讀該店流水帳。
+    if (userRole === 'employee' && !viewAsFranchisee) return [];
     const { startYmd, endYmd } = resolveRange(summaryRange);
     const byName = new Map<string, number>();
     const procurementCost = nonAdminSummary?.procurementCost ?? 0;
     if (procurementCost > 0) byName.set('批貨與自備成本', procurementCost);
-    for (const e of listAccountingLedgerEntries()) {
+    for (const e of ledgerForView) {
       if (e.flowType !== 'expense') continue;
       if (e.dateYmd < startYmd || e.dateYmd > endYmd) continue;
       const name = e.subCategory?.trim() ? `${e.category} / ${e.subCategory.trim()}` : e.category;
@@ -287,7 +349,7 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
       .sort((a, b) => b.amount - a.amount);
     const total = rows.reduce((s, r) => s + r.amount, 0);
     return rows.map((r, i) => ({ id: i + 1, name: r.name, amount: r.amount, pct: pct(r.amount, total) }));
-  }, [isAdmin, summaryRange, financeTick, nonAdminSummary, userRole]);
+  }, [isAdmin, summaryRange, ledgerForView, nonAdminSummary, userRole, viewAsFranchisee]);
 
   const adminSummaryOrders = useMemo(() => {
     if (!isAdmin) return [];
@@ -376,16 +438,137 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
     );
   }, [adminSummaryOrders, isAdmin]);
 
+  /**
+   * 各加盟店「自身」營運摘要（與加盟主自己的 Dashboard 視角一致）：
+   * - 已完成訂單數：依「建單日落於本期間」計
+   * - 盤點完成數：依「盤點日落於本期間」計
+   * - 盤點後營收：以盤點日歸屬，採加盟主視角的零售營收
+   * - 批貨成本：對應的盤點完成單之批貨應付（含自備已扣後總額）
+   * - 毛利＝營收 − 批貨成本
+   * - 流水帳支出：總部看不到加盟店的私帳，因此不納入
+   */
+  const franchiseStoreBreakdown = useMemo(() => {
+    if (!realIsAdmin) return [];
+    const { startYmd, endYmd } = resolveRange(summaryRange);
+    type Row = {
+      /** 加盟主之 user.id；舊資料若無 actorUserId 則為 null（無法進入 view-as） */
+      franchiseeUserId: string | null;
+      label: string;
+      completedOrderCount: number;
+      stallCompletedCount: number;
+      revenue: number;
+      procurementCost: number;
+    };
+    const map = new Map<string, Row>();
+    for (const o of dashboardOrders) {
+      if (o.actorRole !== 'franchisee') continue;
+
+      const createdYmd = ymdFromIso(o.createdAt);
+      const isCompletedInRange =
+        o.status === '已完成' && createdYmd >= startYmd && createdYmd <= endYmd;
+
+      const stallYmd = stallCountAttributeYmd(o);
+      const isStallInRange = Boolean(
+        o.stallCountCompletedAt && stallYmd && stallYmd >= startYmd && stallYmd <= endYmd,
+      );
+
+      if (!isCompletedInRange && !isStallInRange) continue;
+
+      const label = resolveOrderStoreLabel({
+        storeLabel: o.storeLabel,
+        actorRole: o.actorRole,
+        actorUserId: o.actorUserId,
+      });
+      const franchiseeUserId = o.actorUserId ?? null;
+      // 以加盟主 user.id 為唯一鍵，避免不同加盟主湊巧同名而被合併
+      const key = franchiseeUserId ? `uid:${franchiseeUserId}` : `legacy:${label}`;
+      const row =
+        map.get(key) ??
+        ({
+          franchiseeUserId,
+          label,
+          completedOrderCount: 0,
+          stallCompletedCount: 0,
+          revenue: 0,
+          procurementCost: 0,
+        } satisfies Row);
+
+      if (isCompletedInRange) row.completedOrderCount += 1;
+      if (isStallInRange) {
+        row.stallCompletedCount += 1;
+        row.revenue += getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW) ?? 0;
+        row.procurementCost += o.totalAmount;
+      }
+      map.set(key, row);
+    }
+    return Array.from(map.values())
+      .map((r) => ({
+        ...r,
+        gross: r.revenue - r.procurementCost,
+        grossRate: pct(r.revenue - r.procurementCost, r.revenue),
+      }))
+      .sort(
+        (a, b) =>
+          b.revenue - a.revenue ||
+          b.completedOrderCount - a.completedOrderCount ||
+          a.label.localeCompare(b.label, 'zh-Hant'),
+      );
+  }, [dashboardOrders, realIsAdmin, summaryRange]);
+
   return (
     <div className="space-y-6">
+      {viewAsFranchisee && (
+        <div className="rounded-xl border border-amber-600/40 bg-amber-600/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-start sm:items-center gap-2 min-w-0">
+            <Eye size={18} className="text-amber-400 shrink-0 mt-0.5 sm:mt-0" aria-hidden />
+            <p className="text-sm text-amber-100 leading-relaxed">
+              目前以加盟主視角檢視
+              <span className="font-semibold text-amber-300 mx-1">{viewAsFranchisee.label}</span>
+              的營運概況
+              <span className="text-amber-200/70 ml-1">（與加盟主自身畫面一致；流水帳支出取該店本機紀錄）</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onExitViewAs?.()}
+            className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/50 bg-amber-600/15 text-amber-200 text-xs font-medium hover:bg-amber-600/25 shrink-0"
+          >
+            <ArrowLeft size={14} aria-hidden />
+            返回總部概況
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <LayoutDashboard className="text-amber-500 shrink-0" size={28} />
-            {isAdmin ? '總部營運概況' : '我的營運概況'}
+            {viewAsFranchisee
+              ? `${viewAsFranchisee.label} 營運概況`
+              : realIsAdmin
+                ? '總部營運概況'
+                : '我的營運概況'}
           </h2>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setFranchisePickerOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-zinc-900/80 border border-zinc-700 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:border-amber-600/50 hover:text-amber-200 transition-colors font-medium text-xs"
+              title="點此挑選一家加盟店，以該加盟主視角檢視完整營運概況"
+              aria-haspopup="dialog"
+              aria-expanded={franchisePickerOpen}
+            >
+              <Store size={14} className="shrink-0" aria-hidden />
+              各加盟店概況
+              {franchiseStoreBreakdown.length > 0 && (
+                <span className="text-[10px] font-semibold text-amber-400 tabular-nums">
+                  {franchiseStoreBreakdown.length}
+                </span>
+              )}
+            </button>
+          )}
           <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 hover:bg-zinc-700 transition-colors font-medium text-xs">
             今日
           </button>
@@ -575,6 +758,152 @@ export default function Dashboard({ userRole }: { userRole: UserRole }) {
             <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4">
               <p className="text-xs text-zinc-500">總支出成本</p>
               <p className="text-2xl mt-1 text-rose-300 tabular-nums">{moneyTW(adminRangeSummary.totalExpense)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && franchisePickerOpen && (
+        <div
+          className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="franchise-picker-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setFranchisePickerOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-3xl max-h-[90dvh] flex flex-col rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl overflow-hidden"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 px-5 sm:px-6 py-4 border-b border-zinc-800/80">
+              <div className="flex items-center gap-2 min-w-0">
+                <Store size={20} className="text-amber-500/90 shrink-0" aria-hidden />
+                <div className="min-w-0">
+                  <h3
+                    id="franchise-picker-title"
+                    className="text-base sm:text-lg font-medium text-zinc-100"
+                  >
+                    各加盟店營運概況（{summaryRangeLabel(summaryRange)}）
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {franchiseStoreBreakdown.length === 0
+                      ? '本期間尚無加盟店資料；新增叫貨／完成盤點後即會出現。'
+                      : `共 ${franchiseStoreBreakdown.length} 家加盟店・點任一卡片即可進入該加盟主視角檢視完整概況`}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFranchisePickerOpen(false)}
+                className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 shrink-0"
+                aria-label="關閉"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5">
+              {franchiseStoreBreakdown.length === 0 ? (
+                <p className="text-sm text-zinc-500 text-center py-8">
+                  本期間（{summaryRangeLabel(summaryRange)}）尚無加盟店訂單或盤點資料可彙整。
+                  <br />
+                  可關閉本視窗後切換上方時段（本日／本週／本月／本年）試試。
+                </p>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {franchiseStoreBreakdown.map((row) => {
+                      const canDrillIn = Boolean(row.franchiseeUserId && onSelectFranchisee);
+                      const cardInner = (
+                        <>
+                          <div className="flex items-baseline justify-between gap-2 min-w-0">
+                            <h4
+                              className="text-sm font-medium text-zinc-100 truncate"
+                              title={row.label}
+                            >
+                              {row.label}
+                            </h4>
+                            <span className="text-[11px] text-zinc-500 shrink-0 tabular-nums">
+                              {row.completedOrderCount} 單・盤 {row.stallCompletedCount}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-zinc-500">盤點後營收</p>
+                            <p className="text-lg sm:text-xl font-light tabular-nums text-amber-300">
+                              {moneyTW(row.revenue)}
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[11px] mt-1 pt-2 border-t border-zinc-800/70">
+                            <div>
+                              <p className="text-zinc-500">批貨成本</p>
+                              <p className="text-zinc-300 tabular-nums">{moneyTW(row.procurementCost)}</p>
+                            </div>
+                            <div>
+                              <p className="text-zinc-500">
+                                毛利（{row.revenue > 0 ? `${row.grossRate.toFixed(1)}%` : '—'}）
+                              </p>
+                              <p
+                                className={cn(
+                                  'tabular-nums',
+                                  row.gross >= 0 ? 'text-emerald-300' : 'text-rose-300',
+                                )}
+                              >
+                                {moneyTW(row.gross)}
+                              </p>
+                            </div>
+                          </div>
+                          <div
+                            className={cn(
+                              'mt-3 pt-2 border-t border-zinc-800/70 flex items-center justify-between text-[11px]',
+                              canDrillIn ? 'text-amber-300/90' : 'text-zinc-600',
+                            )}
+                          >
+                            <span>
+                              {canDrillIn ? '進入該加盟主完整營運概況' : '舊資料缺加盟主帳號，無法進入'}
+                            </span>
+                            {canDrillIn && (
+                              <ChevronRight
+                                size={14}
+                                className="shrink-0 transition-transform group-hover:translate-x-0.5"
+                                aria-hidden
+                              />
+                            )}
+                          </div>
+                        </>
+                      );
+                      return canDrillIn ? (
+                        <button
+                          key={row.franchiseeUserId ?? row.label}
+                          type="button"
+                          onClick={() => {
+                            onSelectFranchisee?.({
+                              userId: row.franchiseeUserId as string,
+                              label: row.label,
+                            });
+                            setFranchisePickerOpen(false);
+                          }}
+                          className="group text-left rounded-xl border border-zinc-800/80 bg-zinc-950/50 p-4 flex flex-col gap-2 hover:border-amber-600/50 hover:bg-amber-600/[0.04] focus:outline-none focus:ring-2 focus:ring-amber-500/40 transition-colors"
+                          aria-label={`進入 ${row.label} 的營運概況`}
+                        >
+                          {cardInner}
+                        </button>
+                      ) : (
+                        <div
+                          key={row.franchiseeUserId ?? row.label}
+                          className="rounded-xl border border-zinc-800/80 bg-zinc-950/50 p-4 flex flex-col gap-2 opacity-90"
+                        >
+                          {cardInner}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-4 leading-relaxed">
+                    營收／成本以「盤點完成」之單依盤點日歸期；訂單數依「建單日」歸期，故兩者數量可能不同。
+                    點卡片進入後可看到該加盟主的商品營收佔比、流水帳支出佔比等完整 Dashboard。
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>

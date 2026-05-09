@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
-import Dashboard from './views/Dashboard';
+import Dashboard, { type DashboardViewAsTarget } from './views/Dashboard';
 import LoginScreen from './views/LoginScreen';
 import Products from './views/Products';
 import Permissions from './views/Permissions';
@@ -36,6 +36,8 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [currentView, setCurrentView] = useState('dashboard');
+  /** 總部以加盟主視角檢視（view-as）的目標；非 dashboard 頁時自動清除 */
+  const [viewAsFranchisee, setViewAsFranchisee] = useState<DashboardViewAsTarget | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const scrollLockYRef = useRef(0);
 
@@ -144,6 +146,18 @@ export default function App() {
     }
   }, [userRole, currentView]);
 
+  useEffect(() => {
+    if (currentView !== 'dashboard' && viewAsFranchisee) {
+      setViewAsFranchisee(null);
+    }
+  }, [currentView, viewAsFranchisee]);
+
+  useEffect(() => {
+    if (userRole !== 'admin' && viewAsFranchisee) {
+      setViewAsFranchisee(null);
+    }
+  }, [userRole, viewAsFranchisee]);
+
   const handleLogout = () => {
     clearSession();
     setSession(null);
@@ -154,7 +168,14 @@ export default function App() {
     if (!session) return null;
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard userRole={userRole} />;
+        return (
+          <Dashboard
+            userRole={userRole}
+            viewAsFranchisee={viewAsFranchisee}
+            onSelectFranchisee={(target) => setViewAsFranchisee(target)}
+            onExitViewAs={() => setViewAsFranchisee(null)}
+          />
+        );
       case 'orders':
         return <Orders userRole={userRole} />;
       case 'products':

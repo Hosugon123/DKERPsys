@@ -8,6 +8,7 @@ import {
   X,
   Minus,
   Plus,
+  Wallet,
 } from 'lucide-react';
 import type { UserRole } from './Orders';
 import {
@@ -512,7 +513,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       onChange={(e) => setLine(item.id, 'remain', e.target.value)}
                       placeholder="必填"
                       className={cn(
-                        'w-14 min-w-0 min-h-9 bg-zinc-900/80 border rounded px-1 font-mono text-sm text-center',
+                        'w-14 min-w-0 min-h-9 bg-zinc-900/80 border rounded px-1 font-mono text-[0.6125rem] leading-tight text-center',
                         c.remainUnfilled
                           ? 'border-amber-800/50 border-dashed text-zinc-400 placeholder:text-zinc-600'
                           : c.remain > 0
@@ -561,15 +562,55 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         </table>
       </div>
 
-      <button
-        type="button"
-        onClick={requestInventoryComplete}
-        className="fixed bottom-5 right-4 z-40 inline-flex items-center justify-center gap-2 min-h-[48px] px-4 sm:px-5 rounded-2xl bg-amber-600 text-zinc-950 font-semibold text-sm shadow-lg shadow-black/50 ring-2 ring-amber-400/30 hover:bg-amber-500 sm:bottom-6 sm:right-6"
-        aria-label="盤點完成（與上方按鈕相同）"
+      <div
+        className="fixed bottom-4 right-3 sm:bottom-6 sm:right-6 z-40 max-w-[calc(100vw-1.5rem)] sm:max-w-md"
+        aria-label="實收對帳與盤點完成"
       >
-        <CheckCircle2 size={20} className="shrink-0" />
-        盤點完成
-      </button>
+        <div className="rounded-2xl border border-amber-500/40 bg-zinc-950/95 backdrop-blur-md shadow-2xl shadow-black/60 ring-1 ring-amber-500/20 p-2 sm:p-2.5 flex flex-col gap-1.5">
+          <div className="flex items-stretch gap-1.5 sm:gap-2">
+            <label
+              className="flex-1 min-w-0 flex items-stretch rounded-xl border border-zinc-700 bg-zinc-900/80 overflow-hidden focus-within:border-amber-500/60 focus-within:ring-1 focus-within:ring-amber-500/30"
+              title="盤點後實收：當日現金／收銀實收金額。與上方「實收對帳」欄位連動。"
+            >
+              <span className="px-2 sm:px-2.5 py-2 text-[11px] sm:text-xs text-amber-300 font-medium flex items-center gap-1 whitespace-nowrap border-r border-zinc-700/80 bg-zinc-900/60">
+                <Wallet size={14} className="text-amber-500 shrink-0" aria-hidden />
+                實收
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={snap.actualRevenue}
+                onChange={(e) => setSnap((p) => ({ ...p, actualRevenue: e.target.value }))}
+                placeholder="0"
+                aria-label="盤點後實收金額"
+                className="w-24 sm:w-32 min-w-0 bg-transparent px-2 py-2 text-amber-100 font-mono text-sm sm:text-base tabular-nums focus:outline-none placeholder:text-zinc-600"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={requestInventoryComplete}
+              className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[48px] px-3 sm:px-4 rounded-xl bg-amber-600 text-zinc-950 font-semibold text-sm hover:bg-amber-500 active:scale-[0.98] ring-1 ring-amber-400/40"
+              aria-label="盤點完成（與上方按鈕相同）"
+            >
+              <CheckCircle2 size={18} className="shrink-0" />
+              盤點完成
+            </button>
+          </div>
+          {snap.actualRevenue.trim() !== '' && (
+            <p className="text-[10.5px] sm:text-[11px] text-zinc-500 px-1 leading-snug tabular-nums">
+              應有 ${money(dayKpi.shouldRevenue)}・落差{' '}
+              <span
+                className={cn(
+                  'font-medium',
+                  diff < 0 ? 'text-rose-400' : diff > 0 ? 'text-emerald-300' : 'text-zinc-300',
+                )}
+              >
+                {diff === 0 ? '$0' : `${diff < 0 ? '−' : '+'}$${money(Math.abs(diff))}`}
+              </span>
+            </p>
+          )}
+        </div>
+      </div>
 
       {stallCountConfirmOpen && viewOrder && (
         <div

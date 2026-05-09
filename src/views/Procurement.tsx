@@ -13,7 +13,7 @@ import {
   ChevronUp,
   X,
 } from 'lucide-react';
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { UserRole } from './Orders';
 import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryLine, OrderHistoryEntry } from '../lib/orderHistoryStorage';
@@ -272,6 +272,56 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     return total + (item && q > 0 ? estimatedRetailPerPackage(item) * q : 0);
   }, 0);
 
+  /** 手機鍵盤／數量欄聚焦時：底部結帳列改單列精簡，並用 visualViewport 貼在鍵盤上方 */
+  const checkoutDockRef = useRef<HTMLDivElement | null>(null);
+  const [checkoutBarCompact, setCheckoutBarCompact] = useState(false);
+  const syncCheckoutDock = useCallback(() => {
+    const el = checkoutDockRef.current;
+    const vv = window.visualViewport;
+    const inset =
+      vv != null ? Math.max(0, window.innerHeight - vv.offsetTop - vv.height) : 0;
+    if (el) el.style.bottom = `${inset}px`;
+
+    const mobile = window.matchMedia('(max-width:639px)').matches;
+    const ae = document.activeElement as HTMLElement | null;
+    const qtyFieldFocused =
+      ae?.tagName === 'INPUT' && (ae.getAttribute('name')?.startsWith('qty-') ?? false);
+    const keyboardLikely = inset > 96;
+    setCheckoutBarCompact(mobile && (qtyFieldFocused || keyboardLikely));
+  }, []);
+
+  useEffect(() => {
+    syncCheckoutDock();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', syncCheckoutDock);
+    vv?.addEventListener('scroll', syncCheckoutDock);
+    window.addEventListener('resize', syncCheckoutDock);
+    document.addEventListener('focusin', syncCheckoutDock);
+    document.addEventListener('focusout', syncCheckoutDock);
+    return () => {
+      vv?.removeEventListener('resize', syncCheckoutDock);
+      vv?.removeEventListener('scroll', syncCheckoutDock);
+      window.removeEventListener('resize', syncCheckoutDock);
+      document.removeEventListener('focusin', syncCheckoutDock);
+      document.removeEventListener('focusout', syncCheckoutDock);
+    };
+  }, [syncCheckoutDock]);
+
+  useEffect(() => {
+    if (totalCount > 0) syncCheckoutDock();
+  }, [totalCount, syncCheckoutDock]);
+
+  const compactPayableHint =
+    userRole === 'franchisee' && (selfSuppliedDeduction > 0 || totalSelfSuppliedCost > 0)
+      ? `貨款總額 $${totalPayablePrice.toLocaleString()}` +
+        (selfSuppliedDeduction > 0
+          ? `・實際應付 $${franchiseeNetPayable.toLocaleString()}（已扣自備 $${Math.round(selfSuppliedDeduction).toLocaleString()}）`
+          : '') +
+        (totalSelfSuppliedCost > 0
+          ? `・自備成本 $${Math.round(totalSelfSuppliedCost).toLocaleString()}`
+          : '')
+      : undefined;
+
   const buildLinesFromCart = useCallback((): OrderHistoryLine[] => {
     return Object.entries(cart)
       .map(([id, qty]) => {
@@ -439,7 +489,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   }
 
   return (
-    <div className="space-y-3 pb-36 max-w-3xl mx-auto lg:max-w-none">
+    <div
+      className={cn(
+        'space-y-3 max-w-3xl mx-auto lg:max-w-none',
+        checkoutBarCompact ? 'pb-28' : 'pb-36'
+      )}
+    >
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -921,6 +976,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     type="text"
                     name={`qty-${item.id}`}
                     inputMode="decimal"
+                    enterKeyHint="done"
                     autoComplete="off"
                     id={`proc-qty-${item.id}`}
                     value={
@@ -990,69 +1046,145 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       </ul>
 
       {totalCount > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 lg:left-64 z-40 pointer-events-none px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 bg-gradient-to-t from-[#0a0a0a] to-transparent">
-          <div className="max-w-3xl mx-auto pointer-events-auto rounded-2xl border border-zinc-700/90 bg-zinc-950/95 backdrop-blur-md shadow-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="relative shrink-0">
-                <ShoppingBasket className="text-amber-500" size={28} />
-              </div>
-              <div className="min-w-0">
-                {showProcurementCost ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5 min-w-[15rem] sm:min-w-[26rem]">
-                    <div className="min-w-0 sm:pr-2">
-                      <p className="text-xs text-zinc-500">{payableTitle}</p>
-                      <p className="text-lg sm:text-xl font-semibold text-amber-400 tabular-nums">
+        <div
+          ref={checkoutDockRef}
+          className={cn(
+            'fixed left-0 right-0 lg:left-64 z-40 pointer-events-none bg-gradient-to-t from-[#0a0a0a] to-transparent',
+            checkoutBarCompact
+              ? 'px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1'
+              : 'px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2'
+          )}
+        >
+          <div
+            className={cn(
+              'max-w-3xl mx-auto pointer-events-auto border border-zinc-700/90 bg-zinc-950/95 backdrop-blur-md shadow-2xl',
+              checkoutBarCompact
+                ? 'rounded-xl p-2 flex flex-row flex-nowrap items-stretch gap-2'
+                : 'rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'
+            )}
+          >
+            {checkoutBarCompact ? (
+              <>
+                <ShoppingBasket className="text-amber-500 shrink-0 self-center" size={22} aria-hidden />
+                <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                  {showProcurementCost ? (
+                    <div
+                      className="flex flex-wrap items-baseline gap-x-1 gap-y-0 text-[11px] leading-snug tabular-nums"
+                      aria-label="訂單金額摘要"
+                    >
+                      <span className="text-zinc-500 shrink-0">{payableTitle}</span>
+                      <span
+                        className="font-semibold text-amber-400 shrink-0"
+                        title={compactPayableHint}
+                      >
                         $ {totalPayablePrice.toLocaleString()}
-                      </p>
-                      {userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
-                        <p className="text-[11px] text-zinc-500 mt-0.5">
-                          扣除自備品項 $ {Math.round(selfSuppliedDeduction).toLocaleString()} 後，實際應付 $ {Math.round(franchiseeNetPayable).toLocaleString()}
-                        </p>
-                      )}
-                      {userRole === 'franchisee' && totalSelfSuppliedCost > 0 && (
-                        <p className="text-[11px] text-zinc-500">
-                          自備成本（計入支出）$ {Math.round(totalSelfSuppliedCost).toLocaleString()}
-                        </p>
-                      )}
-                    </div>
-                    <div className="min-w-0 sm:pl-2 sm:border-l sm:border-zinc-800/70">
-                      <p className="text-xs text-zinc-500">零售預估（售完參考）</p>
-                      <p className="text-lg sm:text-xl font-semibold text-emerald-400 tabular-nums">
+                      </span>
+                      <span className="text-zinc-600 shrink-0" aria-hidden>
+                        ·
+                      </span>
+                      <span className="text-zinc-500 shrink-0">零售估</span>
+                      <span className="font-semibold text-emerald-400">
                         $ {totalRetailEstimate.toLocaleString()}
-                      </p>
+                      </span>
                     </div>
+                  ) : (
+                    <div className="text-[11px] leading-snug tabular-nums flex flex-wrap items-baseline gap-x-1 gap-y-0">
+                      <span className="text-zinc-500 shrink-0">零售預估</span>
+                      <span className="font-semibold text-emerald-400">
+                        $ {totalRetailEstimate.toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-1.5 items-stretch">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCart({});
+                      setQtyInputDraft({});
+                      setSubmitModalOpen(false);
+                    }}
+                    className="min-w-0 min-h-0 h-10 px-3 rounded-lg border-2 border-zinc-600 bg-zinc-900/80 text-zinc-200 text-sm font-semibold hover:bg-zinc-800 active:scale-[0.98]"
+                  >
+                    清空
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openSubmitConfirm}
+                    className="min-w-0 min-h-0 h-10 px-3.5 rounded-lg bg-amber-500 text-zinc-950 text-sm font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1.5"
+                    aria-label="送出訂單"
+                  >
+                    <ListOrdered size={17} className="shrink-0" aria-hidden />
+                    送出
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="relative shrink-0">
+                    <ShoppingBasket className="text-amber-500" size={28} />
                   </div>
-                ) : (
-                  <div>
-                    <p className="text-xs text-zinc-500">零售預估合計（售完參考）</p>
-                    <p className="text-xl font-semibold text-emerald-400 tabular-nums">
-                      $ {totalRetailEstimate.toLocaleString()}
-                    </p>
+                  <div className="min-w-0">
+                    {showProcurementCost ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5 min-w-[15rem] sm:min-w-[26rem]">
+                        <div className="min-w-0 sm:pr-2">
+                          <p className="text-xs text-zinc-500">{payableTitle}</p>
+                          <p className="text-lg sm:text-xl font-semibold text-amber-400 tabular-nums">
+                            $ {totalPayablePrice.toLocaleString()}
+                          </p>
+                          {userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
+                            <p className="text-[11px] text-zinc-500 mt-0.5">
+                              扣除自備品項 $ {Math.round(selfSuppliedDeduction).toLocaleString()} 後，實際應付 $
+                              {Math.round(franchiseeNetPayable).toLocaleString()}
+                            </p>
+                          )}
+                          {userRole === 'franchisee' && totalSelfSuppliedCost > 0 && (
+                            <p className="text-[11px] text-zinc-500">
+                              自備成本（計入支出）$ {Math.round(totalSelfSuppliedCost).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                        <div className="min-w-0 sm:pl-2 sm:border-l sm:border-zinc-800/70">
+                          <p className="text-xs text-zinc-500">零售預估（售完參考）</p>
+                          <p className="text-lg sm:text-xl font-semibold text-emerald-400 tabular-nums">
+                            $ {totalRetailEstimate.toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-xs text-zinc-500">零售預估合計（售完參考）</p>
+                        <p className="text-xl font-semibold text-emerald-400 tabular-nums">
+                          $ {totalRetailEstimate.toLocaleString()}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </div>
-            <div className="flex flex-row flex-wrap gap-2 w-full sm:w-auto sm:shrink-0 sm:justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setCart({});
-                  setQtyInputDraft({});
-                  setSubmitModalOpen(false);
-                }}
-                className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-5 rounded-xl border-2 border-zinc-600 bg-zinc-900/80 text-zinc-200 text-base font-semibold hover:bg-zinc-800 active:scale-[0.98]"
-              >
-                清空
-              </button>
-              <button
-                type="button"
-                onClick={openSubmitConfirm}
-                className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-6 rounded-xl bg-amber-500 text-zinc-950 text-base font-bold active:scale-[0.98] flex items-center justify-center gap-2"
-              >
-                <ListOrdered size={20} />
-                送出訂單
-              </button>
-            </div>
+                </div>
+                <div className="flex flex-row flex-wrap gap-2 w-full sm:w-auto sm:shrink-0 sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCart({});
+                      setQtyInputDraft({});
+                      setSubmitModalOpen(false);
+                    }}
+                    className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-5 rounded-xl border-2 border-zinc-600 bg-zinc-900/80 text-zinc-200 text-base font-semibold hover:bg-zinc-800 active:scale-[0.98]"
+                  >
+                    清空
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openSubmitConfirm}
+                    className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-6 rounded-xl bg-amber-500 text-zinc-950 text-base font-bold active:scale-[0.98] flex items-center justify-center gap-2"
+                  >
+                    <ListOrdered size={20} />
+                    送出訂單
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

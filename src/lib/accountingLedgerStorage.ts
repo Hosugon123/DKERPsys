@@ -407,6 +407,19 @@ export function listAccountingLedgerEntries(): AccountingLedgerEntry[] {
   return sortEntries(s.byScope[scopeId] ?? []);
 }
 
+/**
+ * 指定 scope 之紀錄（新→舊）。
+ * 僅在「總部以管理視角檢視某加盟店」場景使用：呼叫端應自行確認執行者為 admin。
+ * 一般使用者請改用 `listAccountingLedgerEntries()`，會依目前登入身份自動圈定 scope。
+ */
+export function listAccountingLedgerEntriesForScopeId(scopeId: string): AccountingLedgerEntry[] {
+  if (!scopeId) return [];
+  const { isAdmin } = getDataScopeContext();
+  if (!isAdmin) return [];
+  const s = loadStore();
+  return sortEntries(s.byScope[scopeId] ?? []);
+}
+
 /** 依 YYYY-MM 篩選 */
 export function listAccountingLedgerEntriesForMonth(ym: string): AccountingLedgerEntry[] {
   const prefix = ym.length === 7 ? ym : ym.slice(0, 7);

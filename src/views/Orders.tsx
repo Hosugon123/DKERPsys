@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback, type MouseEvent } from 'react';
-import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2, ListOrdered } from 'lucide-react';
+import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2, ListOrdered, Store } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { orderDateQueryMatches, formatSlashDateTimeWithWeekdayFromIso, orderMatchesActiveWeekdays } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
@@ -33,6 +33,14 @@ export type UserRole = 'admin' | 'franchisee' | 'employee';
 
 const STATUS_TABS = ['所有訂單', '待出貨', '已完成', '已取消'] as const;
 type StatusFilter = (typeof STATUS_TABS)[number];
+
+const HQ_STORE_LABEL = '直營店';
+type StoreTypeFilter = 'all' | 'hq' | 'franchise';
+const STORE_TYPE_TABS: { id: StoreTypeFilter; label: string }[] = [
+  { id: 'all', label: '全部店家' },
+  { id: 'hq', label: '直營店' },
+  { id: 'franchise', label: '加盟店' },
+];
 
 type OrderRow = {
   id: string;
@@ -201,6 +209,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [historyOrders, setHistoryOrders] = useState<OrderHistoryEntry[]>([]);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('所有訂單');
+  /** 店家類型篩選：全部 / 直營 / 加盟 */
+  const [storeTypeFilter, setStoreTypeFilter] = useState<StoreTypeFilter>('all');
+  /** 指定店家篩選；'all' 表示不指定，其他為已解析後的店名（與列表顯示一致） */
+  const [storeLabelFilter, setStoreLabelFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   /** 建單星期篩選（空＝不篩選） */
   const [activeWeekdays, setActiveWeekdays] = useState<number[]>([]);
@@ -282,13 +294,65 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     });
   }, [rawList, userRole]);
 
+  /**
+   * 從目前可見資料抓出所有「曾經出現過」的店家，作為下拉選項。
+   * 同時記錄類型（直營／加盟）以便依「店家類型」過濾。
+   */
+  const storeOptions = useMemo(() => {
+    const map = new Map<string, { label: string; type: 'hq' | 'franchise'; count: number }>();
+    for (const o of ordersData) {
+      const label = o.franchisee;
+      if (!label) continue;
+      const type: 'hq' | 'franchise' = label === HQ_STORE_LABEL ? 'hq' : 'franchise';
+      const cur = map.get(label);
+      if (cur) cur.count += 1;
+      else map.set(label, { label, type, count: 1 });
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'hq' ? -1 : 1;
+      return a.label.localeCompare(b.label, 'zh-Hant');
+    });
+  }, [ordersData]);
+
+  /** 經店家類型過濾後的下拉選項（避免「直營」分頁下還能選到加盟店名） */
+  const visibleStoreOptions = useMemo(() => {
+    if (storeTypeFilter === 'all') return storeOptions;
+    return storeOptions.filter((s) => s.type === storeTypeFilter);
+  }, [storeOptions, storeTypeFilter]);
+
+  /** 切換店家類型時，若已選定的店家不在類型內，重置為「全部」 */
+  useEffect(() => {
+    if (storeLabelFilter === 'all') return;
+    const stillVisible = visibleStoreOptions.some((s) => s.label === storeLabelFilter);
+    if (!stillVisible) setStoreLabelFilter('all');
+  }, [storeLabelFilter, visibleStoreOptions]);
+
+  /** 若店名已不存在於資料（例如資料異動），自動重置避免空白結果 */
+  useEffect(() => {
+    if (storeLabelFilter === 'all') return;
+    const exists = storeOptions.some((s) => s.label === storeLabelFilter);
+    if (!exists) setStoreLabelFilter('all');
+  }, [storeLabelFilter, storeOptions]);
+
+  /** 是否顯示店家篩選 UI：加盟主僅看自己一家，無意義；其他角色至少出現過 1 家以上才顯示 */
+  const showStoreFilter = userRole !== 'franchisee' && storeOptions.length >= 2;
+
   const filteredOrders = useMemo(() => {
     const byWeekday = ordersData.filter((order) => {
       const o = rawList.find((r) => r.id === order.id);
       if (!o) return false;
       return orderMatchesActiveWeekdays(o.createdAt, activeWeekdays);
     });
-    const byStatus = byWeekday.filter((order) => {
+    const byStoreType = byWeekday.filter((order) => {
+      if (storeTypeFilter === 'all') return true;
+      const isHq = order.franchisee === HQ_STORE_LABEL;
+      return storeTypeFilter === 'hq' ? isHq : !isHq;
+    });
+    const byStoreLabel = byStoreType.filter((order) => {
+      if (storeLabelFilter === 'all') return true;
+      return order.franchisee === storeLabelFilter;
+    });
+    const byStatus = byStoreLabel.filter((order) => {
       if (statusFilter === '所有訂單') return true;
       return order.status === statusFilter;
     });
@@ -326,7 +390,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         )
       );
     });
-  }, [activeWeekdays, statusFilter, searchQuery, appliedDateRange, ordersData, rawList]);
+  }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, searchQuery, appliedDateRange, ordersData, rawList]);
 
   useEffect(() => {
     if (expandedOrderId && !filteredOrders.some((o) => o.id === expandedOrderId)) {
@@ -626,6 +690,88 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           </div>
         </div>
       </div>
+
+      {showStoreFilter && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <div
+            className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none shrink-0"
+            role="tablist"
+            aria-label="訂單店家類型篩選"
+          >
+            {STORE_TYPE_TABS.map((tab) => {
+              const isActive = storeTypeFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setStoreTypeFilter(tab.id)}
+                  className={cn(
+                    'flex-shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-medium transition-colors border text-xs sm:text-sm',
+                    isActive
+                      ? 'bg-amber-600/15 text-amber-400 border-amber-600/40'
+                      : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800'
+                  )}
+                >
+                  {tab.id === 'hq' && <Store size={13} aria-hidden />}
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="relative flex-1 min-w-0 sm:max-w-xs">
+            <label htmlFor="orders-store-filter" className="sr-only">
+              指定店家
+            </label>
+            <Store
+              size={15}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+              aria-hidden
+            />
+            <select
+              id="orders-store-filter"
+              value={storeLabelFilter}
+              onChange={(e) => setStoreLabelFilter(e.target.value)}
+              disabled={visibleStoreOptions.length === 0}
+              className={cn(
+                'w-full appearance-none pl-8 pr-3 py-1.5 rounded-lg border bg-zinc-900 text-xs sm:text-sm focus:outline-none focus:border-amber-500 transition-colors',
+                storeLabelFilter !== 'all'
+                  ? 'border-amber-600/50 text-amber-300'
+                  : 'border-zinc-700 text-zinc-300',
+                'disabled:opacity-50 disabled:cursor-not-allowed'
+              )}
+            >
+              <option value="all">
+                {storeTypeFilter === 'all'
+                  ? '所有店家'
+                  : storeTypeFilter === 'hq'
+                    ? '所有直營店'
+                    : '所有加盟店'}
+              </option>
+              {visibleStoreOptions.map((s) => (
+                <option key={s.label} value={s.label}>
+                  {s.label}（{s.count}）
+                </option>
+              ))}
+            </select>
+          </div>
+          {(storeTypeFilter !== 'all' || storeLabelFilter !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setStoreTypeFilter('all');
+                setStoreLabelFilter('all');
+              }}
+              className="self-start sm:self-auto inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
+              aria-label="清除店家篩選"
+            >
+              <X size={12} aria-hidden />
+              清除店家篩選
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-none" role="tablist" aria-label="訂單狀態篩選">
             {STATUS_TABS.map((tab) => {
