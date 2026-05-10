@@ -1,5 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, FileText, Target, Store, HandCoins, LayoutDashboard, ChevronRight, ArrowLeft, Eye, X } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  TrendingUp,
+  FileText,
+  Target,
+  Store,
+  HandCoins,
+  LayoutDashboard,
+  ChevronRight,
+  ChevronDown,
+  ArrowLeft,
+  Eye,
+  X,
+} from 'lucide-react';
 import {
   XAxis,
   YAxis,
@@ -13,7 +25,13 @@ import {
 import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
-import { computeAdminDashboardFinance, currentYmLocal, stallCountAttributeYmd } from '../lib/financeLib';
+import {
+  computeAdminDashboardFinance,
+  computeStallGapSummary,
+  currentYmLocal,
+  stallCountAttributeYmd,
+  type StallGapSummary,
+} from '../lib/financeLib';
 import {
   ACCOUNTING_LEDGER_UPDATED_EVENT,
   listAccountingLedgerEntries,
@@ -26,6 +44,8 @@ import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
   effectiveOrderDateYmd,
+  orderIsFranchiseBusinessScoped,
+  orderIsHeadquartersDirectScoped,
   type OrderHistoryEntry,
   type OrderActorRole,
 } from '../lib/orderHistoryStorage';
@@ -46,6 +66,10 @@ function roleVisible(actorRole: OrderActorRole, userRole: UserRole): boolean {
 
 type ProductRevenueRow = { id: number; name: string; revenue: number; qty: number; pct: number };
 type SummaryRangeKey = 'today' | 'week' | 'month' | 'year';
+/** 總部「直營盤點落差」專用；與下方營運摘要的 summaryRange 分開，避免必須捲動才能換區間 */
+type DirectStallGapRangeMode =
+  | { kind: 'preset'; key: SummaryRangeKey }
+  | { kind: 'custom'; startYmd: string; endYmd: string };
 type ExpenseShareRow = { id: number; name: string; amount: number; pct: number };
 const RANK_DEFAULT_LIMIT = 10;
 
@@ -125,8 +149,170 @@ function resolveRange(key: SummaryRangeKey): { startYmd: string; endYmd: string 
   return { startYmd: toYmd(start), endYmd: end };
 }
 
+function normalizeYmdRange(startYmd: string, endYmd: string): { startYmd: string; endYmd: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startYmd) || !/^\d{4}-\d{2}-\d{2}$/.test(endYmd)) {
+    return { startYmd, endYmd };
+  }
+  return startYmd <= endYmd ? { startYmd, endYmd } : { startYmd: endYmd, endYmd: startYmd };
+}
+
+function resolveDirectStallGapYmdRange(mode: DirectStallGapRangeMode): { startYmd: string; endYmd: string } {
+  if (mode.kind === 'preset') return resolveRange(mode.key);
+  return normalizeYmdRange(mode.startYmd, mode.endYmd);
+}
+
+function directStallGapRangeLabel(mode: DirectStallGapRangeMode): string {
+  if (mode.kind === 'preset') return summaryRangeLabel(mode.key);
+  const { startYmd, endYmd } = resolveDirectStallGapYmdRange(mode);
+  return `${startYmd}～${endYmd}`;
+}
+
 function moneyTW(n: number) {
   return `$ ${Math.round(n).toLocaleString('zh-TW')}`;
+}
+
+function moneySignedInt(n: number) {
+  if (n === 0) return '$0';
+  const abs = Math.round(Math.abs(n)).toLocaleString('zh-TW');
+  return `${n < 0 ? '−' : '+'}$${abs}`;
+}
+
+function StallGapDashboardSection({
+  title,
+  summary,
+  filterSlot,
+}: {
+  title: string;
+  summary: StallGapSummary;
+  /** 置於 `<details>` 展開後、統計與表格明細之上（篩選不佔用 summary 列） */
+  filterSlot?: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
+      <details className="group">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base font-medium text-zinc-200">{title}</h3>
+          <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+            <span className="tabular-nums text-rose-300/90">推估呆帳 {moneyTW(summary.badDebtEstimate)}</span>
+            <span className="text-zinc-600 mx-1.5">·</span>
+            <span
+              className={cn(
+                'tabular-nums',
+                summary.loggedGapSum < 0
+                  ? 'text-rose-400'
+                  : summary.loggedGapSum > 0
+                    ? 'text-emerald-400/90'
+                    : 'text-zinc-400',
+              )}
+            >
+              登記落差 {moneySignedInt(summary.loggedGapSum)}
+            </span>
+            <span className="text-zinc-600 ml-2">
+              {filterSlot ? '（點此展開篩選與明細）' : '（點此展開明細）'}
+            </span>
+          </p>
+        </div>
+        <ChevronDown
+          className="h-5 w-5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180"
+          aria-hidden
+        />
+      </summary>
+      <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-0 space-y-4 border-t border-zinc-800/80">
+      {filterSlot ? <div className="pt-4 pb-4 border-b border-zinc-800/80">{filterSlot}</div> : null}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
+          <p className="text-xs text-zinc-500">已知原因落差</p>
+          <p
+            className={cn(
+              'text-xl font-light tabular-nums mt-1',
+              summary.loggedGapSum < 0
+                ? 'text-rose-300'
+                : summary.loggedGapSum > 0
+                  ? 'text-emerald-300/90'
+                  : 'text-zinc-300',
+            )}
+          >
+            {moneySignedInt(summary.loggedGapSum)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
+          <p className="text-xs text-zinc-500">落差總和</p>
+          <p className="text-xl font-light text-amber-300/90 tabular-nums mt-1">
+            {moneyTW(summary.bookShortfallSum)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-3 sm:col-span-2 lg:col-span-2">
+          <p className="text-xs text-rose-200/80">推估呆帳</p>
+          <p className="text-2xl font-light text-rose-300 tabular-nums mt-1">{moneyTW(summary.badDebtEstimate)}</p>
+        </div>
+      </div>
+      {summary.reasonBreakdown.length > 0 ? (
+        <div>
+          <p className="text-xs font-medium text-zinc-500 mb-2">依原因彙總（登記落差金額）</p>
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-left text-sm min-w-[520px]">
+              <thead className="bg-zinc-900/80 text-zinc-500 text-xs border-b border-zinc-800">
+                <tr>
+                  <th className="px-3 py-2 font-medium">原因摘要</th>
+                  <th className="px-3 py-2 font-medium text-center">筆數</th>
+                  <th className="px-3 py-2 font-medium text-right">金額加總</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/80">
+                {summary.reasonBreakdown.map((r) => (
+                  <tr key={r.reason} className="text-zinc-300">
+                    <td className="px-3 py-2 max-w-[280px] break-words">{r.reason}</td>
+                    <td className="px-3 py-2 text-center tabular-nums text-zinc-400">{r.orderCount}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{moneySignedInt(r.loggedAmountSum)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-zinc-600">本期尚無具名落差原因可彙總。</p>
+      )}
+      {summary.rows.length > 0 ? (
+        <div>
+          <p className="text-xs font-medium text-zinc-500 mb-2">單據明細</p>
+          <div className="overflow-x-auto rounded-lg border border-zinc-800 max-h-[min(24rem,50vh)] overflow-y-auto">
+            <table className="w-full text-left text-[13px] min-w-[720px]">
+              <thead className="sticky top-0 bg-zinc-900/95 text-zinc-500 text-xs border-b border-zinc-800 z-[1]">
+                <tr>
+                  <th className="px-2 py-2 font-medium">盤點日</th>
+                  <th className="px-2 py-2 font-medium">門市</th>
+                  <th className="px-2 py-2 font-medium font-mono">單號</th>
+                  <th className="px-2 py-2 font-medium text-right">登記落差</th>
+                  <th className="px-2 py-2 font-medium text-right">帳面短收</th>
+                  <th className="px-2 py-2 font-medium">原因</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/60">
+                {summary.rows.map((r) => (
+                  <tr key={r.orderId} className="text-zinc-300 hover:bg-white/[0.02]">
+                    <td className="px-2 py-1.5 whitespace-nowrap tabular-nums text-zinc-400">{r.stallYmd}</td>
+                    <td className="px-2 py-1.5">{r.storeLabel}</td>
+                    <td className="px-2 py-1.5 font-mono text-xs text-zinc-500">{r.orderId}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{moneySignedInt(r.loggedGapAmount)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-amber-200/80">
+                      {r.bookShortfall > 0 ? moneyTW(r.bookShortfall) : '—'}
+                    </td>
+                    <td className="px-2 py-1.5 text-zinc-400 max-w-[200px] break-words">{r.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-zinc-600">本期無盤點短收或落差登記資料。</p>
+      )}
+      </div>
+      </details>
+    </div>
+  );
 }
 
 function pct(numerator: number, denominator: number): number {
@@ -157,18 +343,24 @@ export default function Dashboard({
   const [financeTick, setFinanceTick] = useState(0);
   const [orderTick, setOrderTick] = useState(0);
   const [summaryRange, setSummaryRange] = useState<SummaryRangeKey>('month');
+  /** 商品營收圓餅專用區間（總部與本店共用；本店僅含可視訂單）；與營運摘要 summaryRange 分開 */
+  const [productChartsRange, setProductChartsRange] = useState<SummaryRangeKey>('month');
   const [showAllDirect, setShowAllDirect] = useState(false);
   const [showAllFranchise, setShowAllFranchise] = useState(false);
   const [showAllSelf, setShowAllSelf] = useState(false);
   const [showAllExpenseSelf, setShowAllExpenseSelf] = useState(false);
   /** 各加盟店挑選浮層；點頂端按鈕才顯示，不佔主頁版面 */
   const [franchisePickerOpen, setFranchisePickerOpen] = useState(false);
-
-  useEffect(() => {
-    if (!isAdmin && summaryRange === 'year') {
-      setSummaryRange('month');
-    }
-  }, [isAdmin, summaryRange]);
+  /** 直營「盤點落差與呆帳」專用區間（與總部營運摘要 summaryRange 獨立） */
+  const [directStallGapRange, setDirectStallGapRange] = useState<DirectStallGapRangeMode>({
+    kind: 'preset',
+    key: 'month',
+  });
+  /** 本店盤點落差區間（與上方 KPI 的 summaryRange 分開；同總部直營盤點操作） */
+  const [nonAdminStallGapRange, setNonAdminStallGapRange] = useState<DirectStallGapRangeMode>({
+    kind: 'preset',
+    key: 'month',
+  });
 
   useEffect(() => {
     if (!isAdmin && franchisePickerOpen) {
@@ -194,9 +386,11 @@ export default function Dashboard({
     const bump = () => setOrderTick((t) => t + 1);
     window.addEventListener('orderHistoryUpdated', bump);
     window.addEventListener('franchiseManagementOrdersUpdated', bump);
+    window.addEventListener('salesRecordUpdated', bump);
     return () => {
       window.removeEventListener('orderHistoryUpdated', bump);
       window.removeEventListener('franchiseManagementOrdersUpdated', bump);
+      window.removeEventListener('salesRecordUpdated', bump);
     };
   }, []);
 
@@ -217,6 +411,7 @@ export default function Dashboard({
     const mgmt = loadFranchiseManagementOrders().map<DashboardOrder>((m) => ({
       id: m.id,
       createdAt: m.createdAt,
+      orderDateYmd: m.orderDateYmd,
       updatedAt: m.updatedAt,
       source: m.source,
       totalAmount: m.totalAmount,
@@ -230,6 +425,12 @@ export default function Dashboard({
       stallCountBasisYmd: m.stallCountBasisYmd,
       stallCountCompletedAt: m.stallCountCompletedAt,
       stallCountSnapshot: m.stallCountSnapshot,
+      scopeId: m.scopeId,
+      actorUserId: m.actorUserId,
+      createdByName: m.createdByName,
+      stallCountCompletedByName: m.stallCountCompletedByName,
+      stallCountCompletedByUserId: m.stallCountCompletedByUserId,
+      lastUpdatedByName: m.lastUpdatedByName,
     }));
     const history = loadOrderHistory();
     const all = [...mgmt, ...history].filter((o) => roleVisible(o.actorRole, userRole));
@@ -243,9 +444,13 @@ export default function Dashboard({
    */
   const effectiveOrders = useMemo(() => {
     if (!viewAsFranchisee) return dashboardOrders;
-    return dashboardOrders.filter(
-      (o) => o.actorRole === 'franchisee' && o.actorUserId === viewAsFranchisee.userId,
-    );
+    const uid = viewAsFranchisee.userId;
+    return dashboardOrders.filter((o) => {
+      if (o.actorRole === 'franchisee' && o.actorUserId === uid) return true;
+      const scope = o.scopeId?.trim();
+      if (scope === `scope:franchisee:${uid}`) return true;
+      return false;
+    });
   }, [dashboardOrders, viewAsFranchisee]);
 
   /**
@@ -301,13 +506,21 @@ export default function Dashboard({
     };
   }, [effectiveOrders, ledgerForView, isAdmin, summaryRange, userRole, viewAsFranchisee]);
 
+  /** 本店／view-as：與總部相同，依「建單日」落在區間內之已完成訂單（僅 effectiveOrders） */
+  const nonAdminProductChartOrders = useMemo(() => {
+    if (isAdmin) return [];
+    const { startYmd, endYmd } = resolveRange(productChartsRange);
+    return effectiveOrders.filter((o) => {
+      if (o.status !== '已完成') return false;
+      const ymd0 = effectiveOrderDateYmd(o);
+      return ymd0 >= startYmd && ymd0 <= endYmd;
+    });
+  }, [effectiveOrders, isAdmin, productChartsRange]);
+
   const topProducts = useMemo(() => {
-    const completed =
-      isAdmin || !nonAdminSummary
-        ? effectiveOrders.filter((o) => o.status === '已完成')
-        : nonAdminSummary.completed;
+    if (isAdmin) return [];
     const byName = new Map<string, { name: string; sales: number; revenue: number }>();
-    for (const o of completed) {
+    for (const o of nonAdminProductChartOrders) {
       for (const line of o.lines) {
         const prev = byName.get(line.name) ?? { name: line.name, sales: 0, revenue: 0 };
         prev.sales += line.qty;
@@ -318,7 +531,7 @@ export default function Dashboard({
     return Array.from(byName.values())
       .sort((a, b) => (b.revenue === a.revenue ? b.sales - a.sales : b.revenue - a.revenue))
       .map((r, i) => ({ id: i + 1, ...r }));
-  }, [effectiveOrders, isAdmin, nonAdminSummary]);
+  }, [isAdmin, nonAdminProductChartOrders]);
 
   const topProductsTotalRevenue = useMemo(
     () => topProducts.reduce((s, p) => s + p.revenue, 0),
@@ -329,9 +542,9 @@ export default function Dashboard({
     if (isAdmin) return [];
     // employee 自身視角不顯示流水帳支出佔比；總部以加盟主視角檢視時直接讀該店流水帳。
     if (userRole === 'employee' && !viewAsFranchisee) return [];
-    const { startYmd, endYmd } = resolveRange(summaryRange);
+    const { startYmd, endYmd } = resolveRange(productChartsRange);
     const byName = new Map<string, number>();
-    const procurementCost = nonAdminSummary?.procurementCost ?? 0;
+    const procurementCost = nonAdminProductChartOrders.reduce((s, o) => s + o.totalAmount, 0);
     if (procurementCost > 0) byName.set('批貨與自備成本', procurementCost);
     for (const e of ledgerForView) {
       if (e.flowType !== 'expense') continue;
@@ -344,17 +557,40 @@ export default function Dashboard({
       .sort((a, b) => b.amount - a.amount);
     const total = rows.reduce((s, r) => s + r.amount, 0);
     return rows.map((r, i) => ({ id: i + 1, name: r.name, amount: r.amount, pct: pct(r.amount, total) }));
-  }, [isAdmin, summaryRange, ledgerForView, nonAdminSummary, userRole, viewAsFranchisee]);
+  }, [isAdmin, productChartsRange, ledgerForView, nonAdminProductChartOrders, userRole, viewAsFranchisee]);
 
-  const adminSummaryOrders = useMemo(() => {
+  const adminProductChartOrders = useMemo(() => {
     if (!isAdmin) return [];
-    const { startYmd, endYmd } = resolveRange(summaryRange);
+    const { startYmd, endYmd } = resolveRange(productChartsRange);
     return dashboardOrders.filter((o) => {
       if (o.status !== '已完成') return false;
       const ymd0 = effectiveOrderDateYmd(o);
       return ymd0 >= startYmd && ymd0 <= endYmd;
     });
-  }, [dashboardOrders, isAdmin, summaryRange]);
+  }, [dashboardOrders, isAdmin, productChartsRange]);
+
+  const adminStallGapRange = useMemo(() => {
+    if (!isAdmin) return null;
+    const { startYmd, endYmd } = resolveDirectStallGapYmdRange(directStallGapRange);
+    const directOnly = dashboardOrders.filter((o) => orderIsHeadquartersDirectScoped(o));
+    return computeStallGapSummary(directOnly, { type: 'ymd', startYmd, endYmd });
+  }, [dashboardOrders, isAdmin, directStallGapRange, orderTick]);
+
+  const directStallGapResolvedYmd = useMemo(
+    () => resolveDirectStallGapYmdRange(directStallGapRange),
+    [directStallGapRange],
+  );
+
+  const nonAdminStallGap = useMemo(() => {
+    if (isAdmin) return null;
+    const { startYmd, endYmd } = resolveDirectStallGapYmdRange(nonAdminStallGapRange);
+    return computeStallGapSummary(effectiveOrders, { type: 'ymd', startYmd, endYmd });
+  }, [effectiveOrders, isAdmin, nonAdminStallGapRange, orderTick]);
+
+  const nonAdminStallGapResolvedYmd = useMemo(
+    () => resolveDirectStallGapYmdRange(nonAdminStallGapRange),
+    [nonAdminStallGapRange],
+  );
 
   const adminRangeSummary = useMemo(() => {
     if (!isAdmin) return null;
@@ -366,7 +602,7 @@ export default function Dashboard({
     let franchiseCost = 0;
 
     for (const o of dashboardOrders) {
-      if (o.actorRole === 'admin' || o.actorRole === 'employee') {
+      if (orderIsHeadquartersDirectScoped(o)) {
         const stallYmd = stallCountAttributeYmd(o);
         if (o.stallCountCompletedAt && stallYmd && stallYmd >= startYmd && stallYmd <= endYmd) {
           const rev = getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW);
@@ -374,7 +610,7 @@ export default function Dashboard({
           if (rev != null) directRevenue += rev;
           if (cogsRef != null) directCost += cogsRef;
         }
-      } else if (o.actorRole === 'franchisee' && o.status === '已完成') {
+      } else if (orderIsFranchiseBusinessScoped(o) && o.status === '已完成') {
         const ymd0 = effectiveOrderDateYmd(o);
         if (ymd0 >= startYmd && ymd0 <= endYmd) {
           const selfSupplied = o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
@@ -416,22 +652,22 @@ export default function Dashboard({
   const adminDirectProducts = useMemo(() => {
     if (!isAdmin) return [];
     return aggregateProductRevenue(
-      adminSummaryOrders,
-      (o) => o.actorRole === 'admin' || o.actorRole === 'employee',
+      adminProductChartOrders,
+      (o) => orderIsHeadquartersDirectScoped(o),
     );
-  }, [adminSummaryOrders, isAdmin]);
+  }, [adminProductChartOrders, isAdmin]);
 
   const adminFranchiseProducts = useMemo(() => {
     if (!isAdmin) return [];
     return aggregateProductRevenue(
-      adminSummaryOrders,
-      (o) => o.actorRole === 'franchisee',
+      adminProductChartOrders,
+      (o) => orderIsFranchiseBusinessScoped(o),
       (_o, line) => {
         const item = getSupplyItem(line.productId);
         return !isFranchiseeSelfSuppliedItem(item);
       },
     );
-  }, [adminSummaryOrders, isAdmin]);
+  }, [adminProductChartOrders, isAdmin]);
 
   /**
    * 各加盟店「自身」營運摘要（與加盟主自己的 Dashboard 視角一致）：
@@ -456,7 +692,7 @@ export default function Dashboard({
     };
     const map = new Map<string, Row>();
     for (const o of dashboardOrders) {
-      if (o.actorRole !== 'franchisee') continue;
+      if (!orderIsFranchiseBusinessScoped(o)) continue;
 
       const bookYmd = effectiveOrderDateYmd(o);
       const isCompletedInRange =
@@ -473,8 +709,12 @@ export default function Dashboard({
         storeLabel: o.storeLabel,
         actorRole: o.actorRole,
         actorUserId: o.actorUserId,
+        scopeId: o.scopeId,
       });
-      const franchiseeUserId = o.actorUserId ?? null;
+      let franchiseeUserId = o.actorUserId ?? null;
+      if (!franchiseeUserId && o.scopeId?.trim().startsWith('scope:franchisee:')) {
+        franchiseeUserId = o.scopeId.trim().slice('scope:franchisee:'.length) || null;
+      }
       // 以加盟主 user.id 為唯一鍵，避免不同加盟主湊巧同名而被合併
       const key = franchiseeUserId ? `uid:${franchiseeUserId}` : `legacy:${label}`;
       const row =
@@ -574,11 +814,12 @@ export default function Dashboard({
       </div>
 
       {!isAdmin && (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
           {([
             ['today', '本日'],
             ['week', '本週'],
             ['month', '本月'],
+            ['year', '本年'],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -607,15 +848,6 @@ export default function Dashboard({
               </div>
               <div>
                 <h2 className="text-3xl font-light mt-1 text-amber-500 tabular-nums">{moneyTW(adminFinance.revenueTotal)}</h2>
-                <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
-                  直營店盤點營收 {moneyTW(adminFinance.directStoreStallRetailTotal)} ＋ 加盟主批貨{' '}
-                  {moneyTW(adminFinance.franchiseeOrderTotal)}
-                  {adminFinance.ledgerIncomeTotal > 0 ? (
-                    <span className="block mt-1 text-zinc-600">
-                      流水帳收入 {moneyTW(adminFinance.ledgerIncomeTotal)}（未計入營收總計）
-                    </span>
-                  ) : null}
-                </p>
               </div>
             </div>
 
@@ -626,9 +858,6 @@ export default function Dashboard({
               </div>
               <div>
                 <h2 className="text-3xl font-light mt-1 text-[#f5f2ed] tabular-nums">{moneyTW(adminFinance.expenseTotal)}</h2>
-                <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
-                  依流水帳支出認列（本月）{moneyTW(adminFinance.ledgerExpenseTotal)}
-                </p>
               </div>
             </div>
 
@@ -638,20 +867,14 @@ export default function Dashboard({
                 <p className="text-sm">淨利（本月）</p>
               </div>
               <div>
-                <div className="flex justify-between items-end mb-2 gap-2">
-                  <h2
-                    className={cn(
-                      'text-3xl font-light mt-1 tabular-nums',
-                      adminFinance.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'
-                    )}
-                  >
-                    {moneyTW(adminFinance.netProfit)}
-                  </h2>
-                  <div className="text-xs text-zinc-500 shrink-0 text-right">營收 − 支出</div>
-                </div>
-                <p className="text-xs text-zinc-500">
-                  營收＝直營盤點零售＋加盟叫貨；支出＝本月已完成直營叫貨與流水帳支出。
-                </p>
+                <h2
+                  className={cn(
+                    'text-3xl font-light mt-1 tabular-nums',
+                    adminFinance.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                  )}
+                >
+                  {moneyTW(adminFinance.netProfit)}
+                </h2>
               </div>
             </div>
           </>
@@ -702,12 +925,76 @@ export default function Dashboard({
         )}
       </div>
 
+      {!isAdmin && nonAdminStallGap && (
+        <StallGapDashboardSection
+          title={`本店盤點落差與呆帳（${directStallGapRangeLabel(nonAdminStallGapRange)}）`}
+          summary={nonAdminStallGap}
+          filterSlot={
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+                <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
+                {(['today', 'week', 'month', 'year'] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setNonAdminStallGapRange({ kind: 'preset', key })}
+                    className={cn(
+                      'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                      nonAdminStallGapRange.kind === 'preset' && nonAdminStallGapRange.key === key
+                        ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
+                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
+                    )}
+                  >
+                    {summaryRangeLabel(key)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+                <span className="text-[11px] text-zinc-500 shrink-0">自訂起訖</span>
+                <input
+                  type="date"
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
+                  value={nonAdminStallGapResolvedYmd.startYmd}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setNonAdminStallGapRange({
+                      kind: 'custom',
+                      startYmd: v,
+                      endYmd: nonAdminStallGapResolvedYmd.endYmd,
+                    });
+                  }}
+                />
+                <span className="text-zinc-600 text-xs">～</span>
+                <input
+                  type="date"
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
+                  value={nonAdminStallGapResolvedYmd.endYmd}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setNonAdminStallGapRange({
+                      kind: 'custom',
+                      startYmd: nonAdminStallGapResolvedYmd.startYmd,
+                      endYmd: v,
+                    });
+                  }}
+                />
+                <span className="text-[11px] text-zinc-600 tabular-nums">
+                  盤點歸屬日：{nonAdminStallGapResolvedYmd.startYmd}～{nonAdminStallGapResolvedYmd.endYmd}
+                </span>
+              </div>
+            </div>
+          }
+        />
+      )}
+
       {isAdmin && adminRangeSummary && (
         <div className="bg-zinc-900/40 rounded-2xl p-6 border border-zinc-800">
           <div className="flex items-center justify-between gap-2 mb-1">
             <div className="flex items-center gap-2 text-amber-500/90">
             <TrendingUp size={20} className="shrink-0" />
-              <h3 className="text-lg font-medium text-zinc-100">{adminRangeSummary.rangeLabel}總部營運摘要</h3>
+              <h3 className="text-lg font-medium text-zinc-100">{adminRangeSummary.rangeLabel}直營店營運摘要</h3>
             </div>
             <div className="flex items-center gap-1">
               {([
@@ -756,6 +1043,70 @@ export default function Dashboard({
             </div>
           </div>
         </div>
+      )}
+
+      {isAdmin && adminStallGapRange && (
+        <StallGapDashboardSection
+          title="盤點落差與呆帳（直營）"
+          summary={adminStallGapRange}
+          filterSlot={
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+                <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
+                {(['today', 'week', 'month', 'year'] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setDirectStallGapRange({ kind: 'preset', key })}
+                    className={cn(
+                      'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                      directStallGapRange.kind === 'preset' && directStallGapRange.key === key
+                        ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
+                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
+                    )}
+                  >
+                    {summaryRangeLabel(key)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+                <span className="text-[11px] text-zinc-500 shrink-0">自訂起訖</span>
+                <input
+                  type="date"
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
+                  value={directStallGapResolvedYmd.startYmd}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setDirectStallGapRange({
+                      kind: 'custom',
+                      startYmd: v,
+                      endYmd: directStallGapResolvedYmd.endYmd,
+                    });
+                  }}
+                />
+                <span className="text-zinc-600 text-xs">～</span>
+                <input
+                  type="date"
+                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
+                  value={directStallGapResolvedYmd.endYmd}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setDirectStallGapRange({
+                      kind: 'custom',
+                      startYmd: directStallGapResolvedYmd.startYmd,
+                      endYmd: v,
+                    });
+                  }}
+                />
+                <span className="text-[11px] text-zinc-600 tabular-nums">
+                  盤點歸屬日：{directStallGapResolvedYmd.startYmd}～{directStallGapResolvedYmd.endYmd}
+                </span>
+              </div>
+            </div>
+          }
+        />
       )}
 
       {isAdmin && franchisePickerOpen && (
@@ -904,11 +1255,63 @@ export default function Dashboard({
         </div>
       )}
 
-      <div className="bg-zinc-900/30 rounded-2xl p-6 border border-zinc-800 flex flex-col gap-5">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden">
+            <div className="min-w-0 flex-1">
+              {isAdmin ? (
+                <>
+                  <h3 className="text-lg font-medium text-zinc-100">商品營收佔比</h3>
+                  <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+                    依訂單建單日・{summaryRangeLabel(productChartsRange)}・直營與加盟批貨
+                    <span className="text-zinc-600 ml-1">（點此展開）</span>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-medium text-zinc-100">商品與支出佔比</h3>
+                  <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+                    依訂單建單日・{summaryRangeLabel(productChartsRange)}・本店可視訂單與流水帳
+                    <span className="text-zinc-600 ml-1">（點此展開）</span>
+                  </p>
+                </>
+              )}
+            </div>
+            <ChevronDown
+              className="h-5 w-5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+          <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-4 border-t border-zinc-800/80 flex flex-col gap-5 bg-zinc-900/30">
           {isAdmin ? (
             <>
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800/80">
+                <p className="text-xs text-zinc-500">商品營收排行區間（依訂單建單日）</p>
+                <div className="flex flex-wrap items-center gap-1">
+                  {([
+                    ['today', '本日'],
+                    ['week', '本週'],
+                    ['month', '本月'],
+                    ['year', '本年'],
+                  ] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setProductChartsRange(key)}
+                      className={cn(
+                        'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                        productChartsRange === key
+                          ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div>
-                <h3 className="text-base font-medium">直營商品營收佔比（{summaryRangeLabel(summaryRange)}）</h3>
+                <h3 className="text-base font-medium">直營商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
                 {adminDirectProducts.length === 0 ? (
                   <p className="text-xs text-zinc-500 mt-2">尚無直營已完成訂單。</p>
                 ) : (
@@ -964,7 +1367,7 @@ export default function Dashboard({
                 )}
               </div>
               <div className="border-t border-zinc-800 pt-4">
-                <h3 className="text-base font-medium">加盟批貨商品營收佔比（{summaryRangeLabel(summaryRange)}）</h3>
+                <h3 className="text-base font-medium">加盟批貨商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
                 {adminFranchiseProducts.length === 0 ? (
                   <p className="text-xs text-zinc-500 mt-2">尚無加盟批貨已完成訂單。</p>
                 ) : (
@@ -1022,7 +1425,32 @@ export default function Dashboard({
             </>
           ) : (
             <>
-              <h3 className="text-base font-medium">商品營收佔比（{summaryRangeLabel(summaryRange)}）</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800/80">
+                <p className="text-xs text-zinc-500">商品營收排行區間（依訂單建單日・本店資料）</p>
+                <div className="flex flex-wrap items-center gap-1">
+                  {([
+                    ['today', '本日'],
+                    ['week', '本週'],
+                    ['month', '本月'],
+                    ['year', '本年'],
+                  ] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setProductChartsRange(key)}
+                      className={cn(
+                        'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                        productChartsRange === key
+                          ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
+                          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <h3 className="text-base font-medium">商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
               <div className="flex-1">
                 {topProducts.length === 0 ? (
                   <p className="text-sm text-zinc-500 py-8 text-center">尚無已完成銷售可排行。</p>
@@ -1082,7 +1510,7 @@ export default function Dashboard({
                 )}
               </div>
               <div className="border-t border-zinc-800 pt-4">
-                <h3 className="text-base font-medium">支出佔比（{summaryRangeLabel(summaryRange)}）</h3>
+                <h3 className="text-base font-medium">支出佔比（{summaryRangeLabel(productChartsRange)}）</h3>
                 {nonAdminExpenseRows.length === 0 ? (
                   <p className="text-sm text-zinc-500 py-6 text-center">尚無支出資料。</p>
                 ) : (
@@ -1144,73 +1572,88 @@ export default function Dashboard({
               </div>
             </>
           )}
+          </div>
+        </details>
       </div>
 
       {isAdmin && adminFinance && (
-        <div className="bg-zinc-900/40 rounded-2xl p-6 border border-zinc-800">
-          <div className="flex items-center gap-2 mb-1 text-amber-500/90">
-            <TrendingUp size={20} className="shrink-0" />
-            <h3 className="text-lg font-medium text-zinc-100">支出結構表（本月）</h3>
-          </div>
-          <p className="text-xs text-zinc-500 mb-4">
-            依流水帳支出細項加總，展示本月各支出類別占比。
-          </p>
-          <div className="rounded-xl border border-zinc-800/90 bg-zinc-950/35 p-4">
-            {adminFinance.expenseBreakdown.length === 0 ? (
-              <p className="text-sm text-zinc-500 flex items-center justify-center py-10 text-center">
-                本月尚無支出資料可供分析。
-              </p>
-            ) : (
-              <>
-                <div className={cn('w-full', isNarrow ? 'h-[260px]' : 'h-[300px]')}>
-                  <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                    <PieChart>
-                      <Pie
-                        data={adminFinance.expenseBreakdown.map((r) => ({ name: r.name, value: r.value }))}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={isNarrow ? 42 : 56}
-                        outerRadius={isNarrow ? 86 : 110}
-                        paddingAngle={2}
-                        label={
-                          isNarrow
-                            ? false
-                            : ({ name, percent }) =>
-                                `${String(name).length > 10 ? String(name).slice(0, 10) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                        }
-                      >
-                        {adminFinance.expenseBreakdown.map((_, i) => (
-                          <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value: number | undefined) => [moneyTW(value ?? 0), '支出']}
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: '1px solid #3f3f46',
-                          backgroundColor: '#18181b',
-                          color: '#f5f2ed',
-                          fontSize: isNarrow ? '0.8125rem' : '0.75rem',
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-amber-500/90">
+                  <TrendingUp size={20} className="shrink-0" aria-hidden />
+                  <h3 className="text-lg font-medium text-zinc-100">支出結構表（本月）</h3>
                 </div>
-                <div className="mt-3 space-y-2">
-                  {adminFinance.expenseBreakdown.map((row, idx) => (
-                    <div key={row.name} className="flex justify-between text-xs">
-                      <span className="truncate pr-2 text-zinc-300">{idx + 1}. {row.name}</span>
-                      <span className="text-amber-200 tabular-nums">
-                        {moneyTW(row.value)} / {row.pctOfExpense.toFixed(1)}%
-                      </span>
+                <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+                  依流水帳支出細項加總・{adminFinance.expenseBreakdown.length} 項類別
+                  <span className="text-zinc-600 ml-1">（點此展開）</span>
+                </p>
+              </div>
+              <ChevronDown
+                className="h-5 w-5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180"
+                aria-hidden
+              />
+            </summary>
+            <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-4 border-t border-zinc-800/80">
+              <div className="rounded-xl border border-zinc-800/90 bg-zinc-950/35 p-4">
+                {adminFinance.expenseBreakdown.length === 0 ? (
+                  <p className="text-sm text-zinc-500 flex items-center justify-center py-10 text-center">
+                    本月尚無支出資料可供分析。
+                  </p>
+                ) : (
+                  <>
+                    <div className={cn('w-full', isNarrow ? 'h-[260px]' : 'h-[300px]')}>
+                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
+                        <PieChart>
+                          <Pie
+                            data={adminFinance.expenseBreakdown.map((r) => ({ name: r.name, value: r.value }))}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={isNarrow ? 42 : 56}
+                            outerRadius={isNarrow ? 86 : 110}
+                            paddingAngle={2}
+                            label={
+                              isNarrow
+                                ? false
+                                : ({ name, percent }) =>
+                                    `${String(name).length > 10 ? String(name).slice(0, 10) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
+                            }
+                          >
+                            {adminFinance.expenseBreakdown.map((_, i) => (
+                              <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '支出']}
+                            contentStyle={{
+                              borderRadius: '12px',
+                              border: '1px solid #3f3f46',
+                              backgroundColor: '#18181b',
+                              color: '#f5f2ed',
+                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+                    <div className="mt-3 space-y-2">
+                      {adminFinance.expenseBreakdown.map((row, idx) => (
+                        <div key={row.name} className="flex justify-between text-xs">
+                          <span className="truncate pr-2 text-zinc-300">{idx + 1}. {row.name}</span>
+                          <span className="text-amber-200 tabular-nums">
+                            {moneyTW(row.value)} / {row.pctOfExpense.toFixed(1)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </details>
         </div>
       )}
 

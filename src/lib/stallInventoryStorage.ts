@@ -28,6 +28,10 @@ export type DaySnapshot = {
   lines: Record<string, DayLine>;
   actualRevenue: string;
   updatedAt: string;
+  /** 與帳面／盤點推算之落差金額（自填） */
+  revenueGapAmount?: string;
+  /** 落差原因 */
+  revenueGapReason?: string;
   /** 最近一次儲存攤上盤點表之操作者姓名 */
   lastSavedByName?: string;
 };
@@ -173,6 +177,8 @@ export function loadDayForProcurementFromOrder(orderId: string): DaySnapshot {
       lines,
       actualRevenue: merged.actualRevenue,
       updatedAt: merged.updatedAt,
+      revenueGapAmount: merged.revenueGapAmount,
+      revenueGapReason: merged.revenueGapReason,
     });
   }
   if (o.stallCountBasisYmd) {
@@ -218,7 +224,8 @@ export function recomputeStallOutForStallYmdAndOrder(
     sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
   }
   const prevYmd = addDaysYmd(stallYmd, -1);
-  const prevDay = loadDay(prevYmd);
+  /** 與批貨扣庫一致：前一日若已完成盤點，剩餘以銷售紀錄為準 */
+  const prevDay = loadDayForProcurement(prevYmd);
   const fromStorage = loadDay(stallYmd);
   const base: DaySnapshot = editorSnap
     ? {
@@ -244,6 +251,55 @@ export function recomputeStallOutForStallYmdAndOrder(
   }
   saveDay(stallYmd, { ...snap, lines });
   return loadDay(stallYmd);
+}
+
+/** 盤點頁「植入訂單」公式之逐品明細（不含消耗品，與攤上盤點表一致） */
+export type StallOutImportBreakdownRow = {
+  productId: string;
+  name: string;
+  orderQty: number;
+  /** 盤點日前一日收攤剩餘（`loadDayForProcurement`） */
+  prevRemain: number;
+  /** 前項＋本單叫貨；等同按「植入訂單」寫入之實際帶出 */
+  suggestedOut: number;
+};
+
+/**
+ * 依盤點曆法日與所選叫貨單，列出「前日剩餘 + 本單叫貨 = 實際帶出」。
+ * 與 {@link recomputeStallOutForStallYmdAndOrder} 計算一致；單據無效時回傳 null。
+ */
+export function computeStallOutImportBreakdown(
+  stallYmd: string,
+  orderId: string,
+): { prevYmd: string; rows: StallOutImportBreakdownRow[] } | null {
+  const o = findOrderByIdInStores(orderId);
+  if (!o || o.status === '已取消') return null;
+  const sumBy: Record<string, number> = {};
+  for (const l of o.lines) {
+    const q = roundProcurementQty(Number(l.qty) || 0);
+    if (q <= 0) continue;
+    sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
+  }
+  const prevYmd = addDaysYmd(stallYmd, -1);
+  const prevDay = loadDayForProcurement(prevYmd);
+  const rows: StallOutImportBreakdownRow[] = [];
+  for (const it of getAllSupplyItems()) {
+    const item = getSupplyItem(it.id);
+    if (item && isConsumableItem(item)) continue;
+    const R = roundProcurementQty(Math.max(0, num(prevDay.lines[it.id]?.remain)));
+    const orderQty = sumBy[it.id] ?? 0;
+    const suggestedOut = roundProcurementQty(R + orderQty);
+    if (orderQty <= 0 && R <= 0) continue;
+    rows.push({
+      productId: it.id,
+      name: it.name,
+      orderQty,
+      prevRemain: R,
+      suggestedOut,
+    });
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+  return { prevYmd, rows };
 }
 
 /**

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Receipt, Search, Package, ChevronDown, ChevronUp, ClipboardList, Trash2, Store, Minus, Plus } from 'lucide-react';
+import { Receipt, Search, Package, ChevronDown, ChevronUp, Store, Minus, Plus } from 'lucide-react';
 import type { UserRole } from './Orders';
-import { getSupplyItem, isConsumableItem, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
+import {
+  estimatedRetailPerPackage,
+  getSupplyItem,
+  isConsumableItem,
+  userRoleToSupplyRetailView,
+} from '../lib/supplyCatalog';
 import {
   getStallDisplayRetailEstAndRemain,
   getStallDisplayShouldRevenue,
@@ -30,6 +35,12 @@ import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
+}
+
+function fmtLineQty(n: number) {
+  if (!Number.isFinite(n)) return '—';
+  if (Number.isInteger(n)) return String(n);
+  return n.toLocaleString('zh-TW', { maximumFractionDigits: 4 });
 }
 
 function procurementStatusDisplay(s: '待出貨' | '已完成' | '已取消') {
@@ -194,6 +205,8 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     setStallEditError(null);
     const next: SalesRecordDaySnapshot = {
       ...stallEditDraft,
+      revenueGapAmount: (stallEditDraft.revenueGapAmount ?? '').trim(),
+      revenueGapReason: (stallEditDraft.revenueGapReason ?? '').trim(),
       updatedAt: new Date().toISOString(),
     };
     void (async () => {
@@ -359,13 +372,26 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           const displayWholesaleSold =
             getStallDisplayShouldRevenue(order, supplyRetailView) ?? wholesaleKpi.shouldRevenue;
           const actualRev = displaySnap ? num(displaySnap.actualRevenue) : 0;
+          const refLedgerGap = actualRev - displayRetailSold;
           const tableRows = displaySnap
             ? stallDisplayItems
                 .map((item) => {
                   const line = displaySnap.lines[item.id] ?? { out: '', remain: '' };
+                  let c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
+                  const frozenR = Number(displaySnap.frozenRetailUnitPriceByItem?.[item.id]);
+                  if (Number.isFinite(frozenR)) {
+                    c = {
+                      ...c,
+                      estPrice: c.out * frozenR,
+                      remValue: c.remain * frozenR,
+                      soldRevenue: c.sold * frozenR,
+                    };
+                  }
+                  const unitRetail = Number.isFinite(frozenR) ? frozenR : estimatedRetailPerPackage(item);
                   const outN = num(line.out);
                   const remN = num(line.remain);
-                  return { item, outN, remN, sold: Math.max(0, outN - remN) };
+                  const sold = c.remainUnfilled ? 0 : Math.max(0, outN - remN);
+                  return { item, line, c, outN, remN, sold, unitRetail };
                 })
                 .filter((r) => r.outN > 0 || r.remN > 0 || r.sold > 0)
             : [];
@@ -375,43 +401,19 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
               key={order.id}
               className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden"
             >
-              <div
-                className={cn(
-                  'relative min-w-0 w-full flex flex-col sm:flex-row',
-                  isSuperAdmin && 'pr-14 sm:pr-16'
-                )}
-              >
-                {isSuperAdmin && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!isStallEditThis) setDeleteModalId(order.id);
-                    }}
-                    disabled={isStallEditThis}
-                    className="absolute top-3 right-3 z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-800/80 bg-zinc-900/80 text-rose-400/85 hover:border-rose-500/40 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:top-5 sm:right-5"
-                    title={
-                      isStallEditThis
-                        ? '請先儲存或放棄「調整盤點」'
-                        : '從本機完全移除此筆訂單（不須展開明細）'
-                    }
-                    aria-label="刪除本筆訂單"
-                  >
-                    <Trash2 className="size-4" strokeWidth={2} />
-                  </button>
-                )}
+              <div className="relative min-w-0 w-full flex flex-col sm:flex-row">
                 <button
                   type="button"
                   onClick={() => setExpandedId(open ? null : order.id)}
                   className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
                 >
-                <div className="flex items-start gap-4 min-w-0">
-                  <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 flex-shrink-0">
+                <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+                  <div className="hidden sm:flex w-12 h-12 rounded-full bg-zinc-800 items-center justify-center border border-zinc-700 flex-shrink-0">
                     <Package size={24} className="text-amber-500/80" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p
-                      className="text-[calc(0.75rem*1.3)] font-mono text-zinc-400 mb-1.5 break-all leading-snug"
+                      className="text-xs sm:text-[calc(0.75rem*1.3)] font-mono text-zinc-200 mb-1.5 break-words leading-snug"
                       title={order.id}
                     >
                       訂單編號 {order.id}
@@ -437,19 +439,29 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         stallCountCompletedAt={order.stallCountCompletedAt}
                       />
                     </div>
-                    <div className="text-sm text-zinc-500 min-w-0 max-w-full space-y-0.5 leading-relaxed">
-                      <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*1.3)]">
-                        訂單日期 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))}
-                      </p>
-                      <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*0.7*1.15)]">
-                        下單時間 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}
-                      </p>
-                      <p className="break-words [overflow-wrap:anywhere]">
-                        下單者：{displayOrderCreatedByLabel(order)} ・ 盤點者：
-                        {order.stallCountCompletedAt
-                          ? displayOrderStallCountCompletedByLabel(order)
-                          : '—'}
-                      </p>
+                    <div className="min-w-0 max-w-full space-y-2 text-zinc-500">
+                      <div>
+                        <p className="text-[14px] sm:text-xs">訂單日期</p>
+                        <p className="text-[1.35rem] sm:text-[calc(0.875rem*1.56)] text-zinc-100 leading-tight break-keep">
+                          {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[14px] sm:text-xs">下單時間</p>
+                        <p className="text-[1.05rem] sm:text-[calc(0.875rem*0.7*1.38)] leading-snug break-keep">
+                          {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 min-[430px]:grid-cols-2 gap-y-1 gap-x-3">
+                        <p className="text-sm sm:text-sm break-words [overflow-wrap:anywhere]">
+                          下單者：{displayOrderCreatedByLabel(order)}
+                        </p>
+                        <p className="text-sm sm:text-sm break-words [overflow-wrap:anywhere]">
+                          盤點者：{order.stallCountCompletedAt
+                            ? displayOrderStallCountCompletedByLabel(order)
+                            : '—'}
+                        </p>
+                      </div>
                     </div>
                     {order.lastUpdatedByName && order.lastUpdatedByName !== order.createdByName && (
                       <p className="text-[0.6875rem] text-zinc-600 mt-1.5 leading-relaxed">
@@ -464,6 +476,14 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                     <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums whitespace-nowrap">
                       $ {listAmount.toLocaleString()}
                     </p>
+                    {snapshot && (
+                      <>
+                        <p className="text-xs text-zinc-500 mt-1.5">登錄實收</p>
+                        <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums whitespace-nowrap">
+                          $ {money(num(displaySnap.actualRevenue))}
+                        </p>
+                      </>
+                    )}
                   </div>
                   {open ? <ChevronUp className="text-zinc-500 shrink-0" size={20} /> : <ChevronDown className="text-zinc-500 shrink-0" size={20} />}
                 </div>
@@ -474,73 +494,141 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                   {!snapshot && <p className="text-sm text-zinc-500">無資料。</p>}
                   {snapshot && (
                     <>
-                      <div className="rounded-2xl border border-amber-900/40 bg-amber-950/10 p-4">
-                        <div
-                          className={cn(
-                            'grid gap-4 text-sm',
-                            userRole === 'employee' ? 'grid-cols-1' : 'sm:grid-cols-2'
-                          )}
-                        >
-                          <div>
-                            <p className="text-xs text-zinc-500">盤點金額</p>
-                            <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(displayRetailSold)}</p>
-                            <p className="text-[0.625rem] text-zinc-600 mt-0.5">依本機零售參考 × 售出量</p>
-                          </div>
-                          {userRole !== 'employee' && (
-                            <div>
-                              <p className="text-xs text-zinc-500">成本金額</p>
-                              <p className="text-lg font-semibold text-zinc-300 tabular-nums">$ {money(displayWholesaleSold)}</p>
-                              <p className="text-[0.625rem] text-zinc-600 mt-0.5">批價 × 售出量</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="rounded-2xl border border-amber-900/50 bg-amber-950/15 p-4 grid sm:grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <p className="text-xs text-zinc-500">預估金額</p>
-                          <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(displayRetailEstTotal)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-zinc-500">剩餘貨品金額</p>
-                          <p className="text-lg font-semibold text-emerald-400/90 tabular-nums">$ {money(displayRetailRemainValue)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-zinc-500">登錄實收</p>
-                          {isStallEditThis && stallEditDraft ? (
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={stallEditDraft.actualRevenue}
-                              onChange={(e) =>
-                                setStallEditDraft((p) =>
-                                  p ? { ...p, actualRevenue: e.target.value } : p
-                                )
-                              }
-                              className="mt-1 w-full max-w-[12rem] min-h-10 rounded-lg border-2 border-zinc-600 bg-zinc-900 px-3 text-amber-200 font-mono tabular-nums text-lg font-semibold"
-                              placeholder="0"
-                            />
-                          ) : (
-                            <p className="text-lg font-semibold text-amber-300/90 tabular-nums">$ {money(actualRev)}</p>
-                          )}
-                        </div>
-                      </div>
-                      {snapshot && !isStallEditThis && (
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-950/25 px-3 py-2.5 text-sm text-amber-100/95">
-                          <div className="flex items-start gap-2 min-w-0">
-                            <ClipboardList className="shrink-0 mt-0.5 text-amber-400" size={18} aria-hidden />
-                            <span className="leading-snug">
-                              盤點數字有誤或收攤後仍有銷售？可在此修改帶出／剩餘與登錄實收（與訂單管理「調整貨量」相同：先進入編輯再儲存）。
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => startStallEdit(order)}
-                            className="shrink-0 self-start sm:self-center py-2 px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500"
+                      <div className="rounded-2xl border border-amber-900/50 bg-amber-950/15 p-4 text-sm">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+                          <div
+                            className={cn(
+                              'grid gap-x-4 gap-y-5 min-w-0 flex-1',
+                              userRole === 'employee'
+                                ? 'grid-cols-2 sm:grid-cols-2 lg:grid-cols-4'
+                                : 'grid-cols-2 sm:grid-cols-2 lg:grid-cols-5'
+                            )}
                           >
-                            調整盤點
-                          </button>
+                            <div>
+                              <p className="text-xs text-zinc-500">盤點金額</p>
+                              <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(displayRetailSold)}</p>
+                              <p className="text-[0.625rem] text-zinc-600 mt-0.5">零售價 × 售出量</p>
+                            </div>
+                            {userRole !== 'employee' && (
+                              <div>
+                                <p className="text-xs text-zinc-500">成本金額</p>
+                                <p className="text-lg font-semibold text-zinc-300 tabular-nums">$ {money(displayWholesaleSold)}</p>
+                                <p className="text-[0.625rem] text-zinc-600 mt-0.5">批價 × 帶出量</p>
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-xs text-zinc-500">預估金額</p>
+                              <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(displayRetailEstTotal)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-zinc-500">剩餘貨品金額</p>
+                              <p className="text-lg font-semibold text-emerald-400/90 tabular-nums">$ {money(displayRetailRemainValue)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-zinc-500">登錄實收</p>
+                              {isStallEditThis && stallEditDraft ? (
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={stallEditDraft.actualRevenue}
+                                  onChange={(e) =>
+                                    setStallEditDraft((p) =>
+                                      p ? { ...p, actualRevenue: e.target.value } : p
+                                    )
+                                  }
+                                  className="mt-1 w-full max-w-[12rem] min-h-10 rounded-lg border-2 border-zinc-600 bg-zinc-900 px-3 text-amber-200 font-mono tabular-nums text-lg font-semibold"
+                                  placeholder="0"
+                                />
+                              ) : (
+                                <p className="text-lg font-semibold text-amber-300/90 tabular-nums">$ {money(actualRev)}</p>
+                              )}
+                            </div>
+                          </div>
+                          {!isStallEditThis && (
+                            <button
+                              type="button"
+                              onClick={() => startStallEdit(order)}
+                              className="shrink-0 self-end w-full sm:w-auto py-2 px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500"
+                            >
+                              調整盤點
+                            </button>
+                          )}
                         </div>
-                      )}
+                        <div className="mt-4 pt-4 border-t border-amber-900/40 space-y-3">
+                          <p className="text-xs font-medium text-zinc-500">營收落差登記</p>
+                          <p className="text-[0.6875rem] text-zinc-600 leading-relaxed">
+                            參考差額（登錄實收 − 盤點金額）：
+                            <span
+                              className={cn(
+                                'tabular-nums font-medium ml-1',
+                                refLedgerGap < 0
+                                  ? 'text-rose-400/90'
+                                  : refLedgerGap > 0
+                                    ? 'text-emerald-300/90'
+                                    : 'text-zinc-300',
+                              )}
+                            >
+                              {refLedgerGap === 0
+                                ? '$0'
+                                : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
+                            </span>
+                          </p>
+                          {isStallEditThis && stallEditDraft ? (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="text-xs text-zinc-500 block">落差金額（自填，可與參考差額不同）</label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={stallEditDraft.revenueGapAmount ?? ''}
+                                  onChange={(e) =>
+                                    setStallEditDraft((p) =>
+                                      p ? { ...p, revenueGapAmount: e.target.value } : p
+                                    )
+                                  }
+                                  className="mt-1 w-full max-w-xs min-h-10 rounded-lg border-2 border-zinc-600 bg-zinc-900 px-3 text-amber-100 font-mono text-sm"
+                                  placeholder="例：500 或 -200"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs text-zinc-500 block">落差原因</label>
+                                <textarea
+                                  value={stallEditDraft.revenueGapReason ?? ''}
+                                  onChange={(e) =>
+                                    setStallEditDraft((p) =>
+                                      p ? { ...p, revenueGapReason: e.target.value } : p
+                                    )
+                                  }
+                                  rows={2}
+                                  className="mt-1 w-full rounded-lg border-2 border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 resize-y min-h-[4rem]"
+                                  placeholder="例：請客、食材耗損、收銀短溢…"
+                                />
+                              </div>
+                            </div>
+                          ) : (displaySnap.revenueGapAmount?.trim() || displaySnap.revenueGapReason?.trim()) ? (
+                            <div className="space-y-1.5 text-sm">
+                              {displaySnap.revenueGapAmount?.trim() ? (
+                                <p className="text-zinc-300">
+                                  <span className="text-zinc-500">落差金額：</span>
+                                  <span className="tabular-nums text-amber-200/90 font-medium">
+                                    $ {money(num(displaySnap.revenueGapAmount))}
+                                  </span>
+                                </p>
+                              ) : null}
+                              {displaySnap.revenueGapReason?.trim() ? (
+                                <p className="text-zinc-300">
+                                  <span className="text-zinc-500">原因：</span>
+                                  {displaySnap.revenueGapReason.trim()}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-zinc-600">
+                              尚未登記落差。點「調整盤點」可填寫金額與原因（亦可在攤上盤點完成當日填寫）。
+                            </p>
+                          )}
+                        </div>
+                      </div>
                       {isStallEditThis && stallEditDraft && (
                         <div className="space-y-2">
                           <p className="text-xs text-amber-500/90 font-medium">
@@ -575,23 +663,60 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         </div>
                         <div className="overflow-x-auto">
                           {isStallEditThis && stallEditDraft ? (
-                            <table className="w-full text-sm min-w-[720px]">
+                            <table className="w-full text-[11px] sm:text-sm min-w-[56rem]">
                               <thead>
-                                <tr className="text-left text-zinc-500 border-b border-zinc-800">
-                                  <th className="px-3 py-2">品項</th>
-                                  <th className="px-2 py-2 tabular-nums">帶出</th>
-                                  <th className="px-2 py-2 tabular-nums">剩餘</th>
-                                  <th className="px-2 py-2 tabular-nums">售出</th>
+                                <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[10px] sm:text-xs uppercase">
+                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900/80 z-[1]">
+                                    品項
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    帶出數量
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    售出數量
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    剩餘數量
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                    預估金額
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                    售出金額
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                    剩餘金額
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    單價
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    餘貨率
+                                  </th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {stallDisplayItems.map((item) => {
                                   const line = stallEditDraft.lines[item.id] ?? { out: '', remain: '' };
-                                  const c = computeLine(line.out, line.remain, item);
+                                  let c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
+                                  const frozenR = Number(stallEditDraft.frozenRetailUnitPriceByItem?.[item.id]);
+                                  if (Number.isFinite(frozenR)) {
+                                    c = {
+                                      ...c,
+                                      estPrice: c.out * frozenR,
+                                      remValue: c.remain * frozenR,
+                                      soldRevenue: c.sold * frozenR,
+                                    };
+                                  }
+                                  const unitRetail = Number.isFinite(frozenR)
+                                    ? frozenR
+                                    : estimatedRetailPerPackage(item);
                                   return (
                                     <tr key={item.id} className="border-b border-zinc-800/60">
-                                      <td className="px-3 py-2 text-zinc-200 whitespace-nowrap">{item.name}</td>
-                                      <td className="px-2 py-2 p-0">
+                                      <td className="px-2 sm:px-3 py-2 text-zinc-200 whitespace-nowrap sticky left-0 bg-zinc-900/40 z-[1]">
+                                        {item.name}
+                                      </td>
+                                      <td className="px-1.5 sm:px-2 py-2 p-0">
                                         <div className="flex items-center justify-center gap-0.5 max-w-[9rem] mx-auto">
                                           <button
                                             type="button"
@@ -622,7 +747,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           </button>
                                         </div>
                                       </td>
-                                      <td className="px-2 py-2 p-0">
+                                      <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
+                                        {c.remainUnfilled ? '—' : fmtLineQty(c.sold)}
+                                      </td>
+                                      <td className="px-1.5 sm:px-2 py-2 p-0">
                                         <div className="flex items-center justify-center gap-0.5 max-w-[9rem] mx-auto">
                                           <button
                                             type="button"
@@ -660,8 +788,26 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           </button>
                                         </div>
                                       </td>
-                                      <td className="px-2 py-2 font-mono tabular-nums text-zinc-400">
-                                        {c.remainUnfilled ? '—' : money(c.sold)}
+                                      <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                        $ {Math.round(c.estPrice).toLocaleString()}
+                                      </td>
+                                      <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                        {c.remainUnfilled
+                                          ? '—'
+                                          : `$ ${Math.round(c.soldRevenue).toLocaleString()}`}
+                                      </td>
+                                      <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                        {c.remainUnfilled
+                                          ? '—'
+                                          : `$ ${Math.round(c.remValue).toLocaleString()}`}
+                                      </td>
+                                      <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
+                                        {unitRetail.toLocaleString()}
+                                      </td>
+                                      <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
+                                        {c.remainUnfilled || c.out <= 0
+                                          ? '—'
+                                          : `${c.leftRatePct.toFixed(2)}%`}
                                       </td>
                                     </tr>
                                   );
@@ -669,22 +815,74 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                               </tbody>
                             </table>
                           ) : (
-                            <table className="w-full text-sm min-w-[640px]">
+                            <table className="w-full text-[11px] sm:text-sm min-w-[56rem]">
                               <thead>
-                                <tr className="text-left text-zinc-500 border-b border-zinc-800">
-                                  <th className="px-3 py-2">品項</th>
-                                  <th className="px-2 py-2 tabular-nums">帶出</th>
-                                  <th className="px-2 py-2 tabular-nums">剩餘</th>
-                                  <th className="px-2 py-2 tabular-nums">售出</th>
+                                <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[10px] sm:text-xs uppercase">
+                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900/80 z-[1]">
+                                    品項
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    帶出數量
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    售出數量
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    剩餘數量
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                    預估金額
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                    售出金額
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                    剩餘金額
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    單價
+                                  </th>
+                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                    餘貨率
+                                  </th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {tableRows.map(({ item, outN, remN, sold }) => (
+                                {tableRows.map(({ item, c, unitRetail }) => (
                                   <tr key={item.id} className="border-b border-zinc-800/60">
-                                    <td className="px-3 py-2 text-zinc-200">{item.name}</td>
-                                    <td className="px-2 py-2 tabular-nums text-zinc-300">{outN}</td>
-                                    <td className="px-2 py-2 tabular-nums text-zinc-300">{remN}</td>
-                                    <td className="px-2 py-2 tabular-nums text-zinc-400">{sold}</td>
+                                    <td className="px-2 sm:px-3 py-2 text-zinc-200 sticky left-0 bg-zinc-900/40 z-[1]">
+                                      {item.name}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
+                                      {fmtLineQty(c.out)}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
+                                      {c.remainUnfilled ? '—' : fmtLineQty(c.sold)}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
+                                      {c.remainUnfilled ? '—' : fmtLineQty(c.remain)}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                      $ {Math.round(c.estPrice).toLocaleString()}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                      {c.remainUnfilled
+                                        ? '—'
+                                        : `$ ${Math.round(c.soldRevenue).toLocaleString()}`}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                      {c.remainUnfilled
+                                        ? '—'
+                                        : `$ ${Math.round(c.remValue).toLocaleString()}`}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
+                                      {unitRetail.toLocaleString()}
+                                    </td>
+                                    <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
+                                      {c.remainUnfilled || c.out <= 0
+                                        ? '—'
+                                        : `${c.leftRatePct.toFixed(2)}%`}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>

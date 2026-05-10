@@ -3,10 +3,19 @@
  * 供儀表板、匯出報表或未來 AI／API 串接使用。
  */
 import { toLocalYmdDashed } from './dateDisplay';
-import { loadFranchiseManagementOrders, loadOrderHistory } from './orderHistoryStorage';
-import { effectiveOrderDateYmd, type OrderHistoryEntry } from './orderHistoryStorage';
+import {
+  loadFranchiseManagementOrders,
+  loadOrderHistory,
+  effectiveOrderDateYmd,
+  orderIsFranchiseBusinessScoped,
+  orderIsHeadquartersDirectScoped,
+  type OrderHistoryEntry,
+} from './orderHistoryStorage';
 import { getStallDisplaySoldAtRetail } from './orderStallDisplayRevenue';
 import type { SupplyRetailView } from './supplyCatalog';
+import { getSalesRecord, mergeSalesRecordWithCatalog } from './salesRecordStorage';
+import { num } from './stallMath';
+import { resolveOrderStoreLabel } from './orderStoreLabel';
 import {
   listAccountingLedgerEntriesForMonth,
   ingredientSubSpendBreakdownForMonth,
@@ -93,6 +102,36 @@ export type ExpenseBreakdownRow = {
   pctOfExpense: number;
 };
 
+export type StallGapDetailRow = {
+  orderId: string;
+  storeLabel: string;
+  stallYmd: string;
+  loggedGapAmount: number;
+  reason: string;
+  /** max(0, 盤點零售 − 登錄實收) */
+  bookShortfall: number;
+};
+
+export type StallGapReasonAgg = {
+  reason: string;
+  orderCount: number;
+  loggedAmountSum: number;
+};
+
+export type StallGapSummary = {
+  /** Σ 登記落差金額（代數和；負值多為短少／未入帳之登記） */
+  loggedGapSum: number;
+  /** Σ max(0, 盤點零售營收 − 登錄實收) */
+  bookShortfallSum: number;
+  /**
+   * 推估呆帳：帳面短收合計 − |登記落差加總|（不低於 0）。
+   * 登記落差不論正負，皆以絕對值視為已說明／已登錄之沖減幅度，避免僅負值才扣抵造成正登記無效。
+   */
+  badDebtEstimate: number;
+  reasonBreakdown: StallGapReasonAgg[];
+  rows: StallGapDetailRow[];
+};
+
 export type AdminDashboardFinance = {
   ym: string;
   /** 本月盤點歸屬之直營／總部單：零售參考 × 售出量（與銷售紀錄「盤點金額」一致） */
@@ -112,9 +151,102 @@ export type AdminDashboardFinance = {
   netProfit: number;
   /** 僅含金額 &gt; 0 之支出項，供圖表用 */
   expenseBreakdown: ExpenseBreakdownRow[];
+  /** 本月盤點落差／呆帳推估（依盤點日歸屬月） */
+  stallGap: StallGapSummary;
 };
 
 const PROCUREMENT_LABEL = '進貨成本（直營／總部叫貨）';
+
+function resolveStallSnapshotForGap(o: OrderHistoryEntry) {
+  if (o.stallCountSnapshot) return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
+  if (o.stallCountBasisYmd) {
+    const day = getSalesRecord(o.stallCountBasisYmd);
+    return day ? mergeSalesRecordWithCatalog(day) : null;
+  }
+  return null;
+}
+
+/**
+ * 彙總盤點登錄實收與帳面零售之差異、登記落差與推估呆帳。
+ * @param range 以盤點歸屬日（stallCountBasisYmd 或完成時間）落在區間內之單據為準。
+ */
+export function computeStallGapSummary(
+  orders: OrderHistoryEntry[],
+  range: { type: 'ym'; ymKey: string } | { type: 'ymd'; startYmd: string; endYmd: string },
+): StallGapSummary {
+  const ymKey = range.type === 'ym' ? range.ymKey.slice(0, 7) : null;
+  const startYmd = range.type === 'ymd' ? range.startYmd : '';
+  const endYmd = range.type === 'ymd' ? range.endYmd : '';
+
+  let loggedGapSum = 0;
+  let bookShortfallSum = 0;
+  const rows: StallGapDetailRow[] = [];
+
+  for (const o of orders) {
+    if (!o.stallCountCompletedAt) continue;
+    const stallYmd = stallCountAttributeYmd(o);
+    if (!stallYmd) continue;
+    if (ymKey != null) {
+      if (stallCountAttributeYmKey(o) !== ymKey) continue;
+    } else if (stallYmd < startYmd || stallYmd > endYmd) {
+      continue;
+    }
+
+    const snap = resolveStallSnapshotForGap(o);
+    if (!snap) continue;
+
+    const retailSold = getStallDisplaySoldAtRetail(o, HQ_STALL_RETAIL_VIEW);
+    const actualRev = num(snap.actualRevenue);
+    const bookShortfall =
+      retailSold != null ? Math.max(0, retailSold - actualRev) : 0;
+    const gapN = num(snap.revenueGapAmount ?? '');
+    const reason = (snap.revenueGapReason ?? '').trim();
+
+    loggedGapSum += gapN;
+    bookShortfallSum += bookShortfall;
+
+    if (gapN !== 0 || reason || bookShortfall > 0) {
+      rows.push({
+        orderId: o.id,
+        storeLabel: resolveOrderStoreLabel({
+          storeLabel: o.storeLabel,
+          actorRole: o.actorRole,
+          actorUserId: o.actorUserId,
+          scopeId: o.scopeId,
+        }),
+        stallYmd,
+        loggedGapAmount: gapN,
+        reason: reason || '—',
+        bookShortfall,
+      });
+    }
+  }
+
+  const badDebtEstimate = Math.max(0, bookShortfallSum - Math.abs(loggedGapSum));
+
+  const reasonMap = new Map<string, { count: number; sum: number }>();
+  for (const r of rows) {
+    if (!r.reason || r.reason === '—') continue;
+    const prev = reasonMap.get(r.reason) ?? { count: 0, sum: 0 };
+    prev.count += 1;
+    prev.sum += r.loggedGapAmount;
+    reasonMap.set(r.reason, prev);
+  }
+  const reasonBreakdown = Array.from(reasonMap.entries())
+    .map(([reason, { count, sum }]) => ({
+      reason,
+      orderCount: count,
+      loggedAmountSum: sum,
+    }))
+    .sort(
+      (a, b) =>
+        Math.abs(b.loggedAmountSum) - Math.abs(a.loggedAmountSum) || b.orderCount - a.orderCount,
+    );
+
+  rows.sort((a, b) => b.stallYmd.localeCompare(a.stallYmd) || b.orderId.localeCompare(a.orderId));
+
+  return { loggedGapSum, bookShortfallSum, badDebtEstimate, reasonBreakdown, rows };
+}
 
 /**
  * 超級管理員儀表板：本月曆法。
@@ -124,19 +256,26 @@ const PROCUREMENT_LABEL = '進貨成本（直營／總部叫貨）';
 export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance {
   const ymKey = ym.slice(0, 7);
   const merged = mergeOrdersForAdminFinance();
+  /** 總部營運卡：僅直營／總部視角之盤點落差（不含加盟門市單） */
+  const stallGapOrders = merged.filter((o) => orderIsHeadquartersDirectScoped(o));
+  const stallGap = computeStallGapSummary(stallGapOrders, { type: 'ym', ymKey });
 
   let directStoreStallRetailTotal = 0;
   let franchiseeOrderTotal = 0;
   const procurementCostTotal = 0;
 
   for (const o of merged) {
-    if (o.actorRole === 'franchisee' && o.status === '已完成' && orderBookkeepingYmdStartsWithYm(o, ymKey)) {
+    if (
+      orderIsFranchiseBusinessScoped(o) &&
+      o.status === '已完成' &&
+      orderBookkeepingYmdStartsWithYm(o, ymKey)
+    ) {
       const selfSupplied =
         o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
       franchiseeOrderTotal += Math.max(0, o.totalAmount - selfSupplied);
     }
     if (
-      (o.actorRole === 'admin' || o.actorRole === 'employee') &&
+      orderIsHeadquartersDirectScoped(o) &&
       o.stallCountCompletedAt &&
       stallCountAttributeYmKey(o) === ymKey
     ) {
@@ -189,6 +328,7 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
     expenseTotal,
     netProfit,
     expenseBreakdown,
+    stallGap,
   };
 }
 

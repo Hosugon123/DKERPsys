@@ -36,7 +36,6 @@ const adminItems = [
   { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
   { id: 'accounting', label: '流水帳', icon: Wallet },
-  { id: 'dataHub', label: '數據中心', icon: Database },
 ] as const;
 
 const franchiseeItems = [
@@ -278,6 +277,30 @@ export default function Sidebar({
         </nav>
 
         <div className="flex-shrink-0 space-y-1 border-t border-zinc-800 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {userRole === 'admin' && (
+            <button
+              type="button"
+              onClick={() => {
+                if (reorderMode) return;
+                setCurrentView('dataHub');
+                setIsOpen(false);
+              }}
+              disabled={reorderMode}
+              className={cn(
+                'w-full flex items-center gap-3 p-3 transition-colors duration-200 rounded-lg',
+                reorderMode && 'opacity-40 pointer-events-none',
+                !reorderMode && currentView === 'dataHub'
+                  ? 'bg-amber-600/10 border-r-4 border-amber-600 text-amber-500'
+                  : 'text-zinc-400 hover:bg-zinc-800'
+              )}
+            >
+              <Database
+                size={20}
+                className={!reorderMode && currentView === 'dataHub' ? 'text-amber-500' : 'text-zinc-400'}
+              />
+              <span className="font-medium">數據中心</span>
+            </button>
+          )}
           {isSuperAdmin && (
             <button
               type="button"

@@ -6,6 +6,8 @@ type OrderLike = {
   storeLabel: string;
   actorRole?: OrderActorRole;
   actorUserId?: string;
+  /** 資料範圍：總部代建加盟單可能 actorRole 仍為 admin，需依 scope 辨識門市 */
+  scopeId?: string;
 };
 
 function normalizeLegacyStoreLabel(label: string): string {
@@ -25,9 +27,15 @@ function preferUserStoreLabel(user: SystemUser | undefined): string | null {
 export function resolveOrderStoreLabel(order: OrderLike): string {
   const fallback = normalizeLegacyStoreLabel(order.storeLabel);
   const users = listSystemUsers();
+  const scopeFranchiseeUid = order.scopeId?.trim().match(/^scope:franchisee:(.+)$/)?.[1]?.trim();
 
-  if (order.actorRole === 'admin') {
+  if (order.actorRole === 'admin' && !scopeFranchiseeUid) {
     return '直營店';
+  }
+
+  if (order.actorRole === 'admin' && scopeFranchiseeUid) {
+    const franchisee = users.find((u) => u.id === scopeFranchiseeUid);
+    return preferUserStoreLabel(franchisee) ?? fallback;
   }
 
   if (!order.actorUserId) {

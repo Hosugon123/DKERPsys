@@ -5,12 +5,14 @@ import {
   CalendarDays,
   PackagePlus,
   ClipboardList,
+  ChevronDown,
   X,
   Minus,
   Plus,
   Wallet,
 } from 'lucide-react';
 import type { UserRole } from './Orders';
+import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import {
   estimatedRetailPerPackage,
   getSupplyItem,
@@ -25,6 +27,7 @@ import {
   loadDay,
   saveDay,
   recomputeStallOutForStallYmdAndOrder,
+  computeStallOutImportBreakdown,
   listProcurementOrdersInLastNDays,
   type DaySnapshot,
 } from '../lib/stallInventoryStorage';
@@ -74,6 +77,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const [stallCountConfirmOpen, setStallCountConfirmOpen] = useState(false);
   /** 本場盤點鎖定之單一叫貨單：植入帶出、盤點完成押記皆針對此單。 */
   const [viewOrderId, setViewOrderId] = useState<string>('');
+  /** 訂單摘要＋帶出試算表預設收合，避免清單過長 */
+  const [stallOrderDetailOpen, setStallOrderDetailOpen] = useState(false);
   const ORDER_PICKER_SPAN = 35;
 
   useEffect(() => {
@@ -96,9 +101,11 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     };
     window.addEventListener('stallInventoryUpdated', on);
     window.addEventListener('supplyCatalogUpdated', on);
+    window.addEventListener(AUTH_SESSION_CHANGED_EVENT, on);
     return () => {
       window.removeEventListener('stallInventoryUpdated', on);
       window.removeEventListener('supplyCatalogUpdated', on);
+      window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, on);
     };
   }, [dateStr]);
 
@@ -169,12 +176,25 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     });
   }, [dateStr, ordersInWindow]);
 
+  useEffect(() => {
+    setStallOrderDetailOpen(false);
+  }, [viewOrderId]);
+
   const viewOrder = useMemo(
     () => ordersInWindow.find((o) => o.id === viewOrderId) ?? null,
     [ordersInWindow, viewOrderId]
   );
 
+  /** 所選訂單 × 盤點日：前日剩餘 + 本單叫貨 = 實際帶出（與「植入訂單」一致） */
+  const importBreakdown = useMemo(() => {
+    if (!viewOrderId) return null;
+    return computeStallOutImportBreakdown(dateStr, viewOrderId);
+  }, [dateStr, viewOrderId, stallListTick]);
+
   const formatStallCountStamp = (iso: string) => formatSlashDateTimeFromIso(iso) || iso;
+
+  const formatQtyCell = (n: number) =>
+    Number.isInteger(n) ? String(n) : n.toLocaleString('zh-TW', { maximumFractionDigits: 3 });
 
   const rows = useMemo(
     () =>
@@ -233,6 +253,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       lines: recordLines,
       actualRevenue: next.actualRevenue,
       updatedAt: completedAt,
+      revenueGapAmount: (next.revenueGapAmount ?? '').trim(),
+      revenueGapReason: (next.revenueGapReason ?? '').trim(),
       frozenRetailUnitPriceByItem: Object.fromEntries(
         stallDisplayItems.map((it) => [it.id, estimatedRetailPerPackage(it)])
       ),
@@ -338,6 +360,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             植入訂單
           </button>
         </div>
+        <p className="text-[0.6875rem] sm:text-xs text-zinc-500 mt-2 leading-relaxed">
+          加盟主實際帶出量＝<strong className="text-zinc-400 font-medium">前一日收攤剩餘</strong>
+          ＋<strong className="text-zinc-400 font-medium">本筆訂單叫貨量</strong>。按「植入訂單」會依此自動填寫各品項帶出（前一日剩餘優先採用已盤點之銷售紀錄）；亦可再手動微調。
+        </p>
         {recomputeMsg && <p className="text-sm text-amber-200/90 mt-3">{recomputeMsg}</p>}
         {ordersInWindow.length === 0 ? (
           <p className="text-sm text-zinc-500 mt-3">
@@ -345,66 +371,167 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           </p>
         ) : (
           <div className="mt-3 space-y-2">
-            <label className="block text-xs text-zinc-500">
-              <span className="text-zinc-400">選本場要盤點的訂單</span>
-              <select
-                value={viewOrderId}
-                onChange={(e) => setViewOrderId(e.target.value)}
-                className="mt-1.5 w-full sm:max-w-xl rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-800/50"
-              >
-                {ordersInWindow.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ・ 下單 {formatTimeHmFromIso(o.createdAt)} ・ 建單{' '}
-                    {displayOrderCreatedByLabel(o)} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 16)}… ·{' '}
-                    {procurementStatusDisplay(o.status)}
-                  </option>
-                ))}
-              </select>
+            <label className="block w-full text-xs text-zinc-500">
+              <span className="text-zinc-400">植入訂單</span>
+              <div className="relative mt-1.5 w-full">
+                <ChevronDown
+                  size={18}
+                  className="pointer-events-none absolute left-3 top-1/2 z-[1] -translate-y-1/2 text-zinc-500"
+                  aria-hidden
+                />
+                <select
+                  value={viewOrderId}
+                  onChange={(e) => setViewOrderId(e.target.value)}
+                  className="w-full max-w-none cursor-pointer appearance-none rounded-lg border border-zinc-700 bg-zinc-950/80 py-2 pl-10 pr-3 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-800/50 box-border"
+                >
+                  {ordersInWindow.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ・ 下單 {formatTimeHmFromIso(o.createdAt)} ・ 建單{' '}
+                      {displayOrderCreatedByLabel(o)} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 16)}… ·{' '}
+                      {procurementStatusDisplay(o.status)}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </label>
             {viewOrder && (
-              <div className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3 py-2.5 text-sm text-zinc-300 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-mono text-xs text-zinc-400 truncate" title={viewOrder.id}>
-                    {viewOrder.id}
-                    {ordersInWindow.length === 1 && (
-                      <span className="ml-1.5 text-zinc-500 font-sans">（期間內一筆）</span>
-                    )}
-                  </p>
-                  <p className="text-zinc-500 text-xs mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                    <span>
-                      訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(viewOrder))} ・ 下單{' '}
-                      {formatTimeHmFromIso(viewOrder.createdAt)}
-                    </span>
-                    <span aria-hidden>·</span>
-                    <span
+              <div className="w-full rounded-lg border border-zinc-800/80 bg-zinc-950/40 overflow-hidden box-border">
+                <button
+                  type="button"
+                  onClick={() => setStallOrderDetailOpen((v) => !v)}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-zinc-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800/50"
+                  aria-expanded={stallOrderDetailOpen}
+                  aria-controls="stall-order-detail-panel"
+                  aria-label={stallOrderDetailOpen ? '收合訂單明細' : '展開訂單明細'}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <ChevronDown
+                      size={18}
                       className={cn(
-                        'font-medium',
-                        viewOrder.status === '待出貨' ? 'text-amber-400' : 'text-emerald-500/90'
+                        'shrink-0 text-zinc-500 transition-transform self-center',
+                        stallOrderDetailOpen && 'rotate-180'
                       )}
-                    >
-                      {procurementStatusDisplay(viewOrder.status)}
-                    </span>
-                    <StallCountOrderBadge
-                      createdAtIso={viewOrder.createdAt}
-                      stallCountCompletedAt={viewOrder.stallCountCompletedAt}
+                      aria-hidden
                     />
-                    <span>
-                      · {resolveOrderStoreLabel(viewOrder)}
-                    </span>
-                  </p>
-                  <p className="text-[0.6875rem] text-zinc-500 mt-1">
-                    建單者：{displayOrderCreatedByLabel(viewOrder)}
-                  </p>
-                  {viewOrder.stallCountCompletedAt && viewOrder.stallCountBasisYmd && (
-                    <p className="text-[0.6875rem] text-amber-200/80 mt-1.5 pl-0.5">
-                      盤點壓記：{ymdDashToSlash(viewOrder.stallCountBasisYmd)}（盤點日）· {formatStallCountStamp(viewOrder.stallCountCompletedAt)}
-                      {' '}
-                      · 完成者：{displayOrderStallCountCompletedByLabel(viewOrder)}
-                    </p>
+                    <div className="min-w-0">
+                      <p className="text-[0.6875rem] text-zinc-500">訂單明細</p>
+                      <p
+                        className="text-sm text-zinc-200 truncate font-mono"
+                        title={`${formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(viewOrder))} · ${viewOrder.id}`}
+                      >
+                        {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(viewOrder))} · {viewOrder.id}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-amber-200/90 text-sm font-medium tabular-nums text-right self-center">
+                    $ {money(viewOrder.totalAmount)}
+                  </div>
+                </button>
+                <div
+                  id="stall-order-detail-panel"
+                  className={cn(!stallOrderDetailOpen && 'hidden')}
+                >
+                  <div className="px-3 pb-2.5 pt-0 text-sm text-zinc-300 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 border-t border-zinc-800/60">
+                    <div className="min-w-0 pt-2">
+                      <p className="font-mono text-xs text-zinc-400 truncate" title={viewOrder.id}>
+                        {viewOrder.id}
+                        {ordersInWindow.length === 1 && (
+                          <span className="ml-1.5 text-zinc-500 font-sans">（期間內一筆）</span>
+                        )}
+                      </p>
+                      <p className="text-zinc-500 text-xs mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                        <span>
+                          訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(viewOrder))} ・ 下單{' '}
+                          {formatTimeHmFromIso(viewOrder.createdAt)}
+                        </span>
+                        <span aria-hidden>·</span>
+                        <span
+                          className={cn(
+                            'font-medium',
+                            viewOrder.status === '待出貨' ? 'text-amber-400' : 'text-emerald-500/90'
+                          )}
+                        >
+                          {procurementStatusDisplay(viewOrder.status)}
+                        </span>
+                        <StallCountOrderBadge
+                          createdAtIso={viewOrder.createdAt}
+                          stallCountCompletedAt={viewOrder.stallCountCompletedAt}
+                        />
+                        <span>· {resolveOrderStoreLabel(viewOrder)}</span>
+                      </p>
+                      <p className="text-[0.6875rem] text-zinc-500 mt-1">
+                        建單者：{displayOrderCreatedByLabel(viewOrder)}
+                      </p>
+                      {viewOrder.stallCountCompletedAt && viewOrder.stallCountBasisYmd && (
+                        <p className="text-[0.6875rem] text-amber-200/80 mt-1.5 pl-0.5">
+                          {`日期:${ymdDashToSlash(viewOrder.stallCountBasisYmd)}.時間:${
+                            formatTimeHmFromIso(viewOrder.stallCountCompletedAt) ||
+                            formatStallCountStamp(viewOrder.stallCountCompletedAt)
+                          }.盤點者:${displayOrderStallCountCompletedByLabel(viewOrder)} .`}
+                        </p>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-zinc-500 text-sm tabular-nums sm:pt-2 sm:text-right">
+                      批貨 $ {money(viewOrder.totalAmount)}
+                    </div>
+                  </div>
+                  {importBreakdown && (
+                    <div className="mt-0 mx-3 mb-3 rounded-lg border border-zinc-800/80 bg-zinc-950/50 overflow-hidden">
+                      <p className="px-3 py-2 text-[0.6875rem] sm:text-xs text-zinc-500 border-b border-zinc-800/80 leading-relaxed">
+                        帶出試算明細（盤點日 {formatSlashYmdWithWeekdayFromYmd(dateStr)}）：前一日
+                        {formatSlashYmdWithWeekdayFromYmd(importBreakdown.prevYmd)} 收攤剩餘 ＋ 本單叫貨 ＝
+                        實際帶出
+                        <span className="text-zinc-600">
+                          （前日剩餘與銷售紀錄／盤點表讀法同「植入訂單」；按該鈕即寫入下列加總）
+                        </span>
+                      </p>
+                      {importBreakdown.rows.length === 0 ? (
+                        <p className="px-3 py-3 text-xs text-zinc-500">
+                          無販售品可列示（本單無數量且前日無剩餘），或僅含消耗品。
+                        </p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-[0.6875rem] sm:text-xs min-w-[520px]">
+                            <thead>
+                              <tr className="border-b border-zinc-800/80 text-zinc-500">
+                                <th className="px-2 sm:px-3 py-2 font-medium">品項</th>
+                                <th className="px-2 sm:px-3 py-2 font-medium text-right whitespace-nowrap">
+                                  前日剩餘
+                                </th>
+                                <th className="px-2 sm:px-3 py-2 font-medium text-right whitespace-nowrap">
+                                  本單叫貨
+                                </th>
+                                <th className="px-2 sm:px-3 py-2 font-medium text-right whitespace-nowrap text-amber-200/90">
+                                  實際帶出
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {importBreakdown.rows.map((r) => (
+                                <tr
+                                  key={r.productId}
+                                  className="border-b border-zinc-800/40 last:border-b-0 text-zinc-300"
+                                >
+                                  <td className="px-2 sm:px-3 py-1.5 min-w-0 max-w-[12rem] sm:max-w-none truncate sm:whitespace-normal">
+                                    {r.name}
+                                  </td>
+                                  <td className="px-2 sm:px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                                    {formatQtyCell(r.prevRemain)}
+                                  </td>
+                                  <td className="px-2 sm:px-3 py-1.5 text-right tabular-nums">
+                                    {formatQtyCell(r.orderQty)}
+                                  </td>
+                                  <td className="px-2 sm:px-3 py-1.5 text-right tabular-nums font-medium text-amber-200/85">
+                                    {formatQtyCell(r.suggestedOut)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
                   )}
-                </div>
-                <div className="shrink-0 text-zinc-400 text-sm tabular-nums">
-                  $ {money(viewOrder.totalAmount)}
                 </div>
               </div>
             )}
@@ -413,38 +540,38 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       <div
-        className="rounded-2xl border-2 border-amber-800/60 bg-amber-950/20 p-4 sm:p-5 grid sm:grid-cols-2 gap-4"
+        className="rounded-xl border border-amber-800/55 bg-amber-950/20 p-3 sm:p-4 grid sm:grid-cols-2 gap-3 sm:gap-3"
         role="region"
         aria-label="盤點彙總"
       >
-        <div className="space-y-2 border-b sm:border-b-0 sm:border-r border-amber-900/50 pb-4 sm:pb-0 sm:pr-4">
-          <p className="text-xs text-amber-300/80 uppercase tracking-wider">預估與帳面</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+        <div className="space-y-1.5 border-b sm:border-b-0 sm:border-r border-amber-900/50 pb-3 sm:pb-0 sm:pr-3">
+          <p className="text-[0.6875rem] text-amber-300/80 uppercase tracking-wider">預估與帳面</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
             <div>
-              <p className="text-zinc-500">預估金額</p>
-              <p className="text-lg font-semibold text-emerald-400 tabular-nums">
+              <p className="text-zinc-500 text-[0.6875rem] sm:text-xs">預估金額</p>
+              <p className="text-base font-semibold text-emerald-400 tabular-nums">
                 $ {money(dayKpi.estTotal)}
               </p>
             </div>
             <div>
-              <p className="text-zinc-500">剩餘貨品金額</p>
-              <p className="text-lg font-semibold text-emerald-400/90 tabular-nums">
+              <p className="text-zinc-500 text-[0.6875rem] sm:text-xs">剩餘貨品金額</p>
+              <p className="text-base font-semibold text-emerald-400/90 tabular-nums">
                 $ {money(dayKpi.remGoodsValue)}
               </p>
             </div>
             <div>
-              <p className="text-zinc-500">應有營業額</p>
-              <p className="text-lg font-semibold text-rose-400 tabular-nums">
+              <p className="text-zinc-500 text-[0.6875rem] sm:text-xs">應有營業額</p>
+              <p className="text-base font-semibold text-rose-400 tabular-nums">
                 $ {money(dayKpi.shouldRevenue)}
               </p>
             </div>
           </div>
         </div>
-        <div className="space-y-2">
-          <p className="text-xs text-amber-300/80 uppercase tracking-wider">實收對帳</p>
+        <div className="space-y-1.5">
+          <p className="text-[0.6875rem] text-amber-300/80 uppercase tracking-wider">實收對帳</p>
           <div>
-            <label className="text-zinc-500 text-sm">盤點後實收（當日現金／收銀）</label>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
+            <label className="text-zinc-500 text-xs">盤點後實收（當日現金／收銀）</label>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
               <input
                 type="text"
                 inputMode="decimal"
@@ -452,10 +579,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                 onChange={(e) =>
                   setSnap((p) => ({ ...p, actualRevenue: e.target.value }))
                 }
-                className="w-40 min-h-[44px] rounded-lg border-2 border-zinc-600 bg-zinc-900 px-3 text-amber-100 font-mono"
+                className="w-36 min-h-9 rounded-md border border-zinc-600 bg-zinc-900 px-2.5 py-1.5 text-sm text-amber-100 font-mono"
                 placeholder="0"
               />
-              <p className="text-lg font-semibold text-emerald-400 tabular-nums">
+              <p className="text-base font-semibold text-emerald-400 tabular-nums">
                 落差{' '}
                 <span className={diff < 0 ? 'text-rose-400' : 'text-zinc-200'}>
                   {diff < 0 ? '' : '+'}${money(diff)}
@@ -463,22 +590,52 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               </p>
             </div>
           </div>
+          <div className="mt-2 pt-2 border-t border-amber-900/40 space-y-2">
+            <p className="text-[10px] sm:text-[11px] text-zinc-500 leading-snug">
+              若實收與帳面不符，可登記<strong className="text-zinc-400">落差金額</strong>與<strong className="text-zinc-400">原因</strong>（損耗、請客、試吃等）；完成盤點後會寫入銷售紀錄。
+            </p>
+            <div>
+              <label className="text-zinc-500 text-[0.6875rem]">落差金額（自填）</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={snap.revenueGapAmount ?? ''}
+                onChange={(e) =>
+                  setSnap((p) => ({ ...p, revenueGapAmount: e.target.value }))
+                }
+                className="mt-0.5 w-full max-w-xs min-h-9 rounded-md border border-zinc-600 bg-zinc-900 px-2.5 py-1.5 text-amber-100 font-mono text-xs sm:text-sm"
+                placeholder="例：500 或 -200"
+              />
+            </div>
+            <div>
+              <label className="text-zinc-500 text-[0.6875rem]">落差原因</label>
+              <textarea
+                value={snap.revenueGapReason ?? ''}
+                onChange={(e) =>
+                  setSnap((p) => ({ ...p, revenueGapReason: e.target.value }))
+                }
+                rows={2}
+                className="mt-0.5 w-full rounded-md border border-zinc-600 bg-zinc-900 px-2.5 py-1.5 text-xs sm:text-sm text-zinc-200 placeholder:text-zinc-600 resize-y min-h-[3.25rem]"
+                placeholder="例：請客、食材耗損、收銀短溢、零錢誤差…"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950/40 -mx-1 px-1">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[860px] text-left text-[14px] sm:text-sm">
           <thead>
-            <tr className="text-zinc-500 text-xs border-b border-zinc-800 bg-zinc-900/50">
-              <th className="px-2 py-3 font-medium">品項</th>
-              <th className="px-2 py-3 font-medium whitespace-nowrap">帶出貨量</th>
-              <th className="px-2 py-3 font-medium whitespace-nowrap">剩餘貨量</th>
-              <th className="px-2 py-3 font-medium whitespace-nowrap">售出數量</th>
-              <th className="px-2 py-3 font-medium text-right whitespace-nowrap">餘貨金額</th>
-              <th className="px-2 py-3 font-medium text-right whitespace-nowrap">單價（零售）</th>
-              <th className="px-2 py-3 font-medium text-right whitespace-nowrap">預估帶出價格</th>
-              <th className="px-2 py-3 font-medium whitespace-nowrap">單位</th>
-              <th className="px-2 py-3 font-medium text-right whitespace-nowrap">餘貨率</th>
+            <tr className="text-zinc-500 text-[14px] sm:text-xs border-b border-zinc-800 bg-zinc-900/50">
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center">品項</th>
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">帶出貨量</th>
+              <th className="pl-0 pr-1.5 sm:pl-0.5 sm:pr-2.5 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">剩餘貨量</th>
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">售出數量</th>
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">餘貨金額</th>
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">單價（零售）</th>
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">預估帶出價格</th>
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">單位</th>
+              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">餘貨率</th>
             </tr>
           </thead>
           <tbody>
@@ -487,54 +644,54 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                 key={item.id}
                 className="border-b border-zinc-800/70 hover:bg-white/[0.02] text-zinc-200"
               >
-                <td className="px-2 py-2.5 text-rose-300 font-medium whitespace-nowrap">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-rose-300 font-medium whitespace-nowrap text-[14px] sm:text-sm">
                   {item.name}
                 </td>
-                <td className="px-2 py-2.5 p-0">
-                  <div className="flex items-center justify-end gap-0.5 max-w-[9.5rem] sm:max-w-[10.5rem]">
+                <td className="pl-0 pr-1.5 sm:pl-0.5 sm:pr-2.5 py-2 sm:py-2.5 p-0">
+                  <div className="flex items-center justify-end gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
                     <button
                       type="button"
                       onClick={() => bumpLine(item.id, 'out', -1)}
                       disabled={num(snap.lines[item.id]?.out ?? '') <= 0}
-                      className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
                       aria-label={`${item.name} 帶出減一`}
                     >
-                      <Minus size={16} />
+                      <Minus size={14} className="mx-auto" />
                     </button>
                     <input
                       value={snap.lines[item.id]?.out ?? ''}
                       onChange={(e) => setLine(item.id, 'out', e.target.value)}
-                      className="w-16 sm:w-20 min-w-0 min-h-9 bg-zinc-900/80 border border-zinc-700 rounded px-1 text-amber-100 font-mono text-sm text-center"
+                      className="w-8 sm:w-20 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border border-zinc-700 rounded px-0.5 sm:px-1 text-amber-100 font-mono text-[14px] sm:text-sm leading-none text-center"
                       inputMode="decimal"
                       aria-label={`${item.name} 帶出`}
                     />
                     <button
                       type="button"
                       onClick={() => bumpLine(item.id, 'out', 1)}
-                      className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 shrink-0"
+                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
                       aria-label={`${item.name} 帶出加一`}
                     >
-                      <Plus size={16} />
+                      <Plus size={14} className="mx-auto" />
                     </button>
                   </div>
                 </td>
-                <td className="px-2 py-2.5 p-0">
-                  <div className="flex items-center gap-1 flex-nowrap min-w-0">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 p-0">
+                  <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap min-w-0">
                     <button
                       type="button"
                       onClick={() => bumpLine(item.id, 'remain', -1)}
                       disabled={c.remainUnfilled || num(snap.lines[item.id]?.remain ?? '') <= 0}
-                      className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
                       aria-label={`${item.name} 剩餘減一`}
                     >
-                      <Minus size={16} />
+                      <Minus size={14} className="mx-auto" />
                     </button>
                     <input
                       value={snap.lines[item.id]?.remain ?? ''}
                       onChange={(e) => setLine(item.id, 'remain', e.target.value)}
                       placeholder="必填"
                       className={cn(
-                        'w-14 min-w-0 min-h-9 bg-zinc-900/80 border rounded px-1 font-mono text-[0.6125rem] leading-tight text-center',
+                        'w-8 sm:w-16 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border rounded px-0.5 sm:px-1 font-mono text-[19px] leading-none text-center',
                         c.remainUnfilled
                           ? 'border-amber-800/50 border-dashed text-zinc-400 placeholder:text-zinc-600'
                           : c.remain > 0
@@ -547,34 +704,34 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     <button
                       type="button"
                       onClick={() => bumpLine(item.id, 'remain', 1)}
-                      className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 shrink-0"
+                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
                       aria-label={`${item.name} 剩餘加一`}
                     >
-                      <Plus size={16} />
+                      <Plus size={14} className="mx-auto" />
                     </button>
                     <button
                       type="button"
                       onClick={() => setLine(item.id, 'remain', '0')}
-                      className="shrink-0 rounded border border-zinc-600 bg-zinc-800/60 px-1.5 py-1 text-[0.625rem] sm:text-xs text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
+                      className="shrink-0 h-8 rounded border border-zinc-600 bg-zinc-800/60 px-1 sm:px-1.5 py-0 sm:py-1 text-[14px] sm:text-xs leading-none text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
                     >
                       已售完
                     </button>
                   </div>
                 </td>
-                <td className="px-2 py-2.5 font-mono tabular-nums text-zinc-300">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-300 text-[14px] sm:text-sm">
                   {c.remainUnfilled ? <span className="text-zinc-600">—</span> : money(c.sold)}
                 </td>
-                <td className="px-2 py-2.5 text-right font-mono tabular-nums text-zinc-400">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-400 text-[14px] sm:text-sm">
                   {c.remainUnfilled ? <span className="text-zinc-600">—</span> : <>$ {money(c.remValue)}</>}
                 </td>
-                <td className="px-2 py-2.5 text-right font-mono text-zinc-400">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono text-zinc-400 text-[14px] sm:text-sm">
                   {estimatedRetailPerPackage(item).toLocaleString()}
                 </td>
-                <td className="px-2 py-2.5 text-right font-mono text-emerald-300/90">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono text-emerald-300/90 text-[14px] sm:text-sm">
                   $ {money(c.estPrice)}
                 </td>
-                <td className="px-2 py-2.5 text-zinc-500 whitespace-nowrap">{item.pieceUnit}</td>
-                <td className="px-2 py-2.5 text-right text-amber-200/80 font-mono">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-zinc-500 whitespace-nowrap text-[14px] sm:text-sm">{item.pieceUnit}</td>
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-amber-200/80 font-mono text-[14px] sm:text-sm">
                   {c.remainUnfilled || c.out <= 0 ? '—' : `${c.leftRatePct.toFixed(2)}%`}
                 </td>
               </tr>
@@ -584,16 +741,16 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       <div
-        className="fixed bottom-4 right-3 sm:bottom-6 sm:right-6 z-40 max-w-[calc(100vw-1.5rem)] sm:max-w-md"
+        className="fixed bottom-4 z-40 inset-x-3 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:left-auto sm:max-w-md sm:w-[min(28rem,calc(100vw-3rem))]"
         aria-label="實收對帳與盤點完成"
       >
-        <div className="rounded-2xl border border-amber-500/40 bg-zinc-950/95 backdrop-blur-md shadow-2xl shadow-black/60 ring-1 ring-amber-500/20 p-2 sm:p-2.5 flex flex-col gap-1.5">
-          <div className="flex items-stretch gap-1.5 sm:gap-2">
+        <div className="w-full rounded-2xl border border-amber-500/40 bg-zinc-950/95 backdrop-blur-md shadow-2xl shadow-black/60 ring-1 ring-amber-500/20 p-2 sm:p-2.5 flex flex-col gap-1.5">
+          <div className="flex w-full items-stretch justify-between gap-2 sm:gap-2">
             <label
-              className="flex-1 min-w-0 flex items-stretch rounded-xl border border-zinc-700 bg-zinc-900/80 overflow-hidden focus-within:border-amber-500/60 focus-within:ring-1 focus-within:ring-amber-500/30"
+              className="flex min-w-0 flex-1 items-stretch rounded-xl border border-zinc-700 bg-zinc-900/80 overflow-hidden focus-within:border-amber-500/60 focus-within:ring-1 focus-within:ring-amber-500/30"
               title="盤點後實收：當日現金／收銀實收金額。與上方「實收對帳」欄位連動。"
             >
-              <span className="px-2 sm:px-2.5 py-2 text-[11px] sm:text-xs text-amber-300 font-medium flex items-center gap-1 whitespace-nowrap border-r border-zinc-700/80 bg-zinc-900/60">
+              <span className="px-2 sm:px-2.5 py-2 text-[11px] sm:text-xs text-amber-300 font-medium flex items-center gap-1 whitespace-nowrap border-r border-zinc-700/80 bg-zinc-900/60 shrink-0">
                 <Wallet size={14} className="text-amber-500 shrink-0" aria-hidden />
                 實收
               </span>
@@ -604,13 +761,13 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                 onChange={(e) => setSnap((p) => ({ ...p, actualRevenue: e.target.value }))}
                 placeholder="0"
                 aria-label="盤點後實收金額"
-                className="w-24 sm:w-32 min-w-0 bg-transparent px-2 py-2 text-amber-100 font-mono text-sm sm:text-base tabular-nums focus:outline-none placeholder:text-zinc-600"
+                className="min-w-0 flex-1 bg-transparent px-2 py-2 text-amber-100 font-mono text-sm sm:text-base tabular-nums focus:outline-none placeholder:text-zinc-600"
               />
             </label>
             <button
               type="button"
               onClick={requestInventoryComplete}
-              className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[48px] px-3 sm:px-4 rounded-xl bg-amber-600 text-zinc-950 font-semibold text-sm hover:bg-amber-500 active:scale-[0.98] ring-1 ring-amber-400/40"
+              className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[48px] px-3 sm:px-4 rounded-xl bg-amber-600 text-zinc-950 font-semibold text-sm hover:bg-amber-500 active:scale-[0.98] ring-1 ring-amber-400/40 self-stretch"
               aria-label="盤點完成（與上方按鈕相同）"
             >
               <CheckCircle2 size={18} className="shrink-0" />

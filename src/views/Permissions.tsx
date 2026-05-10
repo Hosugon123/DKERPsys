@@ -11,7 +11,7 @@ import { cn } from '../lib/utils';
 function roleLabel(r: SystemUserRole): string {
   switch (r) {
     case 'admin':
-      return '超級管理員';
+      return 'BOSS';
     case 'franchisee':
       return '加盟主';
     case 'employee':
@@ -481,7 +481,7 @@ export default function Permissions({
               className="bg-zinc-900 border border-zinc-700 text-zinc-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-amber-500"
             >
               <option value="all">所有角色</option>
-              <option value="admin">超級管理員</option>
+              <option value="admin">BOSS</option>
               <option value="franchisee">加盟主</option>
               <option value="employee">員工</option>
             </select>
@@ -823,7 +823,7 @@ export default function Permissions({
                     className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors appearance-none disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isEditingPrimarySuper ? (
-                      <option value="admin">超級管理員</option>
+                      <option value="admin">BOSS</option>
                     ) : (
                       <>
                         <option value="franchisee">加盟主</option>

@@ -2,6 +2,7 @@ import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './sale
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
 import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
+import { listSystemUsers } from './systemUsersStorage';
 import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessionActorDisplayName';
 import { getSupplyItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
 
@@ -147,12 +148,65 @@ function normalizeOrderDateYmdInput(s: string): string {
   return ymdFromCreatedAtLocal(new Date().toISOString());
 }
 
+/**
+ * 舊訂單可能缺 scopeId：依建單者 userId 向使用者目錄推斷與 {@link getDataScopeContext} 相同語意之資料範圍，
+ * 讓加盟店／店員只看得到本體系訂單，且不會誤套總部 fallback。
+ */
+function inferScopeIdFromActorUserId(actorUserId: string | undefined): string | undefined {
+  const id = actorUserId?.trim();
+  if (!id) return undefined;
+  const u = listSystemUsers().find((x) => x.id === id);
+  if (!u) return undefined;
+  if (u.role === 'admin') return HQ_SCOPE_ID;
+  if (u.role === 'franchisee') return `scope:franchisee:${u.id}`;
+  if (u.role === 'employee') {
+    if (u.employeeOrgType === 'franchisee' && u.parentFranchiseeUserId) {
+      return `scope:franchisee:${u.parentFranchiseeUserId}`;
+    }
+    return HQ_SCOPE_ID;
+  }
+  return undefined;
+}
+
+/**
+ * 訂單所屬資料範圍（與權限推斷一致）：已存 scopeId 優先，否則依建單者向使用者目錄回推。
+ */
+export function resolveOrderDataScopeId(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>,
+): string | undefined {
+  const declared = row.scopeId?.trim();
+  if (declared) return declared;
+  return inferScopeIdFromActorUserId(row.actorUserId);
+}
+
+/** 是否為加盟店體系之資料範圍（含加盟主、隸屬加盟之店員、以及總部代建單但 scope 指向加盟） */
+export function orderIsFranchiseBusinessScoped(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>,
+): boolean {
+  if (row.actorRole === 'franchisee') return true;
+  const scope = resolveOrderDataScopeId(row);
+  return Boolean(scope?.startsWith('scope:franchisee:'));
+}
+
+/**
+ * 總部視角：直營（總部範圍）訂單。不含 actorRole 為 admin 但 scope 指向加盟之「訂單管理」單。
+ */
+export function orderIsHeadquartersDirectScoped(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>,
+): boolean {
+  if (row.actorRole === 'franchisee') return false;
+  if (orderIsFranchiseBusinessScoped(row)) return false;
+  return row.actorRole === 'admin' || row.actorRole === 'employee';
+}
+
 function canAccessOrder(
   row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>,
   ctx: ReturnType<typeof getDataScopeContext>
 ): boolean {
   if (ctx.isAdmin) return true;
-  if (row.scopeId) return row.scopeId === ctx.scopeId;
+  const declared = row.scopeId?.trim();
+  const effectiveScope = declared || inferScopeIdFromActorUserId(row.actorUserId);
+  if (effectiveScope) return effectiveScope === ctx.scopeId;
   if (row.actorUserId) return row.actorUserId === ctx.userId;
   // 舊資料（尚未有 scope/actor）預設視為總部資料，直營帳號可讀取
   return ctx.scopeId === HQ_SCOPE_ID;

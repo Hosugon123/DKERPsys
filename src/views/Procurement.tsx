@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { UserRole } from './Orders';
+import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import { orders as ordersApi } from '../services/apiService';
 import {
   displayOrderCreatedByLabel,
@@ -120,11 +121,13 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     window.addEventListener('supplyCatalogUpdated', h);
     window.addEventListener('orderHistoryUpdated', h);
     window.addEventListener('franchiseManagementOrdersUpdated', h);
+    window.addEventListener(AUTH_SESSION_CHANGED_EVENT, h);
     return () => {
       window.removeEventListener('stallInventoryUpdated', h);
       window.removeEventListener('supplyCatalogUpdated', h);
       window.removeEventListener('orderHistoryUpdated', h);
       window.removeEventListener('franchiseManagementOrdersUpdated', h);
+      window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, h);
     };
   }, []);
 

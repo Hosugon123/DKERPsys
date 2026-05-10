@@ -25,7 +25,7 @@ export default function Topbar({
     loginId
   )}&backgroundColor=27272a`;
   const roleDisplayNames: Record<UserRole, string> = {
-    admin: '超級管理員',
+    admin: 'BOSS',
     franchisee: '加盟主',
     employee: '直營店員工',
   };
@@ -185,7 +185,7 @@ export default function Topbar({
             </div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
             <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-zinc-500" />
               <input
@@ -217,7 +217,7 @@ export default function Topbar({
               <Settings size={20} />
             </button>
 
-            <div className="relative ml-0 sm:ml-1" ref={accountRef}>
+            <div className="relative ml-0 flex shrink-0 items-center sm:ml-1" ref={accountRef}>
               <input
                 ref={avatarInputRef}
                 type="file"
@@ -228,19 +228,18 @@ export default function Topbar({
               <button
                 type="button"
                 onClick={() => setAccountOpen((v) => !v)}
-                className="flex max-w-[min(56vw,12rem)] items-center gap-1.5 rounded-xl border border-zinc-800/80 bg-zinc-900/50 py-1.5 pl-2.5 pr-2 text-left transition-colors hover:bg-zinc-800/80 sm:max-w-[14rem] sm:gap-2 sm:py-2 sm:pl-3 sm:pr-2.5"
+                className="flex h-11 max-w-[min(56vw,12rem)] items-center gap-1.5 rounded-xl border border-zinc-800/80 bg-zinc-900/50 px-2.5 py-0 text-left transition-colors hover:bg-zinc-800/80 sm:h-11 sm:max-w-[14rem] sm:gap-2 sm:px-3"
                 aria-expanded={accountOpen}
                 aria-haspopup="menu"
+                title={`已登入 ${actorDisplayName || loginId}`}
               >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[0.625rem] leading-tight text-zinc-500">已登入</p>
+                <div className="min-w-0 flex-1 leading-tight">
                   <p className="truncate text-xs font-semibold text-amber-500 sm:text-sm">
                     {actorDisplayName || loginId}
                   </p>
-                  {actorDisplayName ? (
-                    <p className="truncate text-[0.65rem] leading-tight text-zinc-500">{loginId}</p>
-                  ) : null}
-                  <p className="truncate text-[0.65rem] leading-tight text-zinc-400">{roleDisplayNames[userRole]}</p>
+                  <p className="truncate text-[0.65rem] text-zinc-500">
+                    {actorDisplayName ? `${loginId} · ${roleDisplayNames[userRole]}` : roleDisplayNames[userRole]}
+                  </p>
                 </div>
                 <ChevronDown size={16} className="shrink-0 text-amber-500/90" />
               </button>
@@ -292,7 +291,7 @@ export default function Topbar({
             </div>
             {avatarError && <p className="hidden max-w-[11rem] text-[0.6875rem] text-rose-400 sm:block">{avatarError}</p>}
 
-            <div className="ml-0.5 hidden h-10 w-10 shrink-0 overflow-hidden rounded-full border border-zinc-700 bg-zinc-800 sm:flex">
+            <div className="ml-0.5 hidden h-11 w-11 shrink-0 overflow-hidden rounded-full border border-zinc-700 bg-zinc-800 sm:flex sm:items-center sm:justify-center">
               <img
                 src={avatarUrl ?? DEFAULT_AVATAR}
                 alt=""

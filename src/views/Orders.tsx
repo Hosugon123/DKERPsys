@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback, type MouseEvent } from 'react';
-import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2, ListOrdered, Store } from 'lucide-react';
+import { Search, Package, Calendar, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   orderDateQueryMatches,
@@ -26,7 +26,13 @@ import {
   getStallDisplaySoldAtRetail,
   getStallDisplayActualRevenue,
 } from '../lib/orderStallDisplayRevenue';
-import { userRoleToSupplyRetailView } from '../lib/supplyCatalog';
+import {
+  estimatedRetailPerPackage,
+  getSupplyItem,
+  userRoleToSupplyRetailView,
+} from '../lib/supplyCatalog';
+import { computeLine } from '../lib/stallMath';
+import { getSalesRecord, mergeSalesRecordWithCatalog } from '../lib/salesRecordStorage';
 
 export type UserRole = 'admin' | 'franchisee' | 'employee';
 
@@ -80,6 +86,7 @@ function toOrderRowFromMgmt(
       storeLabel: o.storeLabel,
       actorRole: 'admin',
       actorUserId: o.actorUserId,
+      scopeId: o.scopeId,
     }),
     contact: '—',
     phone: '—',
@@ -150,6 +157,24 @@ function canEditOrderInList(raw: RawOrder | undefined, role: UserRole): boolean 
     return isOrderHistoryEntry(raw) && raw.actorRole === 'employee';
   }
   return false;
+}
+
+function mergeOrderStallSnapshot(raw: RawOrder) {
+  if (!orderHasStallCountCompleted(raw)) return null;
+  if (raw.stallCountSnapshot) {
+    return mergeSalesRecordWithCatalog(raw.stallCountSnapshot);
+  }
+  if (raw.stallCountBasisYmd) {
+    const day = getSalesRecord(raw.stallCountBasisYmd);
+    return day ? mergeSalesRecordWithCatalog(day) : null;
+  }
+  return null;
+}
+
+function fmtLineQty(n: number) {
+  if (!Number.isFinite(n)) return '—';
+  if (Number.isInteger(n)) return String(n);
+  return n.toLocaleString('zh-TW', { maximumFractionDigits: 4 });
 }
 
 function mergeRawOrdersForDisplay(
@@ -257,8 +282,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     [mgmtOrders, historyOrders]
   );
 
+  const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
+
   const ordersData = useMemo(() => {
-    const view = userRoleToSupplyRetailView(userRole);
+    const view = supplyRetailView;
     return rawList.map((r) => {
       const stallRev = getStallDisplayShouldRevenue(r, view);
       const countedRevenue = getStallDisplaySoldAtRetail(r, view);
@@ -284,7 +311,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         ? toOrderRowFromMgmt(r, financials)
         : toOrderRowFromHistory(r, financials);
     });
-  }, [rawList, userRole]);
+  }, [rawList, supplyRetailView]);
 
   /**
    * 從目前可見資料抓出所有「曾經出現過」的店家，作為下拉選項。
@@ -808,6 +835,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         )}
         {filteredOrders.map((order) => {
           const raw = rawList.find((r) => r.id === order.id);
+          const stallSnap = raw ? mergeOrderStallSnapshot(raw) : null;
           const canEdit = canEditOrderInList(raw, userRole);
           const isExpanded = expandedOrderId === order.id;
           const isPickingThis =
@@ -829,28 +857,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
               {/* Order Header / Summary：左側＋金額可點展開；刪除鈕僅超級管理員，浮在右上角 */}
               <div
                 className={cn(
-                  'relative min-w-0 w-full p-4 sm:p-6 cursor-pointer hover:bg-white/[0.02] flex flex-col sm:flex-row sm:items-stretch gap-4',
-                  isHeadquarters && 'pr-14 sm:pr-16'
+                  'relative min-w-0 w-full p-4 sm:p-6 cursor-pointer hover:bg-white/[0.02] flex flex-col sm:flex-row sm:items-stretch gap-3 sm:gap-4'
                 )}
                 onClick={() => toggleOrder(order.id)}
               >
-                {isHeadquarters && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!pickingLocked) setDeleteModal({ id: order.id });
-                    }}
-                    disabled={pickingLocked}
-                    className="absolute top-3 right-3 z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-800/80 bg-zinc-900/80 text-rose-400/85 hover:border-rose-500/40 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:top-5 sm:right-5"
-                    title={pickingLocked ? '請先儲存或放棄「調整貨量」' : '從本機完全移除此筆訂單（不須展開明細）'}
-                    aria-label="刪除本筆訂單"
-                  >
-                    <Trash2 className="size-4" strokeWidth={2} />
-                  </button>
-                )}
                 <div className="flex min-w-0 w-full items-center gap-5 sm:min-w-0 sm:flex-1 sm:basis-0 sm:self-center">
-                  <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 flex-shrink-0">
+                  <div className="hidden sm:flex w-12 h-12 rounded-full bg-zinc-800 items-center justify-center border border-zinc-700 flex-shrink-0">
                     <Package
                       size={24}
                       className={cn(
@@ -862,7 +874,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p
-                      className="text-[calc(0.75rem*1.3)] font-mono text-zinc-400 mb-1.5 break-all leading-snug"
+                      className="text-[20px] sm:text-[calc(0.75rem*1.3)] font-mono text-zinc-200 mb-1.5 break-words leading-snug"
                       title={order.id}
                     >
                       訂單編號 {order.id}
@@ -889,21 +901,25 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                         </span>
                       )}
                     </div>
-                    <div className="text-sm text-zinc-500 min-w-0 max-w-full space-y-0.5 leading-relaxed">
+                    <div className="text-sm text-zinc-500 min-w-0 max-w-full space-y-1 leading-relaxed">
                       {raw ? (
                         <>
-                          <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*1.3)]">
+                          <p className="break-words [overflow-wrap:anywhere] text-[19px] sm:text-[calc(0.875rem*1.3)] text-zinc-100 leading-tight">
                             訂單日期 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(raw))}
                           </p>
-                          <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*0.7*1.15)]">
+                          <p className="break-words [overflow-wrap:anywhere] text-[12px] sm:text-[calc(0.875rem*0.7*1.15)]">
                             下單時間 {formatSlashDateTimeWithWeekdayFromIso(raw.createdAt)}
                           </p>
-                          <p className="break-words [overflow-wrap:anywhere]">
-                            下單者：{displayOrderCreatedByLabel(raw)} ・ 盤點者：
-                            {raw.stallCountCompletedAt
-                              ? displayOrderStallCountCompletedByLabel(raw)
-                              : '—'}
-                          </p>
+                          <div className="grid grid-cols-1 min-[430px]:grid-cols-2 gap-y-1 gap-x-3">
+                            <p className="break-words [overflow-wrap:anywhere] text-[16px] sm:text-sm">
+                              下單者：{displayOrderCreatedByLabel(raw)}
+                            </p>
+                            <p className="break-words [overflow-wrap:anywhere] text-[16px] sm:text-sm">
+                              盤點者：{raw.stallCountCompletedAt
+                                ? displayOrderStallCountCompletedByLabel(raw)
+                                : '—'}
+                            </p>
+                          </div>
                         </>
                       ) : (
                         <p className="text-xs text-zinc-600">—</p>
@@ -922,16 +938,24 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                 <div className="flex w-full min-w-0 shrink-0 flex-col sm:w-auto sm:flex-none sm:flex-row items-stretch sm:items-end justify-end gap-2 border-t sm:border-t-0 border-zinc-800 pt-3 sm:pt-0">
                   <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/35 px-3 py-2.5 w-full min-w-0 sm:min-w-[19rem] sm:max-w-[24rem] sm:shrink-0">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.6875rem] sm:text-xs min-w-0">
-                      <span className="text-zinc-500">批貨金額</span>
-                      <span className="text-zinc-200 text-right tabular-nums break-all">$ {Math.round(order.procurementAmount).toLocaleString()}</span>
-                      <span className="text-zinc-500">自備扣除</span>
-                      <span className="text-zinc-300 text-right tabular-nums break-all">
-                        {order.selfSuppliedDeduction > 0 ? `$ ${Math.round(order.selfSuppliedDeduction).toLocaleString()}` : '—'}
-                      </span>
-                      <span className="text-zinc-500">實際應付/應收</span>
-                      <span className="text-amber-300 text-right tabular-nums break-all">
-                        $ {Math.round(order.netPayableAmount).toLocaleString()}
-                      </span>
+                      {userRole !== 'employee' && (
+                        <>
+                          <span className="text-zinc-500">批貨金額</span>
+                          <span className="text-zinc-200 text-right tabular-nums break-all">
+                            $ {Math.round(order.procurementAmount).toLocaleString()}
+                          </span>
+                          <span className="text-zinc-500">自備扣除</span>
+                          <span className="text-zinc-300 text-right tabular-nums break-all">
+                            {order.selfSuppliedDeduction > 0
+                              ? `$ ${Math.round(order.selfSuppliedDeduction).toLocaleString()}`
+                              : '—'}
+                          </span>
+                          <span className="text-zinc-500">實際應付/應收</span>
+                          <span className="text-amber-300 text-right tabular-nums break-all">
+                            $ {Math.round(order.netPayableAmount).toLocaleString()}
+                          </span>
+                        </>
+                      )}
                       <span className="text-zinc-500">預估金額</span>
                       <span className="text-zinc-300 text-right tabular-nums break-all">
                         {order.estimatedAmount == null ? '—' : `$ ${Math.round(order.estimatedAmount).toLocaleString()}`}
@@ -968,49 +992,28 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
               {/* Order Details (Expanded) */}
               {isExpanded && (
-                <div className="border-t border-zinc-800 bg-zinc-900/60 p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in slide-in-from-top-2">
-                  
-                  {/* Info Column */}
-                  <div className="lg:col-span-1 space-y-4">
-                    {userRole === 'employee' && raw && isFranchiseManagementOrder(raw) ? (
-                      <>
-                        <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-2">
-                          總部直營訂單
-                        </h4>
-                        <p className="text-sm text-amber-200/85 leading-relaxed mb-3">
-                          此單由超級管理員自總部下單。直營店同仁可檢視內容，但無法變更出貨狀態、取消或調整實出。
-                        </p>
-                        <div className="bg-zinc-800/30 rounded-xl p-4 border border-zinc-800/50 space-y-3">
-                          <div className="flex gap-3 text-sm">
-                            <User size={18} className="text-zinc-500 flex-shrink-0" />
-                            <div>
-                              <p className="text-zinc-300 font-medium">聯絡人：{order.contact}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-3 text-sm">
-                            <Phone size={18} className="text-zinc-500 flex-shrink-0" />
-                            <div>
-                              <p className="text-zinc-300">{order.phone}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-3 text-sm">
-                            <MapPin size={18} className="text-zinc-500 flex-shrink-0" />
-                            <div>
-                              <p className="text-zinc-300 leading-relaxed">{order.address}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div>
-                        <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-2">本店訂單</h4>
-                      </div>
-                    )}
-
-                    {canEdit && (order.status === '待出貨' || order.status === '已完成') && (
-                      <div className="pt-2 border-t border-zinc-800/80">
-                        <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2.5">訂單動作</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="border-t border-zinc-800 bg-zinc-900/60 p-4 sm:p-6 animate-in slide-in-from-top-2">
+                  <div className="min-w-0 w-full max-w-full">
+                    <div className="mb-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                      <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest shrink-0">
+                        訂單品項明細
+                      </h4>
+                      {(order.status === '待出貨' || order.status === '已完成') && canEdit && (
+                        <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:min-w-0 sm:flex-1">
+                          {!isPickingThis &&
+                            (stallLocked ? (
+                              <span className="text-xs text-zinc-500 shrink-0 text-left sm:text-right w-full sm:w-auto">
+                                已完成盤點押記，無法調整貨量
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => startPickingEdit(e, order.id)}
+                                className="h-9 min-h-9 px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500 shrink-0"
+                              >
+                                調整貨量
+                              </button>
+                            ))}
                           {order.status === '待出貨' ? (
                             <>
                               <button
@@ -1018,7 +1021,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 onClick={(e) => openShipDialog(e, order.id)}
                                 disabled={pickingLocked}
                                 title={pickingLocked ? '請先儲存或放棄「調整貨量」' : undefined}
-                                className="min-h-[2.5rem] w-full py-2 px-3 bg-amber-600 text-zinc-950 text-sm font-semibold rounded-lg hover:bg-amber-500 transition-colors shadow-md shadow-amber-900/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+                                className="h-9 min-h-9 px-3 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 shadow-md shadow-emerald-900/25 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
                               >
                                 標記出貨
                               </button>
@@ -1026,13 +1029,14 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setCancelModal({ id: order.id });
+                                  if (isHeadquarters) setDeleteModal({ id: order.id });
+                                  else setCancelModal({ id: order.id });
                                 }}
                                 disabled={pickingLocked}
                                 title={pickingLocked ? '請先儲存或放棄「調整貨量」' : undefined}
-                                className="min-h-[2.5rem] w-full py-2 px-3 border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium rounded-lg hover:bg-rose-950/70 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                               >
-                                取消訂單
+                                {isHeadquarters ? '刪除訂單' : '取消訂單'}
                               </button>
                             </>
                           ) : (
@@ -1043,13 +1047,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   e.stopPropagation();
                                   setRevertModal({ id: order.id });
                                 }}
-                                disabled={stallLocked}
+                                disabled={stallLocked || pickingLocked}
                                 title={
-                                  stallLocked
-                                    ? '此單已完成盤點押記，無法改回待出貨'
-                                    : undefined
+                                  pickingLocked
+                                    ? '請先儲存或放棄「調整貨量」'
+                                    : stallLocked
+                                      ? '此單已完成盤點押記，無法改回待出貨'
+                                      : undefined
                                 }
-                                className="min-h-[2.5rem] w-full py-2 px-3 border border-zinc-600 bg-zinc-800/50 text-zinc-200 text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800/50"
+                                className="h-9 min-h-9 px-3 rounded-lg border border-zinc-600 bg-zinc-800/50 text-zinc-200 text-sm font-medium hover:bg-zinc-800 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800/50"
                               >
                                 改回待出貨
                               </button>
@@ -1057,39 +1063,19 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setCancelModal({ id: order.id });
+                                  if (isHeadquarters) setDeleteModal({ id: order.id });
+                                  else setCancelModal({ id: order.id });
                                 }}
-                                className="min-h-[2.5rem] w-full py-2 px-3 border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium rounded-lg hover:bg-rose-950/70 transition-colors"
+                                disabled={pickingLocked}
+                                title={pickingLocked ? '請先儲存或放棄「調整貨量」' : undefined}
+                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                               >
-                                取消訂單
+                                {isHeadquarters ? '刪除訂單' : '取消訂單'}
                               </button>
                             </>
                           )}
                         </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Items Column */}
-                  <div className="lg:col-span-2 min-w-0">
-                    <div className="mb-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">訂單品項明細</h4>
-                      {(order.status === '待出貨' || order.status === '已完成') &&
-                        canEdit &&
-                        !isPickingThis &&
-                        (stallLocked ? (
-                          <span className="text-xs text-zinc-500 shrink-0 text-right sm:text-left">
-                            已完成盤點押記，無法調整貨量
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={(e) => startPickingEdit(e, order.id)}
-                            className="h-9 w-full sm:w-auto px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500 shrink-0"
-                          >
-                            調整貨量
-                          </button>
-                        ))}
+                      )}
                     </div>
 
                     {isPickingThis && (
@@ -1128,17 +1114,56 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     )}
 
                     <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto">
-                      <table className="w-full text-left min-w-[18rem]">
-                        <thead className="bg-zinc-800/50 text-zinc-400 text-xs uppercase border-b border-zinc-700/50">
+                      <table
+                        className={cn(
+                          'w-full text-left',
+                          isPickingThis ? 'min-w-[18rem]' : 'min-w-[56rem]'
+                        )}
+                      >
+                        <thead className="bg-zinc-800/50 text-zinc-400 text-[10px] sm:text-xs uppercase border-b border-zinc-700/50">
                           <tr>
-                            <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium">品項</th>
-                            <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center w-[5.25rem] sm:w-[10rem]">
-                              {isPickingThis ? '實出數量' : '數量'}
-                            </th>
-                            <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium text-right">小計</th>
+                            {isPickingThis ? (
+                              <>
+                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium">品項</th>
+                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center w-[5.25rem] sm:w-[10rem]">
+                                  實出數量
+                                </th>
+                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium text-right">小計</th>
+                              </>
+                            ) : (
+                              <>
+                                <th className="py-2 sm:py-2.5 px-2 sm:px-3 font-medium sticky left-0 bg-zinc-800/50 z-[1]">
+                                  品項
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                  帶出數量
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                  售出數量
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                  剩餘數量
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                  預估金額
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                  售出金額
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                  剩餘金額
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                  單價
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                  餘貨率
+                                </th>
+                              </>
+                            )}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-zinc-800/50 text-xs sm:text-sm">
+                        <tbody className="divide-y divide-zinc-800/50 text-[11px] sm:text-sm">
                           {isPickingThis
                             ? pickingLines.map((line, idx) => {
                                 const origQ = pickingOriginal[idx]?.qty ?? line.qty;
@@ -1198,27 +1223,105 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   </tr>
                                 );
                               })
-                            : order.itemLines.map((item, idx) => (
-                                <tr key={idx} className="hover:bg-zinc-800/30">
-                                  <td className="py-2 sm:py-3 px-3 sm:px-4">
-                                    <div className="font-medium text-[#f5f2ed] leading-tight break-keep">{item.name}</div>
-                                    <div className="mt-0.5 text-[0.6875rem] text-zinc-500 leading-tight truncate">單位：{item.unit}</div>
-                                  </td>
-                                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-center font-semibold tabular-nums text-amber-100">{item.qty}</td>
-                                  <td className="py-2 sm:py-3 px-3 sm:px-4 text-right tabular-nums whitespace-nowrap text-zinc-300">
-                                    $ {item.price.toLocaleString()}
-                                  </td>
-                                </tr>
-                              ))}
+                            : (raw?.lines ?? order.itemLines.map((it, i) => ({
+                                productId: `legacy-${i}`,
+                                name: it.name,
+                                unitPrice: it.qty > 0 ? it.price / it.qty : 0,
+                                qty: it.qty,
+                                unit: it.unit,
+                              }))).map((line, idx) => {
+                                const rowSnap = stallSnap?.lines[line.productId];
+                                const hasRowSnap = Boolean(stallSnap && rowSnap);
+                                const frozenR = Number(stallSnap?.frozenRetailUnitPriceByItem?.[line.productId]);
+                                const item = getSupplyItem(line.productId, supplyRetailView);
+                                let c = item
+                                  ? computeLine(rowSnap?.out ?? '', rowSnap?.remain ?? '', item, {
+                                      unitBasis: 'retail',
+                                    })
+                                  : null;
+                                if (c && Number.isFinite(frozenR)) {
+                                  c = {
+                                    ...c,
+                                    estPrice: c.out * frozenR,
+                                    remValue: c.remain * frozenR,
+                                    soldRevenue: c.sold * frozenR,
+                                  };
+                                }
+                                const unitRetail = Number.isFinite(frozenR)
+                                  ? frozenR
+                                  : item
+                                    ? estimatedRetailPerPackage(item)
+                                    : line.unitPrice;
+                                const orderSub = Math.round(line.unitPrice * line.qty * 100) / 100;
+                                return (
+                                  <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
+                                    <td className="py-2 sm:py-2.5 px-2 sm:px-3 align-top sticky left-0 bg-zinc-900/40 z-[1]">
+                                      <div className="font-medium text-[#f5f2ed] leading-tight break-keep">{line.name}</div>
+                                      <div className="mt-0.5 text-[0.65rem] text-zinc-500 leading-tight">
+                                        單位：{line.unit}・叫貨 {fmtLineQty(line.qty)}
+                                      </div>
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
+                                      {hasRowSnap && c ? fmtLineQty(c.out) : '—'}
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
+                                      {hasRowSnap && c && !c.remainUnfilled ? fmtLineQty(c.sold) : '—'}
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
+                                      {hasRowSnap && c && !c.remainUnfilled ? fmtLineQty(c.remain) : '—'}
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                      {hasRowSnap && c ? `$ ${Math.round(c.estPrice).toLocaleString()}` : '—'}
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                      {hasRowSnap && c && !c.remainUnfilled
+                                        ? `$ ${Math.round(c.soldRevenue).toLocaleString()}`
+                                        : '—'}
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                                      {hasRowSnap && c && !c.remainUnfilled
+                                        ? `$ ${Math.round(c.remValue).toLocaleString()}`
+                                        : '—'}
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
+                                      {unitRetail.toLocaleString()}
+                                    </td>
+                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
+                                      {hasRowSnap && c && !c.remainUnfilled && c.out > 0
+                                        ? `${c.leftRatePct.toFixed(2)}%`
+                                        : '—'}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                         </tbody>
                         <tfoot className="bg-zinc-800/20 border-t border-zinc-700/50">
                           <tr>
-                            <td colSpan={2} className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-xs sm:text-sm font-medium text-zinc-400">
-                              {isPickingThis ? '實出合計' : '下單合計'}
-                            </td>
-                            <td className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
-                              $ {(isPickingThis ? pickTotal : order.amount).toLocaleString()}
-                            </td>
+                            {isPickingThis ? (
+                              <>
+                                <td
+                                  colSpan={2}
+                                  className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-xs sm:text-sm font-medium text-zinc-400"
+                                >
+                                  實出合計
+                                </td>
+                                <td className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
+                                  $ {pickTotal.toLocaleString()}
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td
+                                  colSpan={8}
+                                  className="py-2.5 sm:py-4 px-2 sm:px-3 text-right text-xs sm:text-sm font-medium text-zinc-400"
+                                >
+                                  叫貨合計（下單）
+                                </td>
+                                <td className="py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
+                                  $ {order.amount.toLocaleString()}
+                                </td>
+                              </>
+                            )}
                           </tr>
                         </tfoot>
                       </table>

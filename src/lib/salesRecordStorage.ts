@@ -8,6 +8,10 @@ export type SalesRecordDaySnapshot = {
   lines: Record<string, SalesRecordDayLine>;
   actualRevenue: string;
   updatedAt: string;
+  /** 登錄實收與盤點推算之落差金額（自填，可對照參考差額） */
+  revenueGapAmount?: string;
+  /** 落差原因：損耗、請客、試吃等 */
+  revenueGapReason?: string;
   /** 盤點完成當下凍結之零售單價（每品項，避免日後改價影響歷史） */
   frozenRetailUnitPriceByItem?: Record<string, number>;
   /** 盤點完成當下凍結之批價單價（每品項，供成本參考） */
