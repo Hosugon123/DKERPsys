@@ -4,7 +4,7 @@
  */
 import { toLocalYmdDashed } from './dateDisplay';
 import { loadFranchiseManagementOrders, loadOrderHistory } from './orderHistoryStorage';
-import type { OrderHistoryEntry } from './orderHistoryStorage';
+import { effectiveOrderDateYmd, type OrderHistoryEntry } from './orderHistoryStorage';
 import { getStallDisplaySoldAtRetail } from './orderStallDisplayRevenue';
 import type { SupplyRetailView } from './supplyCatalog';
 import {
@@ -45,6 +45,7 @@ function mergeOrdersForAdminFinance(): OrderHistoryEntry[] {
   const mgmt = loadFranchiseManagementOrders().map<OrderHistoryEntry>((m) => ({
     id: m.id,
     createdAt: m.createdAt,
+    orderDateYmd: m.orderDateYmd,
     updatedAt: m.updatedAt ?? m.createdAt,
     source: m.source,
     totalAmount: m.totalAmount,
@@ -57,6 +58,12 @@ function mergeOrdersForAdminFinance(): OrderHistoryEntry[] {
     stallCountBasisYmd: m.stallCountBasisYmd,
     stallCountCompletedAt: m.stallCountCompletedAt,
     stallCountSnapshot: m.stallCountSnapshot,
+    scopeId: m.scopeId,
+    actorUserId: m.actorUserId,
+    createdByName: m.createdByName,
+    stallCountCompletedByName: m.stallCountCompletedByName,
+    stallCountCompletedByUserId: m.stallCountCompletedByUserId,
+    lastUpdatedByName: m.lastUpdatedByName,
   }));
   const hist = loadOrderHistory();
   const byId = new Map<string, OrderHistoryEntry>();
@@ -75,11 +82,9 @@ export function currentYmLocal(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function orderCreatedInYm(iso: string, ym: string): boolean {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return false;
-  const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  return prefix === ym.slice(0, 7);
+function orderBookkeepingYmdStartsWithYm(o: OrderHistoryEntry, ym: string): boolean {
+  const ymd0 = effectiveOrderDateYmd(o);
+  return ymd0.length >= 7 && ymd0.slice(0, 7) === ym.slice(0, 7);
 }
 
 export type ExpenseBreakdownRow = {
@@ -125,7 +130,7 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
   const procurementCostTotal = 0;
 
   for (const o of merged) {
-    if (o.actorRole === 'franchisee' && o.status === '已完成' && orderCreatedInYm(o.createdAt, ymKey)) {
+    if (o.actorRole === 'franchisee' && o.status === '已完成' && orderBookkeepingYmdStartsWithYm(o, ymKey)) {
       const selfSupplied =
         o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
       franchiseeOrderTotal += Math.max(0, o.totalAmount - selfSupplied);

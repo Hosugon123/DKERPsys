@@ -33,7 +33,17 @@ import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { saveSalesRecord } from '../lib/salesRecordStorage';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
-import { formatSlashDateTimeFromIso, formatSlashDateTimeWithWeekdayFromIso, ymdDashToSlash } from '../lib/dateDisplay';
+import {
+  formatSlashDateTimeFromIso,
+  formatSlashYmdWithWeekdayFromYmd,
+  formatTimeHmFromIso,
+  ymdDashToSlash,
+} from '../lib/dateDisplay';
+import {
+  displayOrderCreatedByLabel,
+  displayOrderStallCountCompletedByLabel,
+  effectiveOrderDateYmd,
+} from '../lib/orderHistoryStorage';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 
 function money(n: number) {
@@ -164,8 +174,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     [ordersInWindow, viewOrderId]
   );
 
-  const formatOrderTime = (iso: string) => formatSlashDateTimeWithWeekdayFromIso(iso) || iso;
-
   const formatStallCountStamp = (iso: string) => formatSlashDateTimeFromIso(iso) || iso;
 
   const rows = useMemo(
@@ -279,6 +287,9 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             <Boxes className="text-amber-500 shrink-0" size={28} />
             攤上盤點
           </h2>
+          {snap.lastSavedByName && (
+            <p className="text-xs text-zinc-500 mt-1">本日表單最近存檔：{snap.lastSavedByName}</p>
+          )}
         </div>
         <div className="w-full sm:w-auto grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-2">
           <label className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 rounded-xl border-2 border-zinc-700 bg-zinc-900/80 px-3 py-2.5 text-sm text-zinc-300">
@@ -343,7 +354,9 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               >
                 {ordersInWindow.map((o) => (
                   <option key={o.id} value={o.id}>
-                    建單 {ymdDashToSlash(ymd(new Date(o.createdAt)))} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 16)}… · {procurementStatusDisplay(o.status)}
+                    訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ・ 下單 {formatTimeHmFromIso(o.createdAt)} ・ 建單{' '}
+                    {displayOrderCreatedByLabel(o)} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 16)}… ·{' '}
+                    {procurementStatusDisplay(o.status)}
                   </option>
                 ))}
               </select>
@@ -358,7 +371,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     )}
                   </p>
                   <p className="text-zinc-500 text-xs mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                    <span>{formatOrderTime(viewOrder.createdAt)}</span>
+                    <span>
+                      訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(viewOrder))} ・ 下單{' '}
+                      {formatTimeHmFromIso(viewOrder.createdAt)}
+                    </span>
                     <span aria-hidden>·</span>
                     <span
                       className={cn(
@@ -376,9 +392,14 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       · {resolveOrderStoreLabel(viewOrder)}
                     </span>
                   </p>
+                  <p className="text-[0.6875rem] text-zinc-500 mt-1">
+                    建單者：{displayOrderCreatedByLabel(viewOrder)}
+                  </p>
                   {viewOrder.stallCountCompletedAt && viewOrder.stallCountBasisYmd && (
                     <p className="text-[0.6875rem] text-amber-200/80 mt-1.5 pl-0.5">
                       盤點壓記：{ymdDashToSlash(viewOrder.stallCountBasisYmd)}（盤點日）· {formatStallCountStamp(viewOrder.stallCountCompletedAt)}
+                      {' '}
+                      · 完成者：{displayOrderStallCountCompletedByLabel(viewOrder)}
                     </p>
                   )}
                 </div>

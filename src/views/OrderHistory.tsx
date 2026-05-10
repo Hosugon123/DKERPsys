@@ -5,11 +5,17 @@ import type { UserRole } from './Orders';
 import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 import {
+  displayOrderCreatedByLabel,
+  displayOrderStallCountCompletedByLabel,
+  effectiveOrderDateYmd,
+} from '../lib/orderHistoryStorage';
+import {
   formatSlashDateTimeFromIso,
-  formatSlashDateTimeWithWeekdayFromIso,
+  formatSlashYmdWithWeekdayFromYmd,
+  formatTimeHmFromIso,
   ymdDashToSlash,
   orderDateQueryMatches,
-  orderMatchesActiveWeekdays,
+  orderMatchesActiveWeekdaysFromYmd,
 } from '../lib/dateDisplay';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { getStallDisplayShouldRevenue } from '../lib/orderStallDisplayRevenue';
@@ -51,7 +57,9 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
   }, [deleteModalId]);
 
   const filtered = useMemo(() => {
-    const byWeek = orders.filter((o) => orderMatchesActiveWeekdays(o.createdAt, activeWeekdays));
+    const byWeek = orders.filter((o) =>
+      orderMatchesActiveWeekdaysFromYmd(effectiveOrderDateYmd(o), activeWeekdays)
+    );
     const q = searchQuery.trim().toLowerCase();
     if (!q) return byWeek;
     return byWeek.filter((o) => {
@@ -61,6 +69,7 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
         orderDateQueryMatches(o.createdAt, {
           stallCountBasisYmd: o.stallCountBasisYmd,
           stallCountCompletedAt: o.stallCountCompletedAt,
+          orderDateYmd: o.orderDateYmd,
         }, searchQuery.trim())
       ) {
         return true;
@@ -150,7 +159,19 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
                         />
                       </div>
                     </div>
-                    <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}</p>
+                    <p className="text-sm text-zinc-500 mt-1">
+                      訂單日期 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))} ・ 下單{' '}
+                      {formatTimeHmFromIso(order.createdAt)}
+                    </p>
+                    <p className="text-[0.6875rem] text-zinc-600 mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                      <span>建單者：{displayOrderCreatedByLabel(order)}</span>
+                      {order.stallCountCompletedAt && (
+                        <span>盤點完成者：{displayOrderStallCountCompletedByLabel(order)}</span>
+                      )}
+                      {order.lastUpdatedByName && order.lastUpdatedByName !== order.createdByName && (
+                        <span>最後異動：{order.lastUpdatedByName}</span>
+                      )}
+                    </p>
                     {order.stallCountBasisYmd && order.stallCountCompletedAt && (
                       <p className="text-xs text-amber-200/75 mt-1">
                         盤點：{ymdDashToSlash(order.stallCountBasisYmd)} · {formatSlashDateTimeFromIso(order.stallCountCompletedAt)}

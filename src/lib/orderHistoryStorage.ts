@@ -2,7 +2,15 @@ import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './sale
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
 import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
+import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessionActorDisplayName';
 import { getSupplyItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
+
+/** 寫入訂單／押記時可存檔的顯示名（登入者姓名 → 帳號 → 依 userId 查目錄） */
+function persistableActorDisplayName(): string | undefined {
+  const ctx = getDataScopeContext();
+  const raw = getSessionActorDisplayName() || resolveUserDisplayNameById(ctx.userId);
+  return raw || undefined;
+}
 
 export type OrderActorRole = 'admin' | 'franchisee' | 'employee';
 
@@ -18,7 +26,10 @@ export type FranchiseOrderStatus = '待出貨' | '已完成' | '已取消';
 
 export type OrderHistoryEntry = {
   id: string;
+  /** 實際送出叫貨之時間（ISO，下單時間） */
   createdAt: string;
+  /** 訂單歸屬曆法日 YYYY-MM-DD（可預先下單）；舊資料無此欄時以 createdAt 之本地日視同訂單日 */
+  orderDateYmd?: string;
   /** ISO 最後更新時間（舊資料由 createdAt 補齊） */
   updatedAt: string;
   source: 'procurement';
@@ -43,6 +54,14 @@ export type OrderHistoryEntry = {
   scopeId?: string;
   /** 建單帳號 userId（同店多員工仍可共看 scope） */
   actorUserId?: string;
+  /** 建單者姓名（權限／使用者目錄） */
+  createdByName?: string;
+  /** 攤上盤點「完成」押記之操作者姓名 */
+  stallCountCompletedByName?: string;
+  /** 盤點完成當下之操作者 userId（供舊單僅缺姓名時回補顯示） */
+  stallCountCompletedByUserId?: string;
+  /** 最近一次異動本筆訂單之操作者姓名（狀態、揀貨、盤點快照修正等） */
+  lastUpdatedByName?: string;
 };
 
 const STORAGE_KEY = 'dongshan_order_history_v1';
@@ -51,6 +70,8 @@ const FRANCHISE_MGMT_KEY = 'dongshan_franchise_mgmt_orders_v1';
 export type FranchiseManagementOrder = {
   id: string;
   createdAt: string;
+  /** 訂單歸屬曆法日 YYYY-MM-DD；舊資料無此欄時以 createdAt 之本地日視同訂單日 */
+  orderDateYmd?: string;
   updatedAt: string;
   source: 'procurement';
   totalAmount: number;
@@ -70,6 +91,10 @@ export type FranchiseManagementOrder = {
   stallCountSnapshot?: SalesRecordDaySnapshot;
   scopeId?: string;
   actorUserId?: string;
+  createdByName?: string;
+  stallCountCompletedByName?: string;
+  stallCountCompletedByUserId?: string;
+  lastUpdatedByName?: string;
 };
 
 function newOrderId(): string {
@@ -100,6 +125,28 @@ function normalizeHistoryEntry(
   };
 }
 
+function ymdFromCreatedAtLocal(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** 訂單業務曆法日（盤點／篩選／帶出重算與此對齊）；舊單無 orderDateYmd 則取自 createdAt 本地日 */
+export function effectiveOrderDateYmd(o: { orderDateYmd?: string; createdAt: string }): string {
+  const raw = o.orderDateYmd?.trim();
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  return ymdFromCreatedAtLocal(o.createdAt) || raw || '';
+}
+
+function normalizeOrderDateYmdInput(s: string): string {
+  const t = String(s).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  return ymdFromCreatedAtLocal(new Date().toISOString());
+}
+
 function canAccessOrder(
   row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>,
   ctx: ReturnType<typeof getDataScopeContext>
@@ -109,6 +156,46 @@ function canAccessOrder(
   if (row.actorUserId) return row.actorUserId === ctx.userId;
   // 舊資料（尚未有 scope/actor）預設視為總部資料，直營帳號可讀取
   return ctx.scopeId === HQ_SCOPE_ID;
+}
+
+/** 目前登入身分是否可讀取該筆訂單（盤點／叫貨扣庫／列表共用） */
+export function orderMatchesSessionScope(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>
+): boolean {
+  return canAccessOrder(row, getDataScopeContext());
+}
+
+/** 建單者：優先已存姓名，否則依 actorUserId 向使用者目錄回補 */
+export function displayOrderCreatedByLabel(
+  e: Pick<OrderHistoryEntry, 'createdByName' | 'actorUserId'>
+): string {
+  return e.createdByName?.trim() || resolveUserDisplayNameById(e.actorUserId) || '—';
+}
+
+/** 已有攤上盤點完成押記（與銷售紀錄綁定），不可改回待出貨或調整叫貨／揀貨品項 */
+export function orderHasStallCountCompleted(o: { stallCountCompletedAt?: string }): boolean {
+  return Boolean(o.stallCountCompletedAt?.trim());
+}
+
+/** 盤點完成者：已存姓名 → 完成者 userId → 舊押記無紀錄時退回建單者 userId（僅顯示用） */
+export function displayOrderStallCountCompletedByLabel(
+  e: Pick<
+    OrderHistoryEntry,
+    | 'stallCountCompletedByName'
+    | 'stallCountCompletedByUserId'
+    | 'actorUserId'
+    | 'stallCountCompletedAt'
+  >
+): string {
+  const fromStamp =
+    e.stallCountCompletedByName?.trim() ||
+    resolveUserDisplayNameById(e.stallCountCompletedByUserId);
+  if (fromStamp) return fromStamp;
+  if (e.stallCountCompletedAt) {
+    const legacy = resolveUserDisplayNameById(e.actorUserId);
+    if (legacy) return legacy;
+  }
+  return '—';
 }
 
 export function loadOrderHistory(): OrderHistoryEntry[] {
@@ -166,6 +253,7 @@ function franchiseMgmtToHistoryEntry(m: FranchiseManagementOrder): OrderHistoryE
   return {
     id: m.id,
     createdAt: m.createdAt,
+    orderDateYmd: m.orderDateYmd,
     updatedAt: m.updatedAt ?? m.createdAt,
     source: m.source,
     totalAmount: m.totalAmount,
@@ -176,6 +264,12 @@ function franchiseMgmtToHistoryEntry(m: FranchiseManagementOrder): OrderHistoryE
     storeLabel: m.storeLabel,
     status: m.status,
     actorRole: 'admin',
+    scopeId: m.scopeId,
+    actorUserId: m.actorUserId,
+    createdByName: m.createdByName,
+    stallCountCompletedByName: m.stallCountCompletedByName,
+    stallCountCompletedByUserId: m.stallCountCompletedByUserId,
+    lastUpdatedByName: m.lastUpdatedByName,
     stallCountBasisYmd: m.stallCountBasisYmd,
     stallCountCompletedAt: m.stallCountCompletedAt,
     stallCountSnapshot: m.stallCountSnapshot,
@@ -205,15 +299,16 @@ export function loadCompletedOrderHistoryList(): OrderHistoryEntry[] {
 
 /**
  * 歷史訂單列表：直營店員工僅能看直營相關單（總部＋本店帳下單），不含加盟主單。
+ * 隸屬加盟店之員工資料範圍已是本店，不再依 actorRole 排除（需看到加盟主所下之單）。
  */
 export function loadCompletedOrderHistoryListForRole(
   role: 'admin' | 'franchisee' | 'employee'
 ): OrderHistoryEntry[] {
   const all = loadCompletedOrderHistoryList();
-  if (role === 'employee') {
-    return all.filter((e) => e.actorRole === 'admin' || e.actorRole === 'employee');
-  }
-  return all;
+  if (role !== 'employee') return all;
+  const ctx = getDataScopeContext();
+  if (ctx.scopeId !== HQ_SCOPE_ID) return all;
+  return all.filter((e) => e.actorRole === 'admin' || e.actorRole === 'employee');
 }
 
 /** 讀取本機 `order_history` 全部項目（不過濾舊版 admin 寫入，供內部刪除用） */
@@ -254,13 +349,16 @@ function appendFranchiseManagementOrderInternal(params: {
   totalAmount: number;
   payableAmount?: number;
   selfSuppliedCostAmount?: number;
+  orderDateYmd: string;
 }): void {
-  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount } = params;
+  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount, orderDateYmd } = params;
   const itemCount = roundProcurementQty(lines.reduce((s, l) => s + l.qty, 0));
   const now = new Date().toISOString();
+  const who = persistableActorDisplayName();
   const entry: FranchiseManagementOrder = {
     id: newOrderId(),
     createdAt: now,
+    orderDateYmd: normalizeOrderDateYmdInput(orderDateYmd),
     updatedAt: now,
     source: 'procurement',
     totalAmount,
@@ -272,6 +370,8 @@ function appendFranchiseManagementOrderInternal(params: {
     status: '待出貨',
     scopeId: getDataScopeContext().scopeId,
     actorUserId: getDataScopeContext().userId || undefined,
+    createdByName: who,
+    lastUpdatedByName: who,
   };
   saveFranchiseManagementOrders([entry, ...loadFranchiseManagementOrders()]);
 }
@@ -280,9 +380,11 @@ export function updateFranchiseManagementOrderStatus(id: string, status: Franchi
   const list = loadFranchiseManagementOrders();
   const i = list.findIndex((o) => o.id === id);
   if (i < 0) return;
+  if (status === '待出貨' && orderHasStallCountCompleted(list[i])) return;
   const next = [...list];
   const now = new Date().toISOString();
-  next[i] = { ...next[i], status, updatedAt: now };
+  const who = persistableActorDisplayName();
+  next[i] = { ...next[i], status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
   saveFranchiseManagementOrders(next);
 }
 
@@ -290,9 +392,11 @@ export function updateOrderHistoryStatus(id: string, status: FranchiseOrderStatu
   const list = loadOrderHistory();
   const i = list.findIndex((o) => o.id === id);
   if (i < 0) return;
+  if (status === '待出貨' && orderHasStallCountCompleted(list[i])) return;
   const next = [...list];
   const now = new Date().toISOString();
-  next[i] = { ...next[i], status, updatedAt: now };
+  const who = persistableActorDisplayName();
+  next[i] = { ...next[i], status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
   saveOrderHistory(next);
 }
 
@@ -337,7 +441,9 @@ export function aggregateOrderLinesForSave(lines: OrderHistoryLine[]) {
   return { lines: kept, itemCount, totalAmount };
 }
 
-export type UpdateLinesResult = { ok: true } | { ok: false; reason: 'not_found' | 'not_pending' | 'empty' };
+export type UpdateLinesResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'not_pending' | 'empty' | 'stall_count_locked' };
 
 /**
  * 依單號更新待出貨品項（總部或加盟/店員帳內之訂單，會自動尋找儲位）。
@@ -350,8 +456,10 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
   const mi = mgmt.findIndex((o) => o.id === id);
   if (mi >= 0) {
     if (mgmt[mi].status !== '待出貨') return { ok: false, reason: 'not_pending' };
+    if (orderHasStallCountCompleted(mgmt[mi])) return { ok: false, reason: 'stall_count_locked' };
     const m = [...mgmt];
     const now = new Date().toISOString();
+    const who = persistableActorDisplayName();
     m[mi] = {
       ...m[mi],
       lines,
@@ -360,6 +468,7 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
       payableAmount: totalAmount,
       selfSuppliedCostAmount: 0,
       updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
     };
     saveFranchiseManagementOrders(m);
     return { ok: true };
@@ -369,11 +478,22 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
   const hi = hist.findIndex((o) => o.id === id);
   if (hi >= 0) {
     if (hist[hi].status !== '待出貨') return { ok: false, reason: 'not_pending' };
+    if (orderHasStallCountCompleted(hist[hi])) return { ok: false, reason: 'stall_count_locked' };
     const h = [...hist];
     const now = new Date().toISOString();
     const payableAmount = totalAmount;
     const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, h[hi].actorRole);
-    h[hi] = { ...h[hi], lines, itemCount, totalAmount, payableAmount, selfSuppliedCostAmount, updatedAt: now };
+    const who = persistableActorDisplayName();
+    h[hi] = {
+      ...h[hi],
+      lines,
+      itemCount,
+      totalAmount,
+      payableAmount,
+      selfSuppliedCostAmount,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    };
     saveOrderHistory(h);
     return { ok: true };
   }
@@ -383,7 +503,7 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
 
 export type UpdateEditableOrderLinesResult =
   | { ok: true }
-  | { ok: false; reason: 'not_found' | 'canceled' | 'empty' };
+  | { ok: false; reason: 'not_found' | 'canceled' | 'empty' | 'stall_count_locked' };
 
 /**
  * 依單號更新可編輯訂單之品項（允許「待出貨」與「已完成」，禁止「已取消」）。
@@ -400,8 +520,10 @@ export function updateEditableOrderLinesById(
   const mi = mgmt.findIndex((o) => o.id === id);
   if (mi >= 0) {
     if (mgmt[mi].status === '已取消') return { ok: false, reason: 'canceled' };
+    if (orderHasStallCountCompleted(mgmt[mi])) return { ok: false, reason: 'stall_count_locked' };
     const m = [...mgmt];
     const now = new Date().toISOString();
+    const who = persistableActorDisplayName();
     m[mi] = {
       ...m[mi],
       lines,
@@ -410,6 +532,7 @@ export function updateEditableOrderLinesById(
       payableAmount: totalAmount,
       selfSuppliedCostAmount: 0,
       updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
     };
     saveFranchiseManagementOrders(m);
     return { ok: true };
@@ -419,11 +542,22 @@ export function updateEditableOrderLinesById(
   const hi = hist.findIndex((o) => o.id === id);
   if (hi >= 0) {
     if (hist[hi].status === '已取消') return { ok: false, reason: 'canceled' };
+    if (orderHasStallCountCompleted(hist[hi])) return { ok: false, reason: 'stall_count_locked' };
     const h = [...hist];
     const now = new Date().toISOString();
     const payableAmount = totalAmount;
     const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, h[hi].actorRole);
-    h[hi] = { ...h[hi], lines, itemCount, totalAmount, payableAmount, selfSuppliedCostAmount, updatedAt: now };
+    const who = persistableActorDisplayName();
+    h[hi] = {
+      ...h[hi],
+      lines,
+      itemCount,
+      totalAmount,
+      payableAmount,
+      selfSuppliedCostAmount,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    };
     saveOrderHistory(h);
     return { ok: true };
   }
@@ -441,15 +575,19 @@ export function appendProcurementOrderEntry(params: {
   payableAmount?: number;
   selfSuppliedCostAmount?: number;
   actorRole: OrderActorRole;
+  /** 訂單歸屬日 YYYY-MM-DD（與實際送出時間 createdAt 分開） */
+  orderDateYmd: string;
 }): void {
-  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount, actorRole } = params;
+  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount, actorRole, orderDateYmd } = params;
   const ctx = getDataScopeContext();
+  const bookYmd = normalizeOrderDateYmdInput(orderDateYmd);
   if (actorRole === 'admin') {
     appendFranchiseManagementOrderInternal({
       lines,
       totalAmount,
       payableAmount: payableAmount ?? totalAmount,
       selfSuppliedCostAmount: selfSuppliedCostAmount ?? 0,
+      orderDateYmd: bookYmd,
     });
     return;
   }
@@ -458,9 +596,11 @@ export function appendProcurementOrderEntry(params: {
   const storeLabel = actorRole === 'franchisee' ? '加盟門市' : '門市帳號';
 
   const now = new Date().toISOString();
+  const who = persistableActorDisplayName();
   const entry: OrderHistoryEntry = {
     id: newOrderId(),
     createdAt: now,
+    orderDateYmd: bookYmd,
     updatedAt: now,
     source: 'procurement',
     totalAmount,
@@ -473,6 +613,8 @@ export function appendProcurementOrderEntry(params: {
     status: '待出貨',
     scopeId: ctx.scopeId,
     actorUserId: ctx.userId || undefined,
+    createdByName: who,
+    lastUpdatedByName: who,
   };
 
   const next = [entry, ...loadOrderHistory()];
@@ -487,6 +629,16 @@ export function setOrderStallCountStamp(
   fields: { basisYmd: string; completedAt: string; snapshot: SalesRecordDaySnapshot }
 ): boolean {
   const merged = mergeSalesRecordWithCatalog(fields.snapshot);
+  const ctx = getDataScopeContext();
+  const completedByUserId = ctx.userId?.trim() || undefined;
+  const who = persistableActorDisplayName();
+  const stampPatch = {
+    stallCountBasisYmd: fields.basisYmd,
+    stallCountCompletedAt: fields.completedAt,
+    stallCountSnapshot: merged,
+    ...(completedByUserId ? { stallCountCompletedByUserId: completedByUserId } : {}),
+    ...(who ? { stallCountCompletedByName: who, lastUpdatedByName: who } : {}),
+  };
   const mgmt = loadFranchiseManagementOrders();
   const mi = mgmt.findIndex((o) => o.id === orderId);
   if (mi >= 0) {
@@ -495,9 +647,7 @@ export function setOrderStallCountStamp(
       i === mi
         ? {
             ...o,
-            stallCountBasisYmd: fields.basisYmd,
-            stallCountCompletedAt: fields.completedAt,
-            stallCountSnapshot: merged,
+            ...stampPatch,
             updatedAt: now,
           }
         : o
@@ -513,9 +663,7 @@ export function setOrderStallCountStamp(
       i === hi
         ? {
             ...o,
-            stallCountBasisYmd: fields.basisYmd,
-            stallCountCompletedAt: fields.completedAt,
-            stallCountSnapshot: merged,
+            ...stampPatch,
             updatedAt: now,
           }
         : o
@@ -541,10 +689,16 @@ export function updateStallCountSnapshotByOrderId(
 
   const mgmt = loadFranchiseManagementOrders();
   const mi = mgmt.findIndex((o) => o.id === orderId);
+  const who = persistableActorDisplayName();
   if (mi >= 0) {
     if (!mgmt[mi].stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
     const m = [...mgmt];
-    m[mi] = { ...m[mi], stallCountSnapshot: nextSnap, updatedAt: now };
+    m[mi] = {
+      ...m[mi],
+      stallCountSnapshot: nextSnap,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    };
     saveFranchiseManagementOrders(m);
     return { ok: true };
   }
@@ -553,7 +707,12 @@ export function updateStallCountSnapshotByOrderId(
   if (hi >= 0) {
     if (!hist[hi].stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
     const h = [...hist];
-    h[hi] = { ...h[hi], stallCountSnapshot: nextSnap, updatedAt: now };
+    h[hi] = {
+      ...h[hi],
+      stallCountSnapshot: nextSnap,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    };
     saveOrderHistory(h);
     return { ok: true };
   }
@@ -564,6 +723,7 @@ export function updateStallCountSnapshotByOrderId(
  * 有「盤點完成」押記之訂單（含總部與加盟／店員庫），依完成時間新到舊；供銷售紀錄列表用。
  */
 export function listOrdersWithStallCountCompleted(): OrderHistoryEntry[] {
+  const ctx = getDataScopeContext();
   const byId = new Map<string, OrderHistoryEntry>();
   for (const m of loadFranchiseManagementOrders()) {
     if (!m.stallCountCompletedAt) continue;
@@ -573,9 +733,11 @@ export function listOrdersWithStallCountCompleted(): OrderHistoryEntry[] {
     if (!e.stallCountCompletedAt) continue;
     byId.set(e.id, normalizeHistoryEntry(e));
   }
-  return Array.from(byId.values()).sort((a, b) => {
+  const sorted = Array.from(byId.values()).sort((a, b) => {
     const ta = a.stallCountCompletedAt ?? '';
     const tb = b.stallCountCompletedAt ?? '';
     return ta < tb ? 1 : ta > tb ? -1 : 0;
   });
+  if (ctx.isAdmin) return sorted;
+  return sorted.filter((e) => canAccessOrder(e, ctx));
 }

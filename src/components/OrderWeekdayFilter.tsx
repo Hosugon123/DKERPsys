@@ -20,7 +20,7 @@ type Props = {
 };
 
 /**
- * 預設不篩選；點選週幾才只顯示該建單星期之訂單（可複選）。
+ * 預設不篩選；點選週幾才只顯示「訂單日期」落在該星期之訂單（可複選）。
  */
 export function OrderWeekdayFilter({ value, onChange, className }: Props) {
   const set = new Set(value);

@@ -51,12 +51,53 @@ export function formatSlashDateTimeWithWeekdayFromIso(iso: string): string {
   return `${date}（${weekday}） ${hh}:${mm}`;
 }
 
+/** 訂單業務日 YYYY-MM-DD → 2026/5/10（週六） */
+export function formatSlashYmdWithWeekdayFromYmd(ymdDash: string): string {
+  const parts = ymdDash.split('-').map((x) => parseInt(x, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return ymdDash;
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  if (Number.isNaN(d.getTime())) return ymdDash;
+  const date = formatSlashDateFromDate(d);
+  const weekday = d.toLocaleDateString('zh-TW', { weekday: 'short' });
+  return `${date}（${weekday}）`;
+}
+
+/** 下單時間僅顯示時分（本機） */
+export function formatTimeHmFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** YYYY-MM-DD 對應之星期：1=週一 … 7=週日（本機曆法） */
+export function getIsoWeekdayFromYmdDash(ymdDash: string): number | null {
+  const parts = ymdDash.split('-').map((x) => parseInt(x, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  if (Number.isNaN(d.getTime())) return null;
+  const j = d.getDay();
+  return (j === 0 ? 7 : j) as number;
+}
+
+/**
+ * 依「訂單業務日」星期篩選（與建單當下時間分離）。
+ */
+export function orderMatchesActiveWeekdaysFromYmd(
+  orderYmdDash: string,
+  activeWeekdays: readonly number[]
+): boolean {
+  if (activeWeekdays.length === 0) return true;
+  const w = getIsoWeekdayFromYmdDash(orderYmdDash);
+  if (w == null) return true;
+  return activeWeekdays.includes(w);
+}
+
 /**
  * 彙整可搜尋之日期變體：2026/4/25、2026-04-25、2026/4、20260425
  */
 export function getOrderDateSearchIndex(
   orderCreatedIso: string,
-  extra?: { stallCountBasisYmd?: string; stallCountCompletedAt?: string }
+  extra?: { stallCountBasisYmd?: string; stallCountCompletedAt?: string; orderDateYmd?: string }
 ): string {
   const parts: string[] = [];
   const ymd0 = toLocalYmdDashed(orderCreatedIso);
@@ -64,6 +105,10 @@ export function getOrderDateSearchIndex(
     const [Y, M, D] = ymd0.split('-');
     const slash = ymdDashToSlash(ymd0);
     parts.push(slash, ymd0, ymd0.replace(/-/g, '/'), ymd0.replace(/-/g, ''), `${Y}/${M}`, `/${M}/${D}`);
+  }
+  if (extra?.orderDateYmd) {
+    const b = extra.orderDateYmd;
+    parts.push(b, ymdDashToSlash(b), b.replace(/-/g, ''), b.replace(/-/g, '/'));
   }
   if (extra?.stallCountBasisYmd) {
     const b = extra.stallCountBasisYmd;
@@ -90,7 +135,9 @@ function normalizeDateQuery(s: string): string {
 /** 訂單關鍵字是否命中日期變體（例：2026/4/25、2026/4、0425） */
 export function orderDateQueryMatches(
   orderCreatedIso: string,
-  extra: { stallCountBasisYmd?: string; stallCountCompletedAt?: string } | undefined,
+  extra:
+    | { stallCountBasisYmd?: string; stallCountCompletedAt?: string; orderDateYmd?: string }
+    | undefined,
   qRaw: string
 ): boolean {
   const nq = normalizeDateQuery(qRaw);

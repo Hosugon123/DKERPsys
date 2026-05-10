@@ -4,7 +4,6 @@ import {
   Plus,
   ListOrdered,
   CheckCircle2,
-  Search,
   Bookmark,
   Trash2,
   CalendarDays,
@@ -16,7 +15,12 @@ import {
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { UserRole } from './Orders';
 import { orders as ordersApi } from '../services/apiService';
-import type { OrderHistoryLine, OrderHistoryEntry } from '../lib/orderHistoryStorage';
+import {
+  displayOrderCreatedByLabel,
+  effectiveOrderDateYmd,
+  type OrderHistoryLine,
+  type OrderHistoryEntry,
+} from '../lib/orderHistoryStorage';
 import {
   listProcurementFavorites,
   addProcurementFavorite,
@@ -44,15 +48,16 @@ import {
   setPreferredProcurementBasisOrderId,
   getOrderStallCountBasisYmdForDeduction,
   formatYmdWithWeekday,
+  ymd,
 } from '../lib/stallInventoryStorage';
 import { computeLine, aggregateStallKpis, roundProcurementQty, PROCUREMENT_QTY_MAX } from '../lib/stallMath';
-import { formatSlashDateTimeFromIso } from '../lib/dateDisplay';
+import {
+  formatSlashDateTimeFromIso,
+  formatSlashYmdWithWeekdayFromYmd,
+  formatTimeHmFromIso,
+} from '../lib/dateDisplay';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import ItemCatalogSettings from './ItemCatalogSettings';
-
-function normalizeQ(s: string) {
-  return s.trim().toLowerCase();
-}
 
 function parseQtyInput(raw: string): number {
   const t = String(raw)
@@ -75,7 +80,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const catalogItems = useSupplyCatalogItems(userRole);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [activeCategory, setActiveCategory] = useState<'all' | ItemCategory>('all');
-  const [searchQuery, setSearchQuery] = useState('');
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [stallTick, setStallTick] = useState(0);
   const [basisOrdersList, setBasisOrdersList] = useState<OrderHistoryEntry[]>([]);
@@ -92,8 +96,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   );
   /** 盤點日當天售出一覽：伸縮（同歷史訂單邏輯，預設收合） */
   const [stallDaySalesOpen, setStallDaySalesOpen] = useState(false);
+  /** 常用訂單區塊：預設收合節省版面 */
+  const [favoritesPanelOpen, setFavoritesPanelOpen] = useState(false);
   /** 送出訂單前須在彈層內再按一次「確定送出」 */
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
+  /** 訂單歸屬日（可預先下單）；下單時間為送出當下之 createdAt */
+  const [newOrderDateYmd, setNewOrderDateYmd] = useState(() => ymd(new Date()));
 
   const syncFavorites = useCallback(() => {
     setFavorites(listProcurementFavorites());
@@ -134,13 +142,9 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   useEffect(() => {
     void (async () => {
       const all = await ordersApi.listOrdersWithStallCountCompleted();
-      setBasisOrdersList(
-        userRole === 'employee'
-          ? all.filter((o) => o.actorRole === 'admin' || o.actorRole === 'employee')
-          : all,
-      );
+      setBasisOrdersList(all);
     })();
-  }, [stallTick, userRole]);
+  }, [stallTick]);
 
   useEffect(() => {
     setStallBasisOrderId((prev) => {
@@ -207,13 +211,11 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   }, [stallBasisOrderId, catalogItems, stallTick]);
 
   const visibleItems = useMemo(() => {
-    const q = normalizeQ(searchQuery);
     return catalogItems.filter((item) => {
       if (activeCategory !== 'all' && item.category !== activeCategory) return false;
-      if (!q) return true;
-      return normalizeQ(item.name).includes(q) || item.name.includes(searchQuery.trim());
+      return true;
     });
-  }, [activeCategory, searchQuery, catalogItems]);
+  }, [activeCategory, catalogItems]);
 
   const clearQtyDraft = (id: string) => {
     setQtyInputDraft((p) => {
@@ -341,6 +343,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
 
   const openSubmitConfirm = () => {
     if (buildLinesFromCart().length === 0) return;
+    setNewOrderDateYmd(ymd(new Date()));
     setSubmitModalOpen(true);
   };
 
@@ -373,13 +376,15 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         payableAmount,
         selfSuppliedCostAmount,
         actorRole: userRole,
+        orderDateYmd: newOrderDateYmd,
       });
       setOrderSuccess(true);
       setCart({});
       setQtyInputDraft({});
+      setNewOrderDateYmd(ymd(new Date()));
       setTimeout(() => setOrderSuccess(false), 3000);
     })();
-  }, [buildLinesFromCart, stallBasisOrderId, supplyRetailView, userRole]);
+  }, [buildLinesFromCart, newOrderDateYmd, stallBasisOrderId, supplyRetailView, userRole]);
 
   const applyFavoriteReplace = (f: FavoriteOrder) => {
     setFavoriteError('');
@@ -587,7 +592,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     <option value="">（不指定，下單不扣盤點剩餘）</option>
                     {basisOrders.map((o) => (
                       <option key={o.id} value={o.id}>
-                        建單 {formatSlashDateTimeFromIso(o.createdAt) ?? o.createdAt} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 12)}…
+                        訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ・ 下單 {formatTimeHmFromIso(o.createdAt)} ・ 建單{' '}
+                        {displayOrderCreatedByLabel(o)} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 12)}…
                         {o.stallCountBasisYmd
                           ? ` · 盤點 ${formatYmdWithWeekday(o.stallCountBasisYmd)}`
                           : ''}
@@ -708,165 +714,180 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         )}
       </div>
 
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/35 px-4 py-3 space-y-3">
-        <div className="flex items-center gap-2 text-amber-200/90">
-          <Bookmark size={18} className="shrink-0 text-amber-500" />
-          <h3 className="text-sm font-semibold">常用訂單</h3>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-          <div className="flex-1 min-w-0">
-            <label className="sr-only" htmlFor="favorite-name">
-              新常用訂單名稱
-            </label>
-            <input
-              id="favorite-name"
-              type="text"
-              value={newFavoriteName}
-              onChange={(e) => setNewFavoriteName(e.target.value)}
-              placeholder="名稱（例：週一固定、週五加量、明日預訂）"
-              className="w-full h-11 rounded-xl border-2 border-zinc-700 bg-zinc-900/80 px-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
-            />
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/35 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setFavoritesPanelOpen((o) => !o)}
+          className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-white/[0.02] transition-colors"
+          aria-expanded={favoritesPanelOpen}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Bookmark size={18} className="shrink-0 text-amber-500" />
+            <h3 className="text-sm font-semibold text-amber-200/90 min-w-0">常用訂單</h3>
           </div>
-          <button
-            type="button"
-            onClick={saveAsFavorite}
-            disabled={totalCount === 0}
-            className="shrink-0 h-11 px-4 rounded-xl border-2 border-amber-600/50 bg-amber-600/20 text-amber-200 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed active:bg-amber-600/30"
-          >
-            儲存目前訂單
-          </button>
-        </div>
-        {favoriteError && (
-          <p className="text-xs text-rose-400/90" role="status">
-            {favoriteError}
-          </p>
-        )}
-        {favorites.length > 0 ? (
-          <ul className="space-y-2">
-            {favorites.map((f) => {
-              const favoriteLineTotal = Object.entries(f.quantities).reduce(
-                (sum, [id, qty]) => {
-                  const item = getSupplyItem(id, supplyRetailView);
-                  const q = Number(qty) || 0;
-                  if (!item || q <= 0) return sum;
-                  if (userRole === 'franchisee' && isFranchiseeSelfSuppliedItem(item)) return sum;
-                  return sum + pricePerPackage(item) * q;
-                },
-                0
-              );
-              const favoriteRetailTotal = Object.entries(f.quantities).reduce(
-                (sum, [id, qty]) => {
-                  const item = getSupplyItem(id, supplyRetailView);
-                  const q = Number(qty) || 0;
-                  if (!item || q <= 0) return sum;
-                  return sum + estimatedRetailPerPackage(item) * q;
-                },
-                0
-              );
-              return (
-                <li
-                  key={f.id}
-                  className={cn(
-                    'flex flex-col sm:flex-row sm:items-center gap-2 rounded-xl border px-3 py-2.5 transition-colors',
-                    deleteArmedId === f.id
-                      ? 'border-rose-500/50 bg-rose-950/25 ring-1 ring-rose-500/20'
-                      : 'border-zinc-800 bg-zinc-900/50'
-                  )}
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-zinc-200 truncate">{f.name}</p>
-                    <div className="mt-1 space-y-0.5 text-xs tabular-nums">
-                      {showProcurementCost && (
-                        <p className="text-amber-400/90 font-medium">
-                          {payableTitle} ${' '}
-                          {(Math.round(favoriteLineTotal * 100) / 100).toLocaleString('zh-TW', {
-                            maximumFractionDigits: 2,
-                            minimumFractionDigits: 0,
-                          })}
-                        </p>
-                      )}
-                      <p className={cn('font-medium', showProcurementCost ? 'text-emerald-400/90' : 'text-emerald-400')}>
-                        零售預估 ${' '}
-                        {(Math.round(favoriteRetailTotal * 100) / 100).toLocaleString('zh-TW', {
-                          maximumFractionDigits: 2,
-                          minimumFractionDigits: 0,
-                        })}
-                      </p>
-                    </div>
-                    {deleteArmedId === f.id && (
-                      <p className="text-[0.6875rem] text-rose-300/90 mt-1">
-                        再按一次垃圾桶，才會刪除此常用訂單。
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeleteArmedId(null);
-                        applyFavoriteReplace(f);
-                      }}
-                      className="min-h-9 px-3 rounded-lg bg-amber-600 text-zinc-950 text-xs font-bold"
-                    >
-                      套用
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyFavoriteDeductStallBasisRemain(f)}
-                      className="min-h-9 px-3 rounded-lg border border-amber-600/60 bg-amber-600/10 text-amber-200 text-xs font-semibold hover:bg-amber-600/20"
-                      title="扣盤點剩再帶入"
-                    >
-                      扣盤點剩再帶入
-                    </button>
-                    {deleteArmedId === f.id && (
-                      <button
-                        type="button"
-                        onClick={() => setDeleteArmedId(null)}
-                        className="min-h-9 px-2 text-xs text-zinc-500 hover:text-zinc-300"
-                      >
-                        取消
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onDeleteFavoriteClick(f)}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="sr-only">{favoritesPanelOpen ? '收合' : '展開'}</span>
+            {favoritesPanelOpen ? (
+              <ChevronUp className="text-zinc-500" size={20} />
+            ) : (
+              <ChevronDown className="text-zinc-500" size={20} />
+            )}
+          </div>
+        </button>
+        {favoritesPanelOpen && (
+          <div className="border-t border-zinc-800 px-4 py-3 space-y-3 bg-zinc-900/50">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+              <div className="flex-1 min-w-0">
+                <label className="sr-only" htmlFor="favorite-name">
+                  新常用訂單名稱
+                </label>
+                <input
+                  id="favorite-name"
+                  type="text"
+                  value={newFavoriteName}
+                  onChange={(e) => setNewFavoriteName(e.target.value)}
+                  placeholder="名稱（例：週一固定、週五加量、明日預訂）"
+                  className="w-full h-11 rounded-xl border-2 border-zinc-700 bg-zinc-900/80 px-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={saveAsFavorite}
+                disabled={totalCount === 0}
+                className="shrink-0 h-11 px-4 rounded-xl border-2 border-amber-600/50 bg-amber-600/20 text-amber-200 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed active:bg-amber-600/30"
+              >
+                儲存目前訂單
+              </button>
+            </div>
+            {favoriteError && (
+              <p className="text-xs text-rose-400/90" role="status">
+                {favoriteError}
+              </p>
+            )}
+            {favorites.length > 0 ? (
+              <ul className="space-y-2">
+                {favorites.map((f) => {
+                  const favoriteLineTotal = Object.entries(f.quantities).reduce(
+                    (sum, [id, qty]) => {
+                      const item = getSupplyItem(id, supplyRetailView);
+                      const q = Number(qty) || 0;
+                      if (!item || q <= 0) return sum;
+                      if (userRole === 'franchisee' && isFranchiseeSelfSuppliedItem(item)) return sum;
+                      return sum + pricePerPackage(item) * q;
+                    },
+                    0
+                  );
+                  const favoriteRetailTotal = Object.entries(f.quantities).reduce(
+                    (sum, [id, qty]) => {
+                      const item = getSupplyItem(id, supplyRetailView);
+                      const q = Number(qty) || 0;
+                      if (!item || q <= 0) return sum;
+                      return sum + estimatedRetailPerPackage(item) * q;
+                    },
+                    0
+                  );
+                  return (
+                    <li
+                      key={f.id}
                       className={cn(
-                        'min-h-9 min-w-9 p-0 rounded-lg border flex items-center justify-center',
+                        'flex flex-col sm:flex-row sm:items-center gap-2 rounded-xl border px-3 py-2.5 transition-colors',
                         deleteArmedId === f.id
-                          ? 'border-rose-500/70 bg-rose-600/20 text-rose-300 hover:bg-rose-600/30'
-                          : 'border-zinc-700 text-zinc-500 hover:text-rose-400 hover:border-rose-800'
+                          ? 'border-rose-500/50 bg-rose-950/25 ring-1 ring-rose-500/20'
+                          : 'border-zinc-800 bg-zinc-900/50'
                       )}
-                      title={deleteArmedId === f.id ? '再按以確認刪除' : '刪除（需再按一次確認）'}
-                      aria-label={
-                        deleteArmedId === f.id
-                          ? `確認刪除 ${f.name}`
-                          : `刪除 ${f.name}，需再按一次`
-                      }
                     >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="text-xs text-zinc-500">尚無儲存。把購物車湊好後按「儲存目前訂單」即可在這裡重複使用。</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-zinc-200 truncate">{f.name}</p>
+                        <div className="mt-1 space-y-0.5 text-xs tabular-nums">
+                          {showProcurementCost && (
+                            <p className="text-amber-400/90 font-medium">
+                              {payableTitle} ${' '}
+                              {(Math.round(favoriteLineTotal * 100) / 100).toLocaleString('zh-TW', {
+                                maximumFractionDigits: 2,
+                                minimumFractionDigits: 0,
+                              })}
+                            </p>
+                          )}
+                          <p
+                            className={cn(
+                              'font-medium',
+                              showProcurementCost ? 'text-emerald-400/90' : 'text-emerald-400'
+                            )}
+                          >
+                            零售預估 ${' '}
+                            {(Math.round(favoriteRetailTotal * 100) / 100).toLocaleString('zh-TW', {
+                              maximumFractionDigits: 2,
+                              minimumFractionDigits: 0,
+                            })}
+                          </p>
+                        </div>
+                        {deleteArmedId === f.id && (
+                          <p className="text-[0.6875rem] text-rose-300/90 mt-1">
+                            再按一次垃圾桶，才會刪除此常用訂單。
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeleteArmedId(null);
+                            applyFavoriteReplace(f);
+                          }}
+                          className="min-h-9 px-3 rounded-lg bg-amber-600 text-zinc-950 text-xs font-bold"
+                        >
+                          套用
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyFavoriteDeductStallBasisRemain(f)}
+                          className="min-h-9 px-3 rounded-lg border border-amber-600/60 bg-amber-600/10 text-amber-200 text-xs font-semibold hover:bg-amber-600/20"
+                          title="扣盤點剩再帶入"
+                        >
+                          扣盤點剩再帶入
+                        </button>
+                        {deleteArmedId === f.id && (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteArmedId(null)}
+                            className="min-h-9 px-2 text-xs text-zinc-500 hover:text-zinc-300"
+                          >
+                            取消
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onDeleteFavoriteClick(f)}
+                          className={cn(
+                            'min-h-9 min-w-9 p-0 rounded-lg border flex items-center justify-center',
+                            deleteArmedId === f.id
+                              ? 'border-rose-500/70 bg-rose-600/20 text-rose-300 hover:bg-rose-600/30'
+                              : 'border-zinc-700 text-zinc-500 hover:text-rose-400 hover:border-rose-800'
+                          )}
+                          title={deleteArmedId === f.id ? '再按以確認刪除' : '刪除（需再按一次確認）'}
+                          aria-label={
+                            deleteArmedId === f.id
+                              ? `確認刪除 ${f.name}`
+                              : `刪除 ${f.name}，需再按一次`
+                          }
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-zinc-500">
+                尚無儲存。把購物車湊好後按「儲存目前訂單」即可在這裡重複使用。
+              </p>
+            )}
+          </div>
         )}
       </div>
 
-      <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-2 bg-[#0d0d0d]/95 backdrop-blur-sm border-b border-zinc-800/80 space-y-3 sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-none sm:pb-0 sm:pt-0">
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={20} />
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜尋品名（例：鴨頭、豆干）"
-            enterKeyHint="search"
-            className="w-full h-12 sm:h-11 pl-11 pr-4 rounded-2xl border-2 border-zinc-700 bg-zinc-900/80 text-zinc-100 text-base placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
-          />
-        </div>
+      <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-2 bg-[#0d0d0d]/95 backdrop-blur-sm border-b border-zinc-800/80 sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-none sm:pb-0 sm:pt-0">
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none touch-pan-x">
           {CATEGORY_CHIPS.map((c) => (
             <button
@@ -887,7 +908,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       </div>
 
       {visibleItems.length === 0 && (
-        <p className="text-center text-zinc-500 py-10 text-sm">沒有符合的品項，請改搜尋或分類。</p>
+        <p className="text-center text-zinc-500 py-10 text-sm">此分類沒有品項。</p>
       )}
 
       <ul className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-2.5">
@@ -1252,6 +1273,31 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
               >
                 <X size={22} />
               </button>
+            </div>
+            <div className="mt-4 space-y-2">
+              <label
+                htmlFor="new-order-date-ymd"
+                className="block cursor-pointer rounded-xl border-2 border-zinc-700/90 bg-zinc-950/80 p-3 transition-colors hover:border-zinc-600 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/25"
+              >
+                <span className="block text-xs font-medium text-zinc-400 mb-2">訂單日期（點此區選擇）</span>
+                <div className="relative">
+                  <input
+                    id="new-order-date-ymd"
+                    type="date"
+                    value={newOrderDateYmd}
+                    onChange={(e) => setNewOrderDateYmd(e.target.value)}
+                    className="w-full min-h-12 cursor-pointer rounded-lg border border-zinc-600/80 bg-zinc-900/90 pl-3 pr-11 py-2.5 text-base text-zinc-100 [color-scheme:dark] focus:outline-none sm:text-sm"
+                  />
+                  <CalendarDays
+                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-amber-500/80"
+                    size={20}
+                    aria-hidden
+                  />
+                </div>
+              </label>
+              <p className="text-[0.6875rem] text-zinc-500 leading-relaxed">
+                可選未來日期作為預先叫貨之歸屬日。實際下單時間以按下「確定送出」時之系統時間為準。
+              </p>
             </div>
             <div className="mt-5 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
               <button

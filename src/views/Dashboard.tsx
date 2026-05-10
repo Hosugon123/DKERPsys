@@ -25,6 +25,7 @@ import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
+  effectiveOrderDateYmd,
   type OrderHistoryEntry,
   type OrderActorRole,
 } from '../lib/orderHistoryStorage';
@@ -36,12 +37,6 @@ const EXPENSE_PIE_COLORS = ['#d97706', '#6366f1', '#10b981', '#f43f5e', '#a855f7
 const INGREDIENT_STRUCTURE_PIE_COLORS = ['#ea580c', '#6366f1'];
 
 type DashboardOrder = OrderHistoryEntry;
-
-function ymdFromIso(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 function roleVisible(actorRole: OrderActorRole, userRole: UserRole): boolean {
   if (userRole === 'admin') return true;
@@ -356,8 +351,8 @@ export default function Dashboard({
     const { startYmd, endYmd } = resolveRange(summaryRange);
     return dashboardOrders.filter((o) => {
       if (o.status !== '已完成') return false;
-      const ymd = ymdFromIso(o.createdAt);
-      return ymd >= startYmd && ymd <= endYmd;
+      const ymd0 = effectiveOrderDateYmd(o);
+      return ymd0 >= startYmd && ymd0 <= endYmd;
     });
   }, [dashboardOrders, isAdmin, summaryRange]);
 
@@ -380,8 +375,8 @@ export default function Dashboard({
           if (cogsRef != null) directCost += cogsRef;
         }
       } else if (o.actorRole === 'franchisee' && o.status === '已完成') {
-        const ymd = ymdFromIso(o.createdAt);
-        if (ymd >= startYmd && ymd <= endYmd) {
+        const ymd0 = effectiveOrderDateYmd(o);
+        if (ymd0 >= startYmd && ymd0 <= endYmd) {
           const selfSupplied = o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
           franchiseRevenue += Math.max(0, o.totalAmount - selfSupplied);
           let orderCost = 0;
@@ -463,9 +458,9 @@ export default function Dashboard({
     for (const o of dashboardOrders) {
       if (o.actorRole !== 'franchisee') continue;
 
-      const createdYmd = ymdFromIso(o.createdAt);
+      const bookYmd = effectiveOrderDateYmd(o);
       const isCompletedInRange =
-        o.status === '已完成' && createdYmd >= startYmd && createdYmd <= endYmd;
+        o.status === '已完成' && bookYmd >= startYmd && bookYmd <= endYmd;
 
       const stallYmd = stallCountAttributeYmd(o);
       const isStallInRange = Boolean(

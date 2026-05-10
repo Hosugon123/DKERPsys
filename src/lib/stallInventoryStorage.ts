@@ -4,13 +4,18 @@ import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
   listOrdersWithStallCountCompleted,
+  orderMatchesSessionScope,
+  effectiveOrderDateYmd,
+  type OrderHistoryEntry,
 } from './orderHistoryStorage';
+import { getDataScopeContext } from './dataScope';
 import {
   getSalesRecord,
   applySalesRecordOrderDeduction,
   mergeSalesRecordWithCatalog,
 } from './salesRecordStorage';
 import { ymdDashToSlash } from './dateDisplay';
+import { getSessionActorDisplayName } from './sessionActorDisplayName';
 
 const KEY = 'dongshan_stall_inventory_v1';
 
@@ -23,6 +28,8 @@ export type DaySnapshot = {
   lines: Record<string, DayLine>;
   actualRevenue: string;
   updatedAt: string;
+  /** 最近一次儲存攤上盤點表之操作者姓名 */
+  lastSavedByName?: string;
 };
 
 type StoreV1 = {
@@ -91,7 +98,12 @@ export function loadDay(ymdStr: string): DaySnapshot {
 
 export function saveDay(ymdStr: string, snap: DaySnapshot) {
   const s = loadAll();
-  s.byDate[ymdStr] = { ...snap, updatedAt: new Date().toISOString() };
+  const editor = getSessionActorDisplayName();
+  s.byDate[ymdStr] = {
+    ...snap,
+    updatedAt: new Date().toISOString(),
+    ...(editor ? { lastSavedByName: editor } : {}),
+  };
   saveAll(s);
 }
 
@@ -176,10 +188,6 @@ export function getOrderStallCountBasisYmdForDeduction(orderId: string): string 
   return o?.stallCountBasisYmd ?? null;
 }
 
-function orderCreatedYmd(iso: string) {
-  return ymd(new Date(iso));
-}
-
 function findOrderByIdInStores(orderId: string) {
   return (
     loadFranchiseManagementOrders().find((x) => x.id === orderId) ??
@@ -245,12 +253,17 @@ export function recomputeStallOutForStallYmdAndOrder(
 export function recomputeStallOutForOrderId(orderId: string) {
   const o = findOrderByIdInStores(orderId);
   if (!o) return;
-  recomputeStallOutForStallYmdAndOrder(orderCreatedYmd(o.createdAt), orderId);
+  recomputeStallOutForStallYmdAndOrder(effectiveOrderDateYmd(o), orderId);
 }
 
 export type StallOrderForDateRow = {
   id: string;
   createdAt: string;
+  orderDateYmd?: string;
+  actorUserId?: string;
+  createdByName?: string;
+  stallCountCompletedByName?: string;
+  stallCountCompletedByUserId?: string;
   status: '待出貨' | '已完成' | '已取消';
   totalAmount: number;
   itemCount: number;
@@ -263,6 +276,11 @@ function toStallOrderRow(
   o: {
     id: string;
     createdAt: string;
+    orderDateYmd?: string;
+    actorUserId?: string;
+    createdByName?: string;
+    stallCountCompletedByName?: string;
+    stallCountCompletedByUserId?: string;
     status: '待出貨' | '已完成' | '已取消';
     totalAmount: number;
     itemCount: number;
@@ -274,6 +292,11 @@ function toStallOrderRow(
   return {
     id: o.id,
     createdAt: o.createdAt,
+    orderDateYmd: o.orderDateYmd,
+    actorUserId: o.actorUserId,
+    createdByName: o.createdByName,
+    stallCountCompletedByName: o.stallCountCompletedByName,
+    stallCountCompletedByUserId: o.stallCountCompletedByUserId,
     status: o.status,
     totalAmount: o.totalAmount,
     itemCount: o.itemCount,
@@ -283,6 +306,23 @@ function toStallOrderRow(
   };
 }
 
+/** 盤點／植入訂單選單：非管理員僅保留目前資料範圍可讀取之叫貨單 */
+function filterStallOrderRowsForSessionScope(rows: StallOrderForDateRow[]): StallOrderForDateRow[] {
+  const ctx = getDataScopeContext();
+  if (ctx.isAdmin) return rows;
+  const metaById = new Map<string, Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>>();
+  for (const o of loadFranchiseManagementOrders()) {
+    metaById.set(o.id, { scopeId: o.scopeId, actorUserId: o.actorUserId });
+  }
+  for (const o of loadOrderHistory()) {
+    metaById.set(o.id, { scopeId: o.scopeId, actorUserId: o.actorUserId });
+  }
+  return rows.filter((r) => {
+    const meta = metaById.get(r.id);
+    return meta ? orderMatchesSessionScope(meta) : false;
+  });
+}
+
 /**
  * 盤點日與**訂單建立**日相同之**已出貨（已完成）**叫貨單。
  */
@@ -290,15 +330,17 @@ export function listProcurementOrdersForStallDate(stallYmd: string): StallOrderF
   const out: StallOrderForDateRow[] = [];
   for (const o of loadFranchiseManagementOrders()) {
     if (o.status !== '已完成') continue;
-    if (orderCreatedYmd(o.createdAt) !== stallYmd) continue;
+    if (effectiveOrderDateYmd(o) !== stallYmd) continue;
     out.push(toStallOrderRow(o));
   }
   for (const o of loadOrderHistory()) {
     if (o.status !== '已完成') continue;
-    if (orderCreatedYmd(o.createdAt) !== stallYmd) continue;
+    if (effectiveOrderDateYmd(o) !== stallYmd) continue;
     out.push(toStallOrderRow(o));
   }
-  return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  return filterStallOrderRowsForSessionScope(out).sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+  );
 }
 
 /**
@@ -309,22 +351,24 @@ export function listProcurementOrdersInLastNDays(anchorYmd: string, daySpan: num
   const span = Math.max(1, Math.floor(daySpan) || 1);
   const from = addDaysYmd(anchorYmd, -(span - 1));
   const to = anchorYmd;
-  const inWindow = (iso: string) => {
-    const d = orderCreatedYmd(iso);
+  const inWindow = (o: { orderDateYmd?: string; createdAt: string }) => {
+    const d = effectiveOrderDateYmd(o);
     return d >= from && d <= to;
   };
   const out: StallOrderForDateRow[] = [];
   for (const o of loadFranchiseManagementOrders()) {
     if (o.status !== '已完成') continue;
-    if (!inWindow(o.createdAt)) continue;
+    if (!inWindow(o)) continue;
     out.push(toStallOrderRow(o));
   }
   for (const o of loadOrderHistory()) {
     if (o.status !== '已完成') continue;
-    if (!inWindow(o.createdAt)) continue;
+    if (!inWindow(o)) continue;
     out.push(toStallOrderRow(o));
   }
-  return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  return filterStallOrderRowsForSessionScope(out).sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+  );
 }
 
 /**

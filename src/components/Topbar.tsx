@@ -1,6 +1,7 @@
 import { Bell, Settings, Menu, Search, ChevronDown, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { changeOwnPassword } from '../lib/authSession';
+import { getSessionActorDisplayName } from '../lib/sessionActorDisplayName';
 import { getUserAvatar, removeUserAvatar, setUserAvatar } from '../lib/userAvatarStorage';
 import type { UserRole } from '../views/Orders';
 import RemoteSyncIndicator from './RemoteSyncIndicator';
@@ -28,6 +29,8 @@ export default function Topbar({
     franchisee: '加盟主',
     employee: '直營店員工',
   };
+
+  const actorDisplayName = getSessionActorDisplayName();
 
   const [accountOpen, setAccountOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
@@ -231,7 +234,12 @@ export default function Topbar({
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[0.625rem] leading-tight text-zinc-500">已登入</p>
-                  <p className="truncate text-xs font-semibold text-amber-500 sm:text-sm">{loginId}</p>
+                  <p className="truncate text-xs font-semibold text-amber-500 sm:text-sm">
+                    {actorDisplayName || loginId}
+                  </p>
+                  {actorDisplayName ? (
+                    <p className="truncate text-[0.65rem] leading-tight text-zinc-500">{loginId}</p>
+                  ) : null}
                   <p className="truncate text-[0.65rem] leading-tight text-zinc-400">{roleDisplayNames[userRole]}</p>
                 </div>
                 <ChevronDown size={16} className="shrink-0 text-amber-500/90" />

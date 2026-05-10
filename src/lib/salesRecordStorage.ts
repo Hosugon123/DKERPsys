@@ -1,4 +1,5 @@
 import { getAllSupplyItems } from './supplyCatalog';
+import { getSessionActorDisplayName } from './sessionActorDisplayName';
 import { num, roundProcurementQty } from './stallMath';
 
 /** 與 stallInventoryStorage 之 DaySnapshot 結構一致（此檔避免反向 import 造成循環） */
@@ -15,7 +16,7 @@ export type SalesRecordDaySnapshot = {
 
 const SALES_KEY = 'dongshan_sales_records_v1';
 
-type Row = { completedAt: string; snapshot: SalesRecordDaySnapshot };
+type Row = { completedAt: string; completedByName?: string; snapshot: SalesRecordDaySnapshot };
 
 type StoreV1 = {
   version: 1;
@@ -57,7 +58,12 @@ export function saveSalesRecord(ymd: string, snapshot: SalesRecordDaySnapshot) {
   const s = loadStore();
   const completedAt = new Date().toISOString();
   const snapshotMerged = mergeSnapshotWithCatalog(snapshot);
-  s.byDate[ymd] = { completedAt, snapshot: { ...snapshotMerged, updatedAt: completedAt } };
+  const who = getSessionActorDisplayName();
+  s.byDate[ymd] = {
+    completedAt,
+    ...(who ? { completedByName: who } : {}),
+    snapshot: { ...snapshotMerged, updatedAt: completedAt },
+  };
   saveStore(s);
 }
 
@@ -79,11 +85,15 @@ export function isOrderStallCountDone(
   return Boolean(stallCountCompletedAt);
 }
 
-export function listSalesRecordMeta(): { ymd: string; completedAt: string }[] {
+export function listSalesRecordMeta(): { ymd: string; completedAt: string; completedByName?: string }[] {
   const s = loadStore();
   return Object.keys(s.byDate)
     .sort((a, b) => b.localeCompare(a))
-    .map((d) => ({ ymd: d, completedAt: s.byDate[d].completedAt }));
+    .map((d) => ({
+      ymd: d,
+      completedAt: s.byDate[d].completedAt,
+      completedByName: s.byDate[d].completedByName,
+    }));
 }
 
 /**

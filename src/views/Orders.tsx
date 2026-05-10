@@ -1,15 +1,24 @@
 import { useState, useMemo, useEffect, useRef, useCallback, type MouseEvent } from 'react';
 import { Search, Package, MapPin, Phone, User, Calendar, X, Minus, Plus, Trash2, ListOrdered, Store } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { orderDateQueryMatches, formatSlashDateTimeWithWeekdayFromIso, orderMatchesActiveWeekdays } from '../lib/dateDisplay';
+import {
+  orderDateQueryMatches,
+  formatSlashYmdWithWeekdayFromYmd,
+  formatSlashDateTimeWithWeekdayFromIso,
+  orderMatchesActiveWeekdaysFromYmd,
+} from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { orders as ordersApi } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
-import type {
-  FranchiseManagementOrder,
-  OrderHistoryEntry,
-  OrderHistoryLine,
+import {
+  displayOrderCreatedByLabel,
+  displayOrderStallCountCompletedByLabel,
+  effectiveOrderDateYmd,
+  orderHasStallCountCompleted,
+  type FranchiseManagementOrder,
+  type OrderHistoryEntry,
+  type OrderHistoryLine,
 } from '../lib/orderHistoryStorage';
 import {
   getStallDisplayRetailEstAndRemain,
@@ -18,16 +27,6 @@ import {
   getStallDisplayActualRevenue,
 } from '../lib/orderStallDisplayRevenue';
 import { userRoleToSupplyRetailView } from '../lib/supplyCatalog';
-
-function orderTimeToYmdKey(iso: string): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 export type UserRole = 'admin' | 'franchisee' | 'employee';
 
@@ -48,7 +47,6 @@ type OrderRow = {
   contact: string;
   phone: string;
   address: string;
-  time: string;
   itemLines: { name: string; unit: string; qty: number; price: number }[];
   /** 下單／叫貨合計（明細、揀貨合計用） */
   amount: number;
@@ -72,10 +70,6 @@ type OrderFinancialSummary = {
   actualIncomeAmount: number | null;
 };
 
-function formatOrderWhen(iso: string) {
-  return formatSlashDateTimeWithWeekdayFromIso(iso) || iso;
-}
-
 function toOrderRowFromMgmt(
   o: FranchiseManagementOrder,
   financials: OrderFinancialSummary
@@ -90,7 +84,6 @@ function toOrderRowFromMgmt(
     contact: '—',
     phone: '—',
     address: '—',
-    time: formatOrderWhen(o.createdAt),
     itemLines: o.lines.map((l) => ({
       name: l.name,
       unit: l.unit,
@@ -119,7 +112,6 @@ function toOrderRowFromHistory(
     contact: '—',
     phone: '—',
     address: '—',
-    time: formatOrderWhen(o.createdAt),
     itemLines: o.lines.map((l) => ({
       name: l.name,
       unit: l.unit,
@@ -341,7 +333,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     const byWeekday = ordersData.filter((order) => {
       const o = rawList.find((r) => r.id === order.id);
       if (!o) return false;
-      return orderMatchesActiveWeekdays(o.createdAt, activeWeekdays);
+      return orderMatchesActiveWeekdaysFromYmd(effectiveOrderDateYmd(o), activeWeekdays);
     });
     const byStoreType = byWeekday.filter((order) => {
       if (storeTypeFilter === 'all') return true;
@@ -360,7 +352,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       if (!appliedDateRange) return true;
       const o = rawList.find((r) => r.id === order.id);
       if (!o) return false;
-      const key = orderTimeToYmdKey(o.createdAt);
+      const key = effectiveOrderDateYmd(o);
       if (!key) return false;
       return key >= appliedDateRange.from && key <= appliedDateRange.to;
     });
@@ -375,6 +367,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         orderDateQueryMatches(raw.createdAt, {
           stallCountBasisYmd: raw.stallCountBasisYmd,
           stallCountCompletedAt: raw.stallCountCompletedAt,
+          orderDateYmd: raw.orderDateYmd,
         }, searchQuery.trim())
       ) {
         return true;
@@ -472,6 +465,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
   const applyRevertPending = () => {
     if (!revertModal) return;
+    const r = rawList.find((o) => o.id === revertModal.id);
+    if (r && orderHasStallCountCompleted(r)) {
+      setRevertModal(null);
+      return;
+    }
     setStatus(revertModal.id, '待出貨');
     setRevertModal(null);
   };
@@ -494,6 +492,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setPickingError(null);
     const raw = rawList.find((r) => r.id === orderId);
     if (!raw || raw.status === '已取消' || !canEditOrderInList(raw, userRole)) return;
+    if (orderHasStallCountCompleted(raw)) return;
     setPickingOrderId(orderId);
     setPickingLines(raw.lines.map((l) => ({ ...l })));
     setPickingOriginal(raw.lines.map((l) => ({ ...l })));
@@ -514,6 +513,9 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           break;
         case 'canceled':
           setPickingError('此單已取消，無法調整貨量。');
+          break;
+        case 'stall_count_locked':
+          setPickingError('此單已完成盤點押記，無法調整貨量。');
           break;
         default:
           setPickingError('找不到此訂單。');
@@ -558,7 +560,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   useEffect(() => {
     if (!pickingOrderId) return;
     const r = rawList.find((o) => o.id === pickingOrderId);
-    if (!r || !canEditOrderInList(r, userRole)) exitPickingEdit();
+    if (!r || !canEditOrderInList(r, userRole) || orderHasStallCountCompleted(r)) exitPickingEdit();
   }, [pickingOrderId, rawList, userRole, exitPickingEdit]);
 
   useEffect(() => {
@@ -817,19 +819,37 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           const pickCount = isPickingThis ? pickKept.reduce((s, l) => s + l.qty, 0) : 0;
           const orderLineCount = order.itemLines.reduce((s, l) => s + l.qty, 0);
           const pickingLocked = isPickingThis;
+          const stallLocked = raw ? orderHasStallCountCompleted(raw) : false;
 
           return (
             <div
               key={order.id}
               className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden transition-all duration-200"
             >
-              <div className="flex min-w-0 w-full">
-              {/* Order Header / Summary：左側＋金額可點展開；最右刪除僅超級管理員 */}
+              {/* Order Header / Summary：左側＋金額可點展開；刪除鈕僅超級管理員，浮在右上角 */}
               <div
-                className="min-w-0 flex-1 p-4 sm:p-6 cursor-pointer hover:bg-white/[0.02] flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                className={cn(
+                  'relative min-w-0 w-full p-4 sm:p-6 cursor-pointer hover:bg-white/[0.02] flex flex-col sm:flex-row sm:items-stretch gap-4',
+                  isHeadquarters && 'pr-14 sm:pr-16'
+                )}
                 onClick={() => toggleOrder(order.id)}
               >
-                <div className="flex items-center gap-5 min-w-0">
+                {isHeadquarters && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!pickingLocked) setDeleteModal({ id: order.id });
+                    }}
+                    disabled={pickingLocked}
+                    className="absolute top-3 right-3 z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-800/80 bg-zinc-900/80 text-rose-400/85 hover:border-rose-500/40 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:top-5 sm:right-5"
+                    title={pickingLocked ? '請先儲存或放棄「調整貨量」' : '從本機完全移除此筆訂單（不須展開明細）'}
+                    aria-label="刪除本筆訂單"
+                  >
+                    <Trash2 className="size-4" strokeWidth={2} />
+                  </button>
+                )}
+                <div className="flex min-w-0 w-full items-center gap-5 sm:min-w-0 sm:flex-1 sm:basis-0 sm:self-center">
                   <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 flex-shrink-0">
                     <Package
                       size={24}
@@ -840,7 +860,13 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       )}
                     />
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="text-[calc(0.75rem*1.3)] font-mono text-zinc-400 mb-1.5 break-all leading-snug"
+                      title={order.id}
+                    >
+                      訂單編號 {order.id}
+                    </p>
                     <div className="flex items-center gap-3 mb-1 flex-wrap">
                       <h3 className="text-lg font-bold text-[#f5f2ed]">{order.franchisee}</h3>
                       <span className={cn(
@@ -863,16 +889,38 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                         </span>
                       )}
                     </div>
-                    <div className="text-sm text-zinc-500 flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 min-w-0">
-                      <span className="font-mono text-zinc-400 break-all sm:truncate">{order.id}</span>
-                      <span className="hidden sm:inline">•</span>
-                      <span className="break-words">{order.time}</span>
+                    <div className="text-sm text-zinc-500 min-w-0 max-w-full space-y-0.5 leading-relaxed">
+                      {raw ? (
+                        <>
+                          <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*1.3)]">
+                            訂單日期 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(raw))}
+                          </p>
+                          <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*0.7*1.15)]">
+                            下單時間 {formatSlashDateTimeWithWeekdayFromIso(raw.createdAt)}
+                          </p>
+                          <p className="break-words [overflow-wrap:anywhere]">
+                            下單者：{displayOrderCreatedByLabel(raw)} ・ 盤點者：
+                            {raw.stallCountCompletedAt
+                              ? displayOrderStallCountCompletedByLabel(raw)
+                              : '—'}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-zinc-600">—</p>
+                      )}
                     </div>
+                    {raw &&
+                      raw.lastUpdatedByName &&
+                      raw.lastUpdatedByName !== raw.createdByName && (
+                        <p className="text-[0.6875rem] text-zinc-600 mt-1.5 leading-relaxed">
+                          最後異動：{raw.lastUpdatedByName}
+                        </p>
+                      )}
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-end justify-end gap-2 w-full sm:w-auto border-t sm:border-t-0 border-zinc-800 pt-3 sm:pt-0 self-stretch sm:self-center min-w-0">
-                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/35 px-3 py-2.5 w-full sm:w-auto sm:min-w-[19rem] min-w-0">
+                <div className="flex w-full min-w-0 shrink-0 flex-col sm:w-auto sm:flex-none sm:flex-row items-stretch sm:items-end justify-end gap-2 border-t sm:border-t-0 border-zinc-800 pt-3 sm:pt-0">
+                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/35 px-3 py-2.5 w-full min-w-0 sm:min-w-[19rem] sm:max-w-[24rem] sm:shrink-0">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.6875rem] sm:text-xs min-w-0">
                       <span className="text-zinc-500">批貨金額</span>
                       <span className="text-zinc-200 text-right tabular-nums break-all">$ {Math.round(order.procurementAmount).toLocaleString()}</span>
@@ -916,26 +964,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     {isExpanded ? <X size={20} /> : <span className="text-sm font-medium pr-2 text-amber-500">查看明細</span>}
                   </button>
                 </div>
-              </div>
-
-              {isHeadquarters && (
-                <div className="flex items-stretch border-l border-zinc-800/80 bg-zinc-900/30">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!pickingLocked) setDeleteModal({ id: order.id });
-                    }}
-                    disabled={pickingLocked}
-                    className="flex w-12 sm:w-12 flex-col items-center justify-center gap-0.5 text-rose-400/85 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-                    title={pickingLocked ? '請先儲存或放棄「調整貨量」' : '從本機完全移除此筆訂單（不須展開明細）'}
-                    aria-label="刪除本筆訂單"
-                  >
-                    <Trash2 className="size-[1.1rem] sm:size-5" strokeWidth={2} />
-                    <span className="text-[0.5625rem] sm:text-[0.625rem] font-medium text-zinc-500 leading-tight">刪除</span>
-                  </button>
-                </div>
-              )}
               </div>
 
               {/* Order Details (Expanded) */}
@@ -1015,7 +1043,13 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   e.stopPropagation();
                                   setRevertModal({ id: order.id });
                                 }}
-                                className="min-h-[2.5rem] w-full py-2 px-3 border border-zinc-600 bg-zinc-800/50 text-zinc-200 text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
+                                disabled={stallLocked}
+                                title={
+                                  stallLocked
+                                    ? '此單已完成盤點押記，無法改回待出貨'
+                                    : undefined
+                                }
+                                className="min-h-[2.5rem] w-full py-2 px-3 border border-zinc-600 bg-zinc-800/50 text-zinc-200 text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800/50"
                               >
                                 改回待出貨
                               </button>
@@ -1040,15 +1074,22 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   <div className="lg:col-span-2 min-w-0">
                     <div className="mb-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest">訂單品項明細</h4>
-                      {(order.status === '待出貨' || order.status === '已完成') && canEdit && !isPickingThis && (
-                        <button
-                          type="button"
-                          onClick={(e) => startPickingEdit(e, order.id)}
-                          className="h-9 w-full sm:w-auto px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500 shrink-0"
-                        >
-                          調整貨量
-                        </button>
-                      )}
+                      {(order.status === '待出貨' || order.status === '已完成') &&
+                        canEdit &&
+                        !isPickingThis &&
+                        (stallLocked ? (
+                          <span className="text-xs text-zinc-500 shrink-0 text-right sm:text-left">
+                            已完成盤點押記，無法調整貨量
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => startPickingEdit(e, order.id)}
+                            className="h-9 w-full sm:w-auto px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500 shrink-0"
+                          >
+                            調整貨量
+                          </button>
+                        ))}
                     </div>
 
                     {isPickingThis && (

@@ -10,10 +10,19 @@ import {
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { num, aggregateStallKpis, computeLine, isStallRemainEntryValid } from '../lib/stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
-import { formatYmdWithWeekday } from '../lib/stallInventoryStorage';
 import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry, UpdateStallSnapshotResult } from '../lib/orderHistoryStorage';
-import { formatSlashDateTimeFromIso, formatSlashDateTimeWithWeekdayFromIso, orderDateQueryMatches, orderMatchesActiveWeekdays } from '../lib/dateDisplay';
+import {
+  displayOrderCreatedByLabel,
+  displayOrderStallCountCompletedByLabel,
+  effectiveOrderDateYmd,
+} from '../lib/orderHistoryStorage';
+import {
+  formatSlashDateTimeWithWeekdayFromIso,
+  formatSlashYmdWithWeekdayFromYmd,
+  orderDateQueryMatches,
+  orderMatchesActiveWeekdaysFromYmd,
+} from '../lib/dateDisplay';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
@@ -115,7 +124,9 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   }, [deleteModalId]);
 
   const filtered = useMemo(() => {
-    const byWeek = orders.filter((o) => orderMatchesActiveWeekdays(o.createdAt, activeWeekdays));
+    const byWeek = orders.filter((o) =>
+      orderMatchesActiveWeekdaysFromYmd(effectiveOrderDateYmd(o), activeWeekdays)
+    );
     let byOutlet = byWeek;
     if (isSuperAdmin) {
       if (outletFilter === 'direct') {
@@ -134,6 +145,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
         orderDateQueryMatches(o.createdAt, {
           stallCountBasisYmd: o.stallCountBasisYmd,
           stallCountCompletedAt: o.stallCountCompletedAt,
+          orderDateYmd: o.orderDateYmd,
         }, searchQuery.trim())
       ) {
         return true;
@@ -363,27 +375,59 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
               key={order.id}
               className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden"
             >
-              <div className="flex min-w-0 w-full flex-col sm:flex-row">
-              <button
-                type="button"
-                onClick={() => setExpandedId(open ? null : order.id)}
-                className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
+              <div
+                className={cn(
+                  'relative min-w-0 w-full flex flex-col sm:flex-row',
+                  isSuperAdmin && 'pr-14 sm:pr-16'
+                )}
               >
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isStallEditThis) setDeleteModalId(order.id);
+                    }}
+                    disabled={isStallEditThis}
+                    className="absolute top-3 right-3 z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-800/80 bg-zinc-900/80 text-rose-400/85 hover:border-rose-500/40 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:top-5 sm:right-5"
+                    title={
+                      isStallEditThis
+                        ? '請先儲存或放棄「調整盤點」'
+                        : '從本機完全移除此筆訂單（不須展開明細）'
+                    }
+                    aria-label="刪除本筆訂單"
+                  >
+                    <Trash2 className="size-4" strokeWidth={2} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(open ? null : order.id)}
+                  className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
+                >
                 <div className="flex items-start gap-4 min-w-0">
                   <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 flex-shrink-0">
-                    <Package size={22} className="text-amber-500/80" />
+                    <Package size={24} className="text-amber-500/80" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs text-zinc-500 font-mono truncate">{order.id}</p>
-                    <div className="mt-0.5">
-                      <p className="text-base font-semibold text-[#f5f2ed] break-words leading-tight">{resolveOrderStoreLabel(order)}</p>
-                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                    <p
+                      className="text-[calc(0.75rem*1.3)] font-mono text-zinc-400 mb-1.5 break-all leading-snug"
+                      title={order.id}
+                    >
+                      訂單編號 {order.id}
+                    </p>
+                    <div className="flex items-center gap-3 mb-1 flex-wrap">
+                      <h3 className="text-lg font-bold text-[#f5f2ed] break-words">
+                        {resolveOrderStoreLabel(order)}
+                      </h3>
                       <span
                         className={cn(
-                          'px-2 py-0.5 rounded text-[0.625rem] font-medium border',
+                          'px-2.5 py-0.5 rounded text-xs font-medium border',
                           order.status === '待出貨'
-                            ? 'bg-amber-600/10 text-amber-400 border-amber-600/25'
-                            : 'bg-emerald-600/10 text-emerald-400 border-emerald-600/25'
+                            ? 'bg-amber-600/10 text-amber-500 border-amber-600/20'
+                            : order.status === '已取消'
+                              ? 'bg-rose-600/10 text-rose-400 border-rose-600/20'
+                              : 'bg-emerald-600/10 text-emerald-400 border-emerald-600/20'
                         )}
                       >
                         {procurementStatusDisplay(order.status)}
@@ -392,18 +436,26 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         createdAtIso={order.createdAt}
                         stallCountCompletedAt={order.stallCountCompletedAt}
                       />
-                      </div>
                     </div>
-                    <p className="text-sm text-zinc-500 mt-1">建單 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}</p>
-                    {order.stallCountBasisYmd && order.stallCountCompletedAt && (
-                      <p className="text-xs text-amber-200/75 mt-1">
-                        盤點 {formatYmdWithWeekday(order.stallCountBasisYmd)} · 完成 {formatSlashDateTimeFromIso(order.stallCountCompletedAt)}
+                    <div className="text-sm text-zinc-500 min-w-0 max-w-full space-y-0.5 leading-relaxed">
+                      <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*1.3)]">
+                        訂單日期 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))}
+                      </p>
+                      <p className="break-words [overflow-wrap:anywhere] text-[calc(0.875rem*0.7*1.15)]">
+                        下單時間 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}
+                      </p>
+                      <p className="break-words [overflow-wrap:anywhere]">
+                        下單者：{displayOrderCreatedByLabel(order)} ・ 盤點者：
+                        {order.stallCountCompletedAt
+                          ? displayOrderStallCountCompletedByLabel(order)
+                          : '—'}
+                      </p>
+                    </div>
+                    {order.lastUpdatedByName && order.lastUpdatedByName !== order.createdByName && (
+                      <p className="text-[0.6875rem] text-zinc-600 mt-1.5 leading-relaxed">
+                        最後異動：{order.lastUpdatedByName}
                       </p>
                     )}
-                    <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
-                      身分：
-                      {order.actorRole === 'admin' ? '超級管理員' : order.actorRole === 'franchisee' ? '加盟主' : '店員'}
-                    </p>
                   </div>
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch sm:self-center">
@@ -416,20 +468,6 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                   {open ? <ChevronUp className="text-zinc-500 shrink-0" size={20} /> : <ChevronDown className="text-zinc-500 shrink-0" size={20} />}
                 </div>
               </button>
-              {isSuperAdmin && (
-                <div className="flex items-stretch border-t sm:border-t-0 sm:border-l border-zinc-800/80 bg-zinc-900/30">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteModalId(order.id)}
-                    className="flex w-full h-10 sm:h-auto sm:w-12 flex-row sm:flex-col items-center justify-center gap-1 sm:gap-0.5 text-rose-400/85 hover:text-rose-200 hover:bg-rose-950/40 active:bg-rose-950/55 transition-colors"
-                    title="刪除本筆訂單（不須展開明細）"
-                    aria-label="刪除本筆訂單"
-                  >
-                    <Trash2 className="size-[1.1rem] sm:size-5" strokeWidth={2} />
-                    <span className="text-[0.5625rem] sm:text-[0.625rem] font-medium text-zinc-500 leading-tight">刪除</span>
-                  </button>
-                </div>
-              )}
               </div>
               {open && (
                 <div className="border-t border-zinc-800 bg-zinc-900/50 px-4 sm:px-5 py-4 space-y-4">
@@ -531,25 +569,6 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                           </div>
                         </div>
                       )}
-                      <div>
-                        <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">叫貨品項</p>
-                        <ul className="space-y-2 text-sm">
-                          {order.lines.map((line) => (
-                            <li
-                              key={line.productId + line.name + line.qty}
-                              className="flex justify-between gap-2 text-zinc-300"
-                            >
-                              <span className="min-w-0">
-                                {line.name}{' '}
-                                <span className="text-zinc-500">× {line.qty} {line.unit}</span>
-                              </span>
-                              <span className="tabular-nums text-zinc-400 shrink-0">
-                                $ {(line.unitPrice * line.qty).toLocaleString()}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
                       <div className="rounded-2xl border border-zinc-800 overflow-hidden">
                         <div className="px-3 py-2 bg-zinc-900/80 border-b border-zinc-800 text-xs text-zinc-500">
                           盤點明細
