@@ -3,8 +3,10 @@ import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
 import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
 import { listSystemUsers } from './systemUsersStorage';
+import { getStoreCode3, normalizeStoreCode3Digits } from './storeCodeStorage';
 import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessionActorDisplayName';
 import { getSupplyItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
+import { initialFranchiseeStoreLabelForOrder } from './orderStoreLabel';
 
 /** 寫入訂單／押記時可存檔的顯示名（登入者姓名 → 帳號 → 依 userId 查目錄） */
 function persistableActorDisplayName(): string | undefined {
@@ -63,6 +65,11 @@ export type OrderHistoryEntry = {
   stallCountCompletedByUserId?: string;
   /** 最近一次異動本筆訂單之操作者姓名（狀態、揀貨、盤點快照修正等） */
   lastUpdatedByName?: string;
+  /**
+   * 批貨送出時所選「欲扣除餘貨的訂單」單號；空字串＝不指定（下單不扣盤點剩餘）。
+   * 未定義之舊單：盤點「植入訂單」仍併入前一日收攤剩餘（相容舊行為）。
+   */
+  procurementDeductionBasisOrderId?: string;
 };
 
 const STORAGE_KEY = 'dongshan_order_history_v1';
@@ -96,14 +103,42 @@ export type FranchiseManagementOrder = {
   stallCountCompletedByName?: string;
   stallCountCompletedByUserId?: string;
   lastUpdatedByName?: string;
+  /**
+   * 批貨送出時所選「欲扣除餘貨的訂單」單號；空字串＝不指定。舊單無此欄時盤點公式仍併入前日剩餘。
+   */
+  procurementDeductionBasisOrderId?: string;
 };
+
+/** 依目前登入身分決定訂單店號前綴：BOSS 用本機總部店號；加盟主／其員工用權限表之 orderStoreCode（未填則 001） */
+function resolveStoreCode3ForNewOrder(): string {
+  const ctx = getDataScopeContext();
+  const users = listSystemUsers();
+  if (ctx.role === 'admin' || ctx.role === 'unknown' || !ctx.userId) {
+    return getStoreCode3();
+  }
+  if (ctx.role === 'franchisee') {
+    const u = users.find((x) => x.id === ctx.userId);
+    const raw = u?.orderStoreCode?.trim();
+    return raw ? normalizeStoreCode3Digits(raw) : '001';
+  }
+  if (ctx.role === 'employee') {
+    const u = users.find((x) => x.id === ctx.userId);
+    if (u?.employeeOrgType === 'franchisee' && u.parentFranchiseeUserId) {
+      const parent = users.find((x) => x.id === u.parentFranchiseeUserId);
+      const raw = parent?.orderStoreCode?.trim();
+      return raw ? normalizeStoreCode3Digits(raw) : '001';
+    }
+    return getStoreCode3();
+  }
+  return getStoreCode3();
+}
 
 function newOrderId(): string {
   const ids = [
     ...loadFranchiseManagementOrders().map((o) => o.id),
     ...loadOrderHistory().map((o) => o.id),
   ];
-  return allocateOrderSerialId(ids);
+  return allocateOrderSerialId(ids, new Date(), resolveStoreCode3ForNewOrder());
 }
 
 function normalizeHistoryEntry(
@@ -404,8 +439,16 @@ function appendFranchiseManagementOrderInternal(params: {
   payableAmount?: number;
   selfSuppliedCostAmount?: number;
   orderDateYmd: string;
+  procurementDeductionBasisOrderId?: string;
 }): void {
-  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount, orderDateYmd } = params;
+  const {
+    lines,
+    totalAmount,
+    payableAmount,
+    selfSuppliedCostAmount,
+    orderDateYmd,
+    procurementDeductionBasisOrderId,
+  } = params;
   const itemCount = roundProcurementQty(lines.reduce((s, l) => s + l.qty, 0));
   const now = new Date().toISOString();
   const who = persistableActorDisplayName();
@@ -426,6 +469,9 @@ function appendFranchiseManagementOrderInternal(params: {
     actorUserId: getDataScopeContext().userId || undefined,
     createdByName: who,
     lastUpdatedByName: who,
+    ...(procurementDeductionBasisOrderId !== undefined
+      ? { procurementDeductionBasisOrderId }
+      : {}),
   };
   saveFranchiseManagementOrders([entry, ...loadFranchiseManagementOrders()]);
 }
@@ -631,8 +677,18 @@ export function appendProcurementOrderEntry(params: {
   actorRole: OrderActorRole;
   /** 訂單歸屬日 YYYY-MM-DD（與實際送出時間 createdAt 分開） */
   orderDateYmd: string;
+  /** 批貨頁選取之扣庫參考單號；傳空字串表示不指定 */
+  procurementDeductionBasisOrderId?: string;
 }): void {
-  const { lines, totalAmount, payableAmount, selfSuppliedCostAmount, actorRole, orderDateYmd } = params;
+  const {
+    lines,
+    totalAmount,
+    payableAmount,
+    selfSuppliedCostAmount,
+    actorRole,
+    orderDateYmd,
+    procurementDeductionBasisOrderId,
+  } = params;
   const ctx = getDataScopeContext();
   const bookYmd = normalizeOrderDateYmdInput(orderDateYmd);
   if (actorRole === 'admin') {
@@ -642,12 +698,16 @@ export function appendProcurementOrderEntry(params: {
       payableAmount: payableAmount ?? totalAmount,
       selfSuppliedCostAmount: selfSuppliedCostAmount ?? 0,
       orderDateYmd: bookYmd,
+      procurementDeductionBasisOrderId,
     });
     return;
   }
 
   const itemCount = roundProcurementQty(lines.reduce((s, l) => s + l.qty, 0));
-  const storeLabel = actorRole === 'franchisee' ? '加盟門市' : '門市帳號';
+  const storeLabel =
+    actorRole === 'franchisee'
+      ? initialFranchiseeStoreLabelForOrder(ctx.userId || undefined)
+      : '門市帳號';
 
   const now = new Date().toISOString();
   const who = persistableActorDisplayName();
@@ -669,6 +729,9 @@ export function appendProcurementOrderEntry(params: {
     actorUserId: ctx.userId || undefined,
     createdByName: who,
     lastUpdatedByName: who,
+    ...(procurementDeductionBasisOrderId !== undefined
+      ? { procurementDeductionBasisOrderId }
+      : {}),
   };
 
   const next = [entry, ...loadOrderHistory()];

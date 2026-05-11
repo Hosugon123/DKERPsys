@@ -362,7 +362,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         </div>
         <p className="text-[0.6875rem] sm:text-xs text-zinc-500 mt-2 leading-relaxed">
           加盟主實際帶出量＝<strong className="text-zinc-400 font-medium">前一日收攤剩餘</strong>
-          ＋<strong className="text-zinc-400 font-medium">本筆訂單叫貨量</strong>。按「植入訂單」會依此自動填寫各品項帶出（前一日剩餘優先採用已盤點之銷售紀錄）；亦可再手動微調。
+          ＋<strong className="text-zinc-400 font-medium">本筆訂單叫貨量</strong>（僅限叫貨時有選「欲扣除餘貨的訂單」才會併入前日剩餘；選「不指定」則前日剩餘視為 0）。按「植入訂單」會依此自動填寫各品項帶出（前一日剩餘優先採用已盤點之銷售紀錄）；亦可再手動微調。
         </p>
         {recomputeMsg && <p className="text-sm text-amber-200/90 mt-3">{recomputeMsg}</p>}
         {ordersInWindow.length === 0 ? (
@@ -481,9 +481,16 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         帶出試算明細（盤點日 {formatSlashYmdWithWeekdayFromYmd(dateStr)}）：前一日
                         {formatSlashYmdWithWeekdayFromYmd(importBreakdown.prevYmd)} 收攤剩餘 ＋ 本單叫貨 ＝
                         實際帶出
-                        <span className="text-zinc-600">
-                          （前日剩餘與銷售紀錄／盤點表讀法同「植入訂單」；按該鈕即寫入下列加總）
-                        </span>
+                        {!importBreakdown.chainsPriorStallRemain ? (
+                          <span className="text-amber-200/85">
+                            {' '}
+                            （本單建立時未指定扣庫參考單：前日收攤剩餘依系統以 0 計。）
+                          </span>
+                        ) : (
+                          <span className="text-zinc-600">
+                            （前日剩餘與銷售紀錄／盤點表讀法同「植入訂單」；按該鈕即寫入下列加總）
+                          </span>
+                        )}
                       </p>
                       {importBreakdown.rows.length === 0 ? (
                         <p className="px-3 py-3 text-xs text-zinc-500">

@@ -3,7 +3,8 @@
  */
 const KEY = 'dongshan_store_code_v1';
 
-function normalize3(raw: string | undefined | null): string {
+/** 訂單單號店號前綴：僅數字、最多 3 碼，左補 0；空則 001 */
+export function normalizeStoreCode3Digits(raw: string | undefined | null): string {
   const s = String(raw ?? '').replace(/\D/g, '').slice(0, 3);
   if (s.length === 0) return '001';
   return s.padStart(3, '0');
@@ -12,14 +13,14 @@ function normalize3(raw: string | undefined | null): string {
 export function getStoreCode3(): string {
   try {
     const v = localStorage.getItem(KEY);
-    return normalize3(v);
+    return normalizeStoreCode3Digits(v);
   } catch {
     return '001';
   }
 }
 
 export function setStoreCode3(code: string): void {
-  const n = normalize3(code);
+  const n = normalizeStoreCode3Digits(code);
   localStorage.setItem(KEY, n);
   window.dispatchEvent(new Event('storeCodeUpdated'));
 }

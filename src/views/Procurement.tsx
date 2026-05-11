@@ -380,6 +380,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         selfSuppliedCostAmount,
         actorRole: userRole,
         orderDateYmd: newOrderDateYmd,
+        procurementDeductionBasisOrderId: stallBasisOrderId,
       });
       setOrderSuccess(true);
       setCart({});

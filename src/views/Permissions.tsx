@@ -100,6 +100,7 @@ export default function Permissions({
   const [addPhone, setAddPhone] = useState('');
   const [addEmail, setAddEmail] = useState('');
   const [addStoreLabel, setAddStoreLabel] = useState('');
+  const [addOrderStoreCode, setAddOrderStoreCode] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [addSaving, setAddSaving] = useState(false);
 
@@ -110,6 +111,7 @@ export default function Permissions({
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editStoreLabel, setEditStoreLabel] = useState('');
+  const [editOrderStoreCode, setEditOrderStoreCode] = useState('');
   const [editStatus, setEditStatus] = useState<SystemUserStatus>('active');
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
@@ -194,6 +196,7 @@ export default function Permissions({
     setAddPhone('');
     setAddEmail('');
     setAddStoreLabel('');
+    setAddOrderStoreCode('');
     setAddLoginId('');
     setAddInitialPassword('');
     setIsAddModalOpen(true);
@@ -220,6 +223,7 @@ export default function Permissions({
     setEditPhone(u.phone);
     setEditEmail(u.email);
     setEditStoreLabel(u.storeLabel ?? '');
+    setEditOrderStoreCode(u.orderStoreCode ?? '');
     setEditStatus(u.status);
     setEditLoginId(u.loginId ?? '');
   };
@@ -247,6 +251,7 @@ export default function Permissions({
         parentFranchiseeUserId:
           addRole === 'employee' && addEmployeeOrgType === 'franchisee' ? addParentFranchiseeUserId : undefined,
         storeLabel: addStoreLabel.trim() || undefined,
+        orderStoreCode: addRole === 'franchisee' ? addOrderStoreCode : undefined,
       });
       setIsAddModalOpen(false);
       await refreshUsers();
@@ -277,6 +282,7 @@ export default function Permissions({
         parentFranchiseeUserId:
           editRole === 'employee' && editEmployeeOrgType === 'franchisee' ? editParentFranchiseeUserId : undefined,
         storeLabel: editStoreLabel,
+        ...(editRole === 'franchisee' ? { orderStoreCode: editOrderStoreCode } : {}),
       });
       closeEditModal();
       await refreshUsers();
@@ -398,8 +404,10 @@ export default function Permissions({
         <div className="flex items-start gap-2 min-w-0">
           <Hash className="shrink-0 text-amber-500/90 mt-0.5" size={20} />
           <div>
-            <p className="text-sm font-semibold text-amber-100/90">本機店號</p>
-            <p className="text-xs text-zinc-500 mt-0.5">訂單單號前綴（3 碼）。</p>
+            <p className="text-sm font-semibold text-amber-100/90">本機店號（總部／直營）</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              BOSS 建單與直營員工叫貨之訂單前綴（3 碼）。加盟店請於各<strong className="text-zinc-400">加盟主帳號</strong>內設定「訂單店號」。
+            </p>
           </div>
         </div>
         {isSuperAdmin ? (
@@ -666,6 +674,7 @@ export default function Permissions({
                         setAddEmployeeOrgType('hq');
                         setAddParentFranchiseeUserId('');
                       }
+                      if (nextRole !== 'franchisee') setAddOrderStoreCode('');
                     }}
                     className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors appearance-none"
                   >
@@ -684,6 +693,25 @@ export default function Permissions({
                   />
                 </div>
               </div>
+              {addRole === 'franchisee' && (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                    訂單店號（3 碼數字，選填）
+                  </label>
+                  <input
+                    type="text"
+                    value={addOrderStoreCode}
+                    onChange={(e) => setAddOrderStoreCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                    placeholder="例如：002（未填則預設 001）"
+                    maxLength={3}
+                    inputMode="numeric"
+                    className="w-full max-w-[12rem] bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 font-mono text-amber-200/90 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
+                  />
+                  <p className="mt-1 text-[0.6875rem] text-zinc-500 leading-relaxed">
+                    訂單編號格式：店號 ＋ 日期 ＋ 當日序號。加盟門市員工下單時沿用所屬加盟主此店號。
+                  </p>
+                </div>
+              )}
               {addRole === 'employee' && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                   <div>
@@ -819,6 +847,7 @@ export default function Permissions({
                         setEditEmployeeOrgType('hq');
                         setEditParentFranchiseeUserId('');
                       }
+                      if (nextRole !== 'franchisee') setEditOrderStoreCode('');
                     }}
                     className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors appearance-none disabled:cursor-not-allowed disabled:opacity-60"
                   >
@@ -885,6 +914,25 @@ export default function Permissions({
                   className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
+              {editRole === 'franchisee' && (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-1.5">
+                    訂單店號（3 碼數字，選填）
+                  </label>
+                  <input
+                    type="text"
+                    value={editOrderStoreCode}
+                    onChange={(e) => setEditOrderStoreCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                    placeholder="例如：002（未填則預設 001）"
+                    maxLength={3}
+                    inputMode="numeric"
+                    className="w-full max-w-[12rem] bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2.5 font-mono text-amber-200/90 text-[#f5f2ed] focus:outline-none focus:border-amber-500 transition-colors"
+                  />
+                  <p className="mt-1 text-[0.6875rem] text-zinc-500 leading-relaxed">
+                    訂單編號：店號 ＋ 日期 ＋ 當日第幾張。門市員工叫貨沿用此加盟主店號。
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-zinc-400 mb-1.5">聯絡電話</label>
                 <input

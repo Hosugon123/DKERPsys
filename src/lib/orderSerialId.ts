@@ -1,4 +1,4 @@
-import { getStoreCode3 } from './storeCodeStorage';
+import { getStoreCode3, normalizeStoreCode3Digits } from './storeCodeStorage';
 
 const SEQ_KEY = 'dongshan_order_seq_v1';
 
@@ -43,12 +43,17 @@ function maxSeqFromIds(store3: string, ymd8: string, existingOrderIds: string[])
 
 /**
  * 新訂單流水：店號(3) + 日期 YYYYMMDD(8) + 當日第 n 筆（1 起，不補 0）→ 如 001202604251
+ * @param storeCode3 指定店號（加盟主／其員工）；未傳則用本機「總部店號」{@link getStoreCode3}
  */
 export function allocateOrderSerialId(
   existingOrderIds: string[],
-  at: Date = new Date()
+  at: Date = new Date(),
+  storeCode3?: string
 ): string {
-  const store3 = getStoreCode3();
+  const store3 =
+    storeCode3 != null && String(storeCode3).trim() !== ''
+      ? normalizeStoreCode3Digits(storeCode3)
+      : getStoreCode3();
   const ymd8 = ymd8Local(at);
   const counterKey = `${store3}-${ymd8}`;
 

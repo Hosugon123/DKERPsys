@@ -123,6 +123,7 @@ export const orders = {
     selfSuppliedCostAmount?: number;
     actorRole: orderHistory.OrderActorRole;
     orderDateYmd: string;
+    procurementDeductionBasisOrderId?: string;
   }): Promise<void> {
     return withRemoteStorageWrite(() => {
       orderHistory.appendProcurementOrderEntry(params);

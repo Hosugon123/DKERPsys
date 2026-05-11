@@ -203,6 +203,16 @@ function findOrderByIdInStores(orderId: string) {
 }
 
 /**
+ * 是否於叫貨送出時選了「欲扣除餘貨的訂單」。
+ * 未選（`procurementDeductionBasisOrderId === ''`）時，盤點「植入訂單」不應併入前一日收攤剩餘。
+ * 舊單無此欄（undefined）則維持原公式（併入前日剩餘）。
+ */
+function procurementOrderChainsPriorStallRemain(o: { procurementDeductionBasisOrderId?: string }): boolean {
+  if (o.procurementDeductionBasisOrderId === undefined) return true;
+  return o.procurementDeductionBasisOrderId.trim() !== '';
+}
+
+/**
  * 依所選**單一訂單**帶出叫貨量、並以**盤點曆法日 (stallYmd)** 決定前一日收攤剩餘，重寫各品「帶出」。
  * 帶出[品] ＝ 盤點日之前一日**收攤剩餘** ＋ **該筆**訂單內同品訂量合計（多店則一單一盤、各選各單再植入／完成）。
  * @param opts.clearRemain 盤上「植入訂單」時設為 true，重算帶出後一併將**剩餘貨量**欄全數清零；揀貨／訂單同步重算則不傳。
@@ -224,8 +234,9 @@ export function recomputeStallOutForStallYmdAndOrder(
     sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
   }
   const prevYmd = addDaysYmd(stallYmd, -1);
-  /** 與批貨扣庫一致：前一日若已完成盤點，剩餘以銷售紀錄為準 */
-  const prevDay = loadDayForProcurement(prevYmd);
+  /** 與批貨扣庫一致：前一日若已完成盤點，剩餘以銷售紀錄為準（未選扣庫參考單之叫貨單則不併入） */
+  const prevDay =
+    procurementOrderChainsPriorStallRemain(o) ? loadDayForProcurement(prevYmd) : mergeDayWithCurrentCatalog(emptyDay());
   const fromStorage = loadDay(stallYmd);
   const base: DaySnapshot = editorSnap
     ? {
@@ -271,9 +282,10 @@ export type StallOutImportBreakdownRow = {
 export function computeStallOutImportBreakdown(
   stallYmd: string,
   orderId: string,
-): { prevYmd: string; rows: StallOutImportBreakdownRow[] } | null {
+): { prevYmd: string; rows: StallOutImportBreakdownRow[]; chainsPriorStallRemain: boolean } | null {
   const o = findOrderByIdInStores(orderId);
   if (!o || o.status === '已取消') return null;
+  const chainsPriorStallRemain = procurementOrderChainsPriorStallRemain(o);
   const sumBy: Record<string, number> = {};
   for (const l of o.lines) {
     const q = roundProcurementQty(Number(l.qty) || 0);
@@ -281,7 +293,7 @@ export function computeStallOutImportBreakdown(
     sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
   }
   const prevYmd = addDaysYmd(stallYmd, -1);
-  const prevDay = loadDayForProcurement(prevYmd);
+  const prevDay = chainsPriorStallRemain ? loadDayForProcurement(prevYmd) : mergeDayWithCurrentCatalog(emptyDay());
   const rows: StallOutImportBreakdownRow[] = [];
   for (const it of getAllSupplyItems()) {
     const item = getSupplyItem(it.id);
@@ -299,7 +311,7 @@ export function computeStallOutImportBreakdown(
     });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-  return { prevYmd, rows };
+  return { prevYmd, rows, chainsPriorStallRemain };
 }
 
 /**

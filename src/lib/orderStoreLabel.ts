@@ -24,6 +24,16 @@ function preferUserStoreLabel(user: SystemUser | undefined): string | null {
   return null;
 }
 
+/**
+ * 加盟主叫貨建單時寫入 `storeLabel`：直接存店鋪名稱，避免僅顯示「加盟門市」且舊單缺 actorUserId 時無法還原。
+ */
+export function initialFranchiseeStoreLabelForOrder(actorUserId: string | undefined): string {
+  const id = actorUserId?.trim();
+  if (!id) return '加盟門市';
+  const u = listSystemUsers().find((x) => x.id === id);
+  return preferUserStoreLabel(u) ?? '加盟門市';
+}
+
 export function resolveOrderStoreLabel(order: OrderLike): string {
   const fallback = normalizeLegacyStoreLabel(order.storeLabel);
   const users = listSystemUsers();
@@ -39,6 +49,13 @@ export function resolveOrderStoreLabel(order: OrderLike): string {
   }
 
   if (!order.actorUserId) {
+    if (
+      scopeFranchiseeUid &&
+      (order.actorRole === 'franchisee' || order.actorRole === 'employee')
+    ) {
+      const franchisee = users.find((u) => u.id === scopeFranchiseeUid);
+      return preferUserStoreLabel(franchisee) ?? fallback;
+    }
     return fallback;
   }
 

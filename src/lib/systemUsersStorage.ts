@@ -2,6 +2,7 @@
  * 權限設定／系統使用者目錄（本機 localStorage，結構預留對應 Cloud SQL `users` 表）。
  */
 import { SUPER_ADMIN_LOGIN_ID } from './authConstants';
+import { normalizeStoreCode3Digits } from './storeCodeStorage';
 
 const KEY = 'dongshan_system_users_v1';
 
@@ -28,6 +29,11 @@ export type SystemUser = {
   parentFranchiseeUserId?: string;
   /** 加盟主／直營門市顯示用（選填） */
   storeLabel?: string;
+  /**
+   * 加盟主專用：訂單單號前綴店號（3 位數字，與「店鋪名稱」不同）。
+   * 員工帳號下單時沿用所屬加盟主此欄位。
+   */
+  orderStoreCode?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -44,6 +50,8 @@ export type NewSystemUserInput = {
   employeeOrgType?: EmployeeOrgType;
   parentFranchiseeUserId?: string;
   storeLabel?: string;
+  /** 僅加盟主：訂單店號 3 碼 */
+  orderStoreCode?: string;
   status?: SystemUserStatus;
 };
 
@@ -59,6 +67,7 @@ export type SystemUserUpdate = Partial<
     | 'employeeOrgType'
     | 'parentFranchiseeUserId'
     | 'storeLabel'
+    | 'orderStoreCode'
   >
 >;
 
@@ -329,6 +338,9 @@ export function createSystemUser(input: NewSystemUserInput): SystemUser {
   );
   Object.assign(u, affiliation);
   if (input.storeLabel?.trim()) u.storeLabel = input.storeLabel.trim();
+  if (input.role === 'franchisee' && input.orderStoreCode != null && String(input.orderStoreCode).trim()) {
+    u.orderStoreCode = normalizeStoreCode3Digits(input.orderStoreCode);
+  }
   savePersisted([u, ...list]);
   return { ...u };
 }
@@ -390,9 +402,16 @@ export function updateSystemUser(id: string, patch: SystemUserUpdate): boolean {
     merged.employeeOrgType = affiliation.employeeOrgType;
     merged.parentFranchiseeUserId = affiliation.parentFranchiseeUserId;
   }
+  if (nextRole !== 'franchisee') {
+    delete merged.orderStoreCode;
+  }
   if (patch.storeLabel !== undefined) {
     const s = String(patch.storeLabel).trim();
     merged.storeLabel = s || undefined;
+  }
+  if (patch.orderStoreCode !== undefined && nextRole === 'franchisee') {
+    const s = String(patch.orderStoreCode).trim();
+    merged.orderStoreCode = s ? normalizeStoreCode3Digits(s) : undefined;
   }
   const next = [...list];
   next[i] = merged;
