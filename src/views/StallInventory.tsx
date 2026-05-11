@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Boxes,
   CheckCircle2,
-  CalendarDays,
   PackagePlus,
   ClipboardList,
   ChevronDown,
@@ -28,7 +27,7 @@ import {
   saveDay,
   recomputeStallOutForStallYmdAndOrder,
   computeStallOutImportBreakdown,
-  listProcurementOrdersInLastNDays,
+  listUncountedCompletedProcurementOrdersForSession,
   type DaySnapshot,
 } from '../lib/stallInventoryStorage';
 import { orders as ordersApi, withRemoteStorageWrite } from '../services/apiService';
@@ -69,7 +68,8 @@ function formatStallBumpedValue(n: number): string {
 export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
-  const [dateStr, setDateStr] = useState(() => ymd(new Date()));
+  const [nowIso, setNowIso] = useState(() => new Date().toISOString());
+  const dateStr = useMemo(() => ymd(new Date(nowIso)), [nowIso]);
   const [snap, setSnap] = useState<DaySnapshot>(() => loadDay(ymd(new Date())));
   const [saveFlash, setSaveFlash] = useState(false);
   const [stallListTick, setStallListTick] = useState(0);
@@ -79,7 +79,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const [viewOrderId, setViewOrderId] = useState<string>('');
   /** 訂單摘要＋帶出試算表預設收合，避免清單過長 */
   const [stallOrderDetailOpen, setStallOrderDetailOpen] = useState(false);
-  const ORDER_PICKER_SPAN = 35;
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      setNowIso(new Date().toISOString());
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, []);
 
   useEffect(() => {
     setSnap(loadDay(dateStr));
@@ -160,11 +165,11 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
 
   /** 供選單：盤點日起往前提煉內多店多單，依單一筆一盤 */
   const ordersInWindow = useMemo(
-    () => listProcurementOrdersInLastNDays(dateStr, ORDER_PICKER_SPAN),
-    [dateStr, stallListTick]
+    () => listUncountedCompletedProcurementOrdersForSession(),
+    [stallListTick]
   );
 
-  // 有訂單時預設選清單最前一筆；盤點日或單據變更時若目前選單已無則重選
+  // 有訂單時預設選清單最前一筆；單據變更時若目前選單已無則重選
   useEffect(() => {
     if (ordersInWindow.length === 0) {
       setViewOrderId('');
@@ -174,7 +179,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       if (prev && ordersInWindow.some((o) => o.id === prev)) return prev;
       return ordersInWindow[0]!.id;
     });
-  }, [dateStr, ordersInWindow]);
+  }, [ordersInWindow]);
 
   useEffect(() => {
     setStallOrderDetailOpen(false);
@@ -314,18 +319,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           )}
         </div>
         <div className="w-full sm:w-auto grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-2">
-          <label className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 rounded-xl border-2 border-zinc-700 bg-zinc-900/80 px-3 py-2.5 text-sm text-zinc-300">
-            <span className="inline-flex items-center gap-2 shrink-0">
-              <CalendarDays size={18} className="text-amber-500" />
-              <span>盤點日</span>
+          <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 rounded-xl border-2 border-zinc-700 bg-zinc-900/80 px-3 py-2.5 text-sm text-zinc-300">
+            <span className="text-zinc-400">盤點時間</span>
+            <span className="min-w-0 text-right sm:text-left text-amber-400 font-medium tabular-nums">
+              {formatSlashDateTimeFromIso(nowIso)}
             </span>
-            <input
-              type="date"
-              value={dateStr}
-              onChange={(e) => setDateStr(e.target.value)}
-              className="min-w-0 bg-transparent text-right sm:text-left text-amber-400 font-medium focus:outline-none [color-scheme:dark]"
-            />
-          </label>
+          </div>
           <button
             type="button"
             onClick={requestInventoryComplete}
@@ -360,10 +359,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             植入訂單
           </button>
         </div>
-        <p className="text-[0.6875rem] sm:text-xs text-zinc-500 mt-2 leading-relaxed">
-          加盟主實際帶出量＝<strong className="text-zinc-400 font-medium">前一日收攤剩餘</strong>
-          ＋<strong className="text-zinc-400 font-medium">本筆訂單叫貨量</strong>（僅限叫貨時有選「欲扣除餘貨的訂單」才會併入前日剩餘；選「不指定」則前日剩餘視為 0）。按「植入訂單」會依此自動填寫各品項帶出（前一日剩餘優先採用已盤點之銷售紀錄）；亦可再手動微調。
-        </p>
         {recomputeMsg && <p className="text-sm text-amber-200/90 mt-3">{recomputeMsg}</p>}
         {ordersInWindow.length === 0 ? (
           <p className="text-sm text-zinc-500 mt-3">
@@ -376,19 +371,21 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               <div className="relative mt-1.5 w-full">
                 <ChevronDown
                   size={18}
-                  className="pointer-events-none absolute left-3 top-1/2 z-[1] -translate-y-1/2 text-zinc-500"
+                  className="pointer-events-none absolute right-3 top-1/2 z-[1] -translate-y-1/2 text-zinc-500"
                   aria-hidden
                 />
                 <select
                   value={viewOrderId}
                   onChange={(e) => setViewOrderId(e.target.value)}
-                  className="w-full max-w-none cursor-pointer appearance-none rounded-lg border border-zinc-700 bg-zinc-950/80 py-2 pl-10 pr-3 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-800/50 box-border"
+                  className="w-full max-w-none cursor-pointer appearance-none rounded-lg border border-zinc-700 bg-zinc-950/80 py-2 pl-3 pr-10 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-800/50 box-border"
                 >
                   {ordersInWindow.map((o) => (
                     <option key={o.id} value={o.id}>
-                      訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ・ 下單 {formatTimeHmFromIso(o.createdAt)} ・ 建單{' '}
-                      {displayOrderCreatedByLabel(o)} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 16)}… ·{' '}
-                      {procurementStatusDisplay(o.status)}
+                      {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ·
+                      建單 {displayOrderCreatedByLabel(o)} ·
+                      {resolveOrderStoreLabel(o)} ·
+                      單號 {o.id} ·
+                      {procurementStatusDisplay(o.status)}／{o.stallCountCompletedAt ? '已盤點' : '未盤點'}
                     </option>
                   ))}
                 </select>
@@ -404,28 +401,15 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   aria-controls="stall-order-detail-panel"
                   aria-label={stallOrderDetailOpen ? '收合訂單明細' : '展開訂單明細'}
                 >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <ChevronDown
-                      size={18}
-                      className={cn(
-                        'shrink-0 text-zinc-500 transition-transform self-center',
-                        stallOrderDetailOpen && 'rotate-180'
-                      )}
-                      aria-hidden
-                    />
-                    <div className="min-w-0">
-                      <p className="text-[0.6875rem] text-zinc-500">訂單明細</p>
-                      <p
-                        className="text-sm text-zinc-200 truncate font-mono"
-                        title={`${formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(viewOrder))} · ${viewOrder.id}`}
-                      >
-                        {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(viewOrder))} · {viewOrder.id}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-amber-200/90 text-sm font-medium tabular-nums text-right self-center">
-                    $ {money(viewOrder.totalAmount)}
-                  </div>
+                  <p className="text-sm text-zinc-200">訂單明細</p>
+                  <ChevronDown
+                    size={18}
+                    className={cn(
+                      'shrink-0 text-zinc-500 transition-transform self-center',
+                      stallOrderDetailOpen && 'rotate-180'
+                    )}
+                    aria-hidden
+                  />
                 </button>
                 <div
                   id="stall-order-detail-panel"
@@ -577,7 +561,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         <div className="space-y-1.5">
           <p className="text-[0.6875rem] text-amber-300/80 uppercase tracking-wider">實收對帳</p>
           <div>
-            <label className="text-zinc-500 text-xs">盤點後實收（當日現金／收銀）</label>
+            <label className="text-zinc-500 text-xs">實收現金</label>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
               <input
                 type="text"
@@ -598,11 +582,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             </div>
           </div>
           <div className="mt-2 pt-2 border-t border-amber-900/40 space-y-2">
-            <p className="text-[10px] sm:text-[11px] text-zinc-500 leading-snug">
-              若實收與帳面不符，可登記<strong className="text-zinc-400">落差金額</strong>與<strong className="text-zinc-400">原因</strong>（損耗、請客、試吃等）；完成盤點後會寫入銷售紀錄。
-            </p>
             <div>
-              <label className="text-zinc-500 text-[0.6875rem]">落差金額（自填）</label>
+              <label className="text-zinc-500 text-[0.6875rem]">認列金額</label>
               <input
                 type="text"
                 inputMode="decimal"

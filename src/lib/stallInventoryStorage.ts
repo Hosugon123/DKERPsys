@@ -4,8 +4,8 @@ import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
   listOrdersWithStallCountCompleted,
-  orderMatchesSessionScope,
   effectiveOrderDateYmd,
+  resolveOrderDataScopeId,
   type OrderHistoryEntry,
 } from './orderHistoryStorage';
 import { getDataScopeContext } from './dataScope';
@@ -374,10 +374,9 @@ function toStallOrderRow(
   };
 }
 
-/** 盤點／植入訂單選單：非管理員僅保留目前資料範圍可讀取之叫貨單 */
+/** 盤點／植入訂單選單：僅保留「目前帳號所屬 scope」之訂單（不因管理員身分放寬）。 */
 function filterStallOrderRowsForSessionScope(rows: StallOrderForDateRow[]): StallOrderForDateRow[] {
   const ctx = getDataScopeContext();
-  if (ctx.isAdmin) return rows;
   const metaById = new Map<string, Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>>();
   for (const o of loadFranchiseManagementOrders()) {
     metaById.set(o.id, { scopeId: o.scopeId, actorUserId: o.actorUserId });
@@ -387,7 +386,9 @@ function filterStallOrderRowsForSessionScope(rows: StallOrderForDateRow[]): Stal
   }
   return rows.filter((r) => {
     const meta = metaById.get(r.id);
-    return meta ? orderMatchesSessionScope(meta) : false;
+    if (!meta) return false;
+    const orderScope = resolveOrderDataScopeId(meta);
+    return Boolean(orderScope && orderScope === ctx.scopeId);
   });
 }
 
@@ -432,6 +433,27 @@ export function listProcurementOrdersInLastNDays(anchorYmd: string, daySpan: num
   for (const o of loadOrderHistory()) {
     if (o.status !== '已完成') continue;
     if (!inWindow(o)) continue;
+    out.push(toStallOrderRow(o));
+  }
+  return filterStallOrderRowsForSessionScope(out).sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+  );
+}
+
+/**
+ * 攤上盤點選單：目前登入身分可讀取範圍內，「已出貨且尚未盤點完成」之全部訂單（不限訂單日）。
+ * 用於同店多單逐筆完成盤點，不再受盤點日區間限制。
+ */
+export function listUncountedCompletedProcurementOrdersForSession(): StallOrderForDateRow[] {
+  const out: StallOrderForDateRow[] = [];
+  for (const o of loadFranchiseManagementOrders()) {
+    if (o.status !== '已完成') continue;
+    if (o.stallCountCompletedAt?.trim()) continue;
+    out.push(toStallOrderRow(o));
+  }
+  for (const o of loadOrderHistory()) {
+    if (o.status !== '已完成') continue;
+    if (o.stallCountCompletedAt?.trim()) continue;
     out.push(toStallOrderRow(o));
   }
   return filterStallOrderRowsForSessionScope(out).sort((a, b) =>

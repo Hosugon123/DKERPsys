@@ -20,6 +20,7 @@ export const DONGSHAN_EXPORT_STORAGE_KEYS = [
   'dongshan_procurement_favorites_v1',
   'dongshan_procurement_stall_basis_ymd',
   'dongshan_procurement_stall_basis_order_id',
+  'dongshan_dashboard_revenue_notes_v1',
   'dongshan_sidebar_main_nav_order_v1_admin',
   'dongshan_sidebar_main_nav_order_v1_franchisee',
   'dongshan_sidebar_main_nav_order_v1_employee',
