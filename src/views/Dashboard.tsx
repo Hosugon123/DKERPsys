@@ -50,16 +50,17 @@ import {
   type OrderHistoryEntry,
   type OrderActorRole,
 } from '../lib/orderHistoryStorage';
-import { formatSlashDateTimeFromIso } from '../lib/dateDisplay';
-import {
-  DASHBOARD_REVENUE_NOTES_UPDATED_EVENT,
-  getWeekRevenueNote,
-  setWeekRevenueNote,
-} from '../lib/dashboardRevenueNotesStorage';
 import { getWeekdayBaselineTarget, setWeekdayBaselineTarget } from '../lib/dashboardWeekdayBaselineStorage';
-import { buildDirectStallEconomicsByYmd, type DirectStallDayEconomics } from '../lib/directStallDayEconomics';
+import {
+  buildDirectStallEconomicsByYmd,
+  buildFranchiseStallEconomicsByYmd,
+  type DirectStallDayEconomics,
+} from '../lib/directStallDayEconomics';
+import { getDataScopeContext } from '../lib/dataScope';
+import { getSalesRecord, patchSalesRecordRevenueGapReason } from '../lib/salesRecordStorage';
 
 const HQ_STALL_VIEW = 'headquarter' as const;
+const FRANCHISE_STALL_VIEW = 'franchisee' as const;
 
 const EXPENSE_PIE_COLORS = ['#d97706', '#6366f1', '#10b981', '#f43f5e', '#a855f7', '#06b6d4', '#eab308', '#ec4899', '#84cc16', '#f97316'];
 
@@ -246,6 +247,34 @@ function moneySignedInt(n: number) {
   return `${n < 0 ? '−' : '+'}$${abs}`;
 }
 
+function DirectStallGapReasonCell({ ymd, syncKey }: { ymd: string; syncKey: number }) {
+  const snap = useMemo(() => getSalesRecord(ymd), [ymd, syncKey]);
+  const stored = snap?.revenueGapReason ?? '';
+  const [val, setVal] = useState(stored);
+  useEffect(() => {
+    setVal(stored);
+  }, [stored]);
+  const amountLine = snap?.revenueGapAmount?.trim();
+  return (
+    <div className="flex min-w-[10rem] max-w-[18rem] flex-col gap-1">
+      <input
+        type="text"
+        aria-label={`${ymd} 備註`}
+        className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-200 focus:border-amber-600/50 focus:outline-none focus:ring-1 focus:ring-amber-600/30"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => {
+          if (val.trim() === stored.trim()) return;
+          patchSalesRecordRevenueGapReason(ymd, val);
+        }}
+      />
+      {amountLine ? (
+        <span className="text-[10px] leading-snug text-zinc-600">登錄落差 {amountLine}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function StallGapDashboardSection({
   title,
   summary,
@@ -430,12 +459,7 @@ export default function Dashboard({
     kind: 'preset',
     key: 'month',
   });
-  const [selectedWeekStartYmd, setSelectedWeekStartYmd] = useState(() =>
-    startOfWeekMondayYmd(toYmd(new Date())),
-  );
-  const [weekHighReasonDraft, setWeekHighReasonDraft] = useState('');
-  const [weekLowReasonDraft, setWeekLowReasonDraft] = useState('');
-  const [weekNoteSavedAt, setWeekNoteSavedAt] = useState('');
+  const [selectedWeekStartYmd] = useState(() => startOfWeekMondayYmd(toYmd(new Date())));
   /** 對照「本週／上週／上上週…」之同名星期：0＝週一 … 6＝週日 */
   const [weekdayChainFocusIdx, setWeekdayChainFocusIdx] = useState(0);
   /** 同名星期「業績打底」編輯草稿（localStorage 鍵為 weekdayChainFocusIdx） */
@@ -455,18 +479,6 @@ export default function Dashboard({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [franchisePickerOpen]);
-
-  useEffect(() => {
-    const sync = () => {
-      const note = getWeekRevenueNote(selectedWeekStartYmd);
-      setWeekHighReasonDraft(note.highReason);
-      setWeekLowReasonDraft(note.lowReason);
-      setWeekNoteSavedAt(note.updatedAt);
-    };
-    sync();
-    window.addEventListener(DASHBOARD_REVENUE_NOTES_UPDATED_EVENT, sync);
-    return () => window.removeEventListener(DASHBOARD_REVENUE_NOTES_UPDATED_EVENT, sync);
-  }, [selectedWeekStartYmd]);
 
   useEffect(() => {
     const v = getWeekdayBaselineTarget(weekdayChainFocusIdx);
@@ -571,11 +583,34 @@ export default function Dashboard({
     [userRole, viewAsFranchisee],
   );
 
-  /** 總部直營：每日預估／餘貨／應收／實收／落差（供銷售數據統整區） */
-  const directStallEconomicsByYmd = useMemo(
-    () => buildDirectStallEconomicsByYmd(effectiveOrders, HQ_STALL_VIEW),
-    [effectiveOrders, orderTick],
-  );
+  /** 「銷售數據」區：加盟視角為該店加盟主 userId；總部直營為 null */
+  const franchiseStallSalesBoardOwnerUserId = useMemo(() => {
+    if (!franchiseOperatingExpenseModel) return null;
+    if (viewAsFranchisee) return viewAsFranchisee.userId;
+    const ctx = getDataScopeContext();
+    const m = ctx.scopeId.match(/^scope:franchisee:(.+)$/);
+    return m?.[1]?.trim() || null;
+  }, [franchiseOperatingExpenseModel, viewAsFranchisee]);
+
+  /** 總部直營：每日經濟指標（加盟視角略過以降低不必要計算） */
+  const hqDirectStallEconomicsByYmd = useMemo(() => {
+    if (franchiseOperatingExpenseModel) return new Map<string, DirectStallDayEconomics>();
+    return buildDirectStallEconomicsByYmd(effectiveOrders, HQ_STALL_VIEW);
+  }, [effectiveOrders, franchiseOperatingExpenseModel, orderTick]);
+
+  /** 指定加盟店：已完成盤點之訂單＋孤立銷售紀錄（加盟零售價視角） */
+  const franchiseStoreEconomicsByYmd = useMemo(() => {
+    if (!franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
+    return buildFranchiseStallEconomicsByYmd(
+      effectiveOrders,
+      FRANCHISE_STALL_VIEW,
+      franchiseStallSalesBoardOwnerUserId,
+    );
+  }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick]);
+
+  const stallSalesEconomicsByYmd = franchiseStallSalesBoardOwnerUserId
+    ? franchiseStoreEconomicsByYmd
+    : hqDirectStallEconomicsByYmd;
 
   type StallWeekdayChainRow = {
     periodLabel: string;
@@ -590,8 +625,8 @@ export default function Dashboard({
   );
 
   const focusDayEconomics = useMemo(() => {
-    return directStallEconomicsByYmd.get(calendarWeekFocusYmd) ?? null;
-  }, [directStallEconomicsByYmd, calendarWeekFocusYmd]);
+    return stallSalesEconomicsByYmd.get(calendarWeekFocusYmd) ?? null;
+  }, [stallSalesEconomicsByYmd, calendarWeekFocusYmd]);
 
   const stallWeekdayChainRows = useMemo((): StallWeekdayChainRow[] => {
     const d = weekdayChainFocusIdx;
@@ -602,16 +637,16 @@ export default function Dashboard({
         periodLabel: weekdayChainPeriodLabel(k, dayShort),
         ymd,
         weeksBack: k,
-        eco: directStallEconomicsByYmd.get(ymd) ?? null,
+        eco: stallSalesEconomicsByYmd.get(ymd) ?? null,
       };
     });
-  }, [directStallEconomicsByYmd, selectedWeekStartYmd, weekdayChainFocusIdx]);
+  }, [stallSalesEconomicsByYmd, selectedWeekStartYmd, weekdayChainFocusIdx]);
 
   const sameWeekdayActualStats = useMemo(() => {
     const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
     const entries: { ymd: string; actual: number }[] = [];
-    for (const [ymd, row] of directStallEconomicsByYmd.entries()) {
+    for (const [ymd, row] of stallSalesEconomicsByYmd.entries()) {
       if (mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
       if (ymd > todayStr) continue;
       if (row.actual === null) continue;
@@ -631,21 +666,12 @@ export default function Dashboard({
     const max = entries.reduce((b, c) => (c.actual > b.actual ? c : b), entries[0]!);
     const min = entries.reduce((b, c) => (c.actual < b.actual ? c : b), entries[0]!);
     return { dayCount: entries.length, sum, avg, max, min };
-  }, [directStallEconomicsByYmd, weekdayChainFocusIdx]);
+  }, [stallSalesEconomicsByYmd, weekdayChainFocusIdx]);
 
-  const chainActualHighest = useMemo(() => {
-    const rows = stallWeekdayChainRows.filter((r) => r.eco?.actual !== null && r.eco !== null);
-    if (rows.length === 0) return null;
-    return rows.reduce((b, r) => ((r.eco!.actual as number) > (b.eco!.actual as number) ? r : b), rows[0]!);
-  }, [stallWeekdayChainRows]);
-
-  const chainActualLowest = useMemo(() => {
-    const rows = stallWeekdayChainRows.filter((r) => r.eco?.actual !== null && r.eco !== null);
-    if (rows.length === 0) return null;
-    return rows.reduce((b, r) => ((r.eco!.actual as number) < (b.eco!.actual as number) ? r : b), rows[0]!);
-  }, [stallWeekdayChainRows]);
-
-  const showDirectStallSalesBoard = !franchiseOperatingExpenseModel && !viewAsFranchisee;
+  const showFranchiseStallSalesBoard =
+    franchiseOperatingExpenseModel && franchiseStallSalesBoardOwnerUserId != null;
+  const showStallSalesBoard =
+    (!franchiseOperatingExpenseModel && !viewAsFranchisee) || showFranchiseStallSalesBoard;
 
   const saveWeekdayBaseline = useCallback(() => {
     const n = Number(String(weekdayBaselineDraft).replace(/,/g, '').trim());
@@ -897,16 +923,6 @@ export default function Dashboard({
     );
   }, [dashboardOrders, realIsAdmin, summaryRange]);
 
-  const saveWeekRevenueReasons = useCallback(() => {
-    const note = setWeekRevenueNote(selectedWeekStartYmd, {
-      highReason: weekHighReasonDraft.trim(),
-      lowReason: weekLowReasonDraft.trim(),
-    });
-    setWeekHighReasonDraft(note.highReason);
-    setWeekLowReasonDraft(note.lowReason);
-    setWeekNoteSavedAt(note.updatedAt);
-  }, [selectedWeekStartYmd, weekHighReasonDraft, weekLowReasonDraft]);
-
   return (
     <div className="space-y-6">
       {viewAsFranchisee && (
@@ -1107,312 +1123,6 @@ export default function Dashboard({
         )}
       </div>
 
-      {showDirectStallSalesBoard ? (
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
-        <details className="group" open>
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-5 text-left [&::-webkit-details-marker]:hidden">
-            <div className="min-w-0 flex-1">
-              <h3 className="text-base sm:text-lg font-medium text-zinc-100">銷售數據統整（同名星期・直營攤車）</h3>
-              <p className="text-xs text-zinc-500 mt-1">
-                參考試算表：以<strong className="text-amber-200/90">預估帶出 − 餘貨</strong>得<strong className="text-rose-200/85">應有營業額</strong>，再與<strong className="text-emerald-200/85">盤點後實收</strong>對帳。
-                <span className="block mt-1 text-zinc-400">
-                  曆法週：週一起 {ymdSlash(selectedWeekStartYmd)}～{ymdSlash(addDaysYmd(selectedWeekStartYmd, 6))}
-                  {' · '}
-                  檢視<strong className="text-amber-200/90">{WEEKDAY_TOGGLE_LABELS[weekdayChainFocusIdx]}</strong>
-                  （每周同一天對照；表格 {WEEKDAY_CHAIN_ROW_COUNT} 列）。
-                </span>
-                <span className="text-zinc-600 ml-1">（點此收折/展開）</span>
-              </p>
-            </div>
-            <ChevronDown
-              className="h-5 w-5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180"
-              aria-hidden
-            />
-          </summary>
-          <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
-            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-              <div className="flex flex-col gap-3 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWeekStartYmd((prev) => addDaysYmd(prev, -7))}
-                    className="px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 text-xs hover:text-zinc-100"
-                  >
-                    上一週
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const today = toYmd(new Date());
-                      setSelectedWeekStartYmd(startOfWeekMondayYmd(today));
-                      setWeekdayChainFocusIdx(mondayFirstWeekdayIndexFromYmd(today));
-                    }}
-                    className="px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 text-xs hover:text-zinc-100"
-                  >
-                    本週
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWeekStartYmd((prev) => addDaysYmd(prev, 7))}
-                    className="px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 text-xs hover:text-zinc-100"
-                  >
-                    下一週
-                  </button>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] text-zinc-500 uppercase tracking-wider">地名／行程對應星期（單選）</span>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => setWeekdayChainFocusIdx(idx)}
-                        className={cn(
-                          'px-2.5 py-1 rounded-md text-xs border transition-colors min-h-[32px]',
-                          weekdayChainFocusIdx === idx
-                            ? 'bg-amber-600/25 border-amber-500/45 text-amber-200'
-                            : 'bg-zinc-950 border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600',
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <p className="text-[11px] text-zinc-500 leading-relaxed max-w-xl lg:text-right lg:self-end">
-                選取日期：<span className="tabular-nums text-zinc-300">{ymdSlash(calendarWeekFocusYmd)}</span>
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-              <div className="xl:col-span-8 space-y-4 min-w-0">
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                  <div className="rounded-xl border border-emerald-900/35 bg-emerald-950/15 p-3">
-                    <p className="text-[11px] text-emerald-200/75">預估金額</p>
-                    <p className="text-lg font-light tabular-nums text-emerald-300 mt-1">
-                      {focusDayEconomics ? moneyTW(focusDayEconomics.estTotal) : '—'}
-                    </p>
-                    <p className="text-[10px] text-zinc-600 mt-1">帶出貨量×單價</p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-900/35 bg-emerald-950/15 p-3">
-                    <p className="text-[11px] text-emerald-200/75">剩餘貨品金額</p>
-                    <p className="text-lg font-light tabular-nums text-emerald-300 mt-1">
-                      {focusDayEconomics ? moneyTW(focusDayEconomics.remainValue) : '—'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-rose-900/35 bg-rose-950/15 p-3">
-                    <p className="text-[11px] text-rose-200/75">應有營業額</p>
-                    <p className="text-lg font-light tabular-nums text-rose-200 mt-1">
-                      {focusDayEconomics ? moneyTW(focusDayEconomics.expectedRetail) : '—'}
-                    </p>
-                    <p className="text-[10px] text-zinc-600 mt-1">預估 − 餘貨</p>
-                  </div>
-                  <div className="rounded-xl border border-amber-900/35 bg-amber-950/15 p-3">
-                    <p className="text-[11px] text-amber-200/75">盤點後營收</p>
-                    <p className="text-lg font-light tabular-nums text-amber-200 mt-1">
-                      {focusDayEconomics?.actual !== null && focusDayEconomics?.actual !== undefined
-                        ? moneyTW(focusDayEconomics.actual)
-                        : '—'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-3 sm:col-span-2 lg:col-span-1">
-                    <p className="text-[11px] text-zinc-400">落差金額</p>
-                    <p
-                      className={cn(
-                        'text-lg font-light tabular-nums mt-1',
-                        focusDayEconomics?.gap == null
-                          ? 'text-zinc-500'
-                          : focusDayEconomics.gap > 0
-                            ? 'text-emerald-300'
-                            : focusDayEconomics.gap < 0
-                              ? 'text-rose-300'
-                              : 'text-zinc-400',
-                      )}
-                    >
-                      {focusDayEconomics?.gap == null ? '—' : moneySignedInt(focusDayEconomics.gap)}
-                    </p>
-                    <p className="text-[10px] text-zinc-600 mt-1">實收 − 應有</p>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto rounded-lg border border-zinc-800">
-                  <table className="w-full min-w-[920px] text-left text-sm">
-                    <thead className="bg-zinc-900/90 border-b border-zinc-800 text-zinc-500 text-xs">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">週期</th>
-                        <th className="px-3 py-2 font-medium">日期</th>
-                        <th className="px-3 py-2 font-medium text-right">應收</th>
-                        <th className="px-3 py-2 font-medium text-right">實收</th>
-                        <th className="px-3 py-2 font-medium text-right">落差</th>
-                        <th className="px-3 py-2 font-medium min-w-[8rem]">備註</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800/70">
-                      {stallWeekdayChainRows.map((row) => {
-                        const eco = row.eco;
-                        const isFocus = row.ymd === calendarWeekFocusYmd;
-                        return (
-                          <tr
-                            key={row.ymd + String(row.weeksBack)}
-                            className={cn(
-                              'text-zinc-300 hover:bg-white/[0.02]',
-                              isFocus && 'bg-amber-950/30',
-                            )}
-                          >
-                            <td className="px-3 py-2 whitespace-nowrap">{row.periodLabel}</td>
-                            <td className="px-3 py-2 tabular-nums text-zinc-400">{ymdSlash(row.ymd)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-rose-200/90">
-                              {eco ? moneyTW(eco.expectedRetail) : '—'}
-                            </td>
-                            <td className="px-3 py-2 text-right tabular-nums text-emerald-200/90">
-                              {eco?.actual !== null && eco?.actual !== undefined ? moneyTW(eco.actual) : '—'}
-                            </td>
-                            <td
-                              className={cn(
-                                'px-3 py-2 text-right tabular-nums',
-                                eco?.gap == null
-                                  ? 'text-zinc-600'
-                                  : eco.gap > 0
-                                    ? 'text-emerald-300/90'
-                                    : eco.gap < 0
-                                      ? 'text-rose-300/90'
-                                      : 'text-zinc-500',
-                              )}
-                            >
-                              {eco?.gap == null ? '—' : moneySignedInt(eco.gap)}
-                            </td>
-                            <td className="px-3 py-2 text-xs text-zinc-500 max-w-[14rem] truncate" title={eco?.note ?? ''}>
-                              {eco?.note?.trim() ? eco.note : '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
-                    <p className="text-xs text-zinc-500">
-                      對照列實收最高：
-                      {chainActualHighest
-                        ? `${chainActualHighest.periodLabel}（${ymdSlash(chainActualHighest.ymd)}，${moneyTW(chainActualHighest.eco!.actual as number)}）`
-                        : '—'}
-                    </p>
-                    <label className="block mt-2 text-xs text-zinc-400">最高原因備註</label>
-                    <textarea
-                      value={weekHighReasonDraft}
-                      onChange={(e) => setWeekHighReasonDraft(e.target.value)}
-                      rows={2}
-                      className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-600/60"
-                      placeholder="例：連假、平台曝光、團購"
-                    />
-                  </div>
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
-                    <p className="text-xs text-zinc-500">
-                      對照列實收最低：
-                      {chainActualLowest
-                        ? `${chainActualLowest.periodLabel}（${ymdSlash(chainActualLowest.ymd)}，${moneyTW(chainActualLowest.eco!.actual as number)}）`
-                        : '—'}
-                    </p>
-                    <label className="block mt-2 text-xs text-zinc-400">最低原因備註</label>
-                    <textarea
-                      value={weekLowReasonDraft}
-                      onChange={(e) => setWeekLowReasonDraft(e.target.value)}
-                      rows={2}
-                      className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-600/60"
-                      placeholder="例：下雨、公休、試吃折損"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[11px] text-zinc-500">
-                    歷史同名星期（已登錄實收）：{sameWeekdayActualStats.dayCount} 日
-                    {weekNoteSavedAt ? ` ・備註上次儲存：${formatSlashDateTimeFromIso(weekNoteSavedAt)}` : ''}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={saveWeekRevenueReasons}
-                    className="px-3.5 py-1.5 rounded-md bg-amber-600 text-zinc-950 text-xs font-semibold hover:bg-amber-500"
-                  >
-                    儲存高低原因備註
-                  </button>
-                </div>
-              </div>
-
-              <div className="xl:col-span-4 rounded-xl border border-sky-900/35 bg-sky-950/15 p-4 space-y-3">
-                <p className="text-xs font-medium text-sky-200/90">同名星期・歷史實收統計</p>
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  僅統計<strong className="text-zinc-400">截至今日</strong>且<strong className="text-zinc-400">已填盤點後實收</strong>之日。
-                </p>
-                <div className="space-y-2.5 text-sm">
-                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
-                    <span className="text-zinc-500">總營收（實收合計）</span>
-                    <span className="tabular-nums text-sky-100">{moneyTW(sameWeekdayActualStats.sum)}</span>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
-                    <span className="text-zinc-500">平均營收</span>
-                    <span className="tabular-nums text-zinc-100">{moneyTW(sameWeekdayActualStats.avg)}</span>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
-                    <span className="text-zinc-500">最高營收</span>
-                    <span className="text-right">
-                      <span className="tabular-nums text-emerald-300 block">
-                        {sameWeekdayActualStats.max ? moneyTW(sameWeekdayActualStats.max.actual) : '—'}
-                      </span>
-                      <span className="text-[11px] text-zinc-600 tabular-nums">
-                        {sameWeekdayActualStats.max ? ymdSlash(sameWeekdayActualStats.max.ymd) : ''}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
-                    <span className="text-zinc-500">最低營收</span>
-                    <span className="text-right">
-                      <span className="tabular-nums text-rose-300 block">
-                        {sameWeekdayActualStats.min ? moneyTW(sameWeekdayActualStats.min.actual) : '—'}
-                      </span>
-                      <span className="text-[11px] text-zinc-600 tabular-nums">
-                        {sameWeekdayActualStats.min ? ymdSlash(sameWeekdayActualStats.min.ymd) : ''}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="pt-1 space-y-2">
-                    <div className="flex justify-between gap-2 items-baseline">
-                      <span className="text-zinc-500 shrink-0">業績打底</span>
-                      <span className="tabular-nums text-amber-200/90 text-xs">
-                        已存：
-                        {getWeekdayBaselineTarget(weekdayChainFocusIdx) !== undefined
-                          ? moneyTW(getWeekdayBaselineTarget(weekdayChainFocusIdx)!)
-                          : '未設定'}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-end gap-2">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={weekdayBaselineDraft}
-                        onChange={(e) => setWeekdayBaselineDraft(e.target.value)}
-                        placeholder="目標金額"
-                        className="min-w-[8rem] flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-sm text-zinc-200 tabular-nums focus:outline-none focus:border-sky-600/50"
-                      />
-                      <button
-                        type="button"
-                        onClick={saveWeekdayBaseline}
-                        className="px-3 py-2 rounded-lg border border-sky-700/80 bg-sky-950/40 text-sky-200 text-xs hover:bg-sky-900/40"
-                      >
-                        儲存打底
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </details>
-      </div>
-      ) : null}
 
       {!isAdmin && nonAdminStallGap && (
         <StallGapDashboardSection
@@ -1522,6 +1232,225 @@ export default function Dashboard({
           </div>
         </div>
       )}
+
+      {showStallSalesBoard ? (
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
+        <details className="group" open>
+          <summary
+            className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-5 text-left [&::-webkit-details-marker]:hidden"
+            onClick={(e) => {
+              const summary = e.currentTarget;
+              const detailsEl = summary.parentElement;
+              if (!detailsEl || detailsEl.tagName !== 'DETAILS') return;
+              e.preventDefault();
+              (detailsEl as HTMLDetailsElement).open = !(detailsEl as HTMLDetailsElement).open;
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base sm:text-lg font-medium text-zinc-100">
+                {showFranchiseStallSalesBoard ? '本店銷售數據' : '直營店銷售數據'}
+              </h3>
+            </div>
+            <ChevronDown
+              className="h-5 w-5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+          <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setWeekdayChainFocusIdx(idx)}
+                    className={cn(
+                      'px-2.5 py-1 rounded-md text-xs border transition-colors min-h-[32px]',
+                      weekdayChainFocusIdx === idx
+                        ? 'bg-amber-600/25 border-amber-500/45 text-amber-200'
+                        : 'bg-zinc-950 border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-relaxed max-w-xl lg:text-right lg:self-end">
+                選取日期：<span className="tabular-nums text-zinc-300">{ymdSlash(calendarWeekFocusYmd)}</span>
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+              <div className="xl:col-span-8 space-y-4 min-w-0">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-rose-900/35 bg-rose-950/15 p-3">
+                    <p className="text-[11px] text-rose-200/75">應有營業額</p>
+                    <p className="text-lg font-light tabular-nums text-rose-200 mt-1">
+                      {focusDayEconomics ? moneyTW(focusDayEconomics.expectedRetail) : '—'}
+                    </p>
+                    <p className="text-[10px] text-zinc-600 mt-1">零售推算售出</p>
+                  </div>
+                  <div className="rounded-xl border border-amber-900/35 bg-amber-950/15 p-3">
+                    <p className="text-[11px] text-amber-200/75">盤點後營收</p>
+                    <p className="text-lg font-light tabular-nums text-amber-200 mt-1">
+                      {focusDayEconomics?.actual !== null && focusDayEconomics?.actual !== undefined
+                        ? moneyTW(focusDayEconomics.actual)
+                        : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-3">
+                    <p className="text-[11px] text-zinc-400">落差金額</p>
+                    <p
+                      className={cn(
+                        'text-lg font-light tabular-nums mt-1',
+                        focusDayEconomics?.gap == null
+                          ? 'text-zinc-500'
+                          : focusDayEconomics.gap > 0
+                            ? 'text-emerald-300'
+                            : focusDayEconomics.gap < 0
+                              ? 'text-rose-300'
+                              : 'text-zinc-400',
+                      )}
+                    >
+                      {focusDayEconomics?.gap == null ? '—' : moneySignedInt(focusDayEconomics.gap)}
+                    </p>
+                    <p className="text-[10px] text-zinc-600 mt-1">實收 − 應有</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                  <table className="w-full min-w-[920px] text-left text-sm">
+                    <thead className="bg-zinc-900/90 border-b border-zinc-800 text-zinc-500 text-xs">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">週期</th>
+                        <th className="px-3 py-2 font-medium">日期</th>
+                        <th className="px-3 py-2 font-medium text-right">應收</th>
+                        <th className="px-3 py-2 font-medium text-right">實收</th>
+                        <th className="px-3 py-2 font-medium text-right">落差</th>
+                        <th className="px-3 py-2 font-medium min-w-[11rem]">備註</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/70">
+                      {stallWeekdayChainRows.map((row) => {
+                        const eco = row.eco;
+                        const isFocus = row.ymd === calendarWeekFocusYmd;
+                        return (
+                          <tr
+                            key={row.ymd + String(row.weeksBack)}
+                            className={cn(
+                              'text-zinc-300 hover:bg-white/[0.02]',
+                              isFocus && 'bg-amber-950/30',
+                            )}
+                          >
+                            <td className="px-3 py-2 whitespace-nowrap">{row.periodLabel}</td>
+                            <td className="px-3 py-2 tabular-nums text-zinc-400">{ymdSlash(row.ymd)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-rose-200/90">
+                              {eco ? moneyTW(eco.expectedRetail) : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-emerald-200/90">
+                              {eco?.actual !== null && eco?.actual !== undefined ? moneyTW(eco.actual) : '—'}
+                            </td>
+                            <td
+                              className={cn(
+                                'px-3 py-2 text-right tabular-nums',
+                                eco?.gap == null
+                                  ? 'text-zinc-600'
+                                  : eco.gap > 0
+                                    ? 'text-emerald-300/90'
+                                    : eco.gap < 0
+                                      ? 'text-rose-300/90'
+                                      : 'text-zinc-500',
+                              )}
+                            >
+                              {eco?.gap == null ? '—' : moneySignedInt(eco.gap)}
+                            </td>
+                            <td className="px-3 py-2 align-middle">
+                              <DirectStallGapReasonCell ymd={row.ymd} syncKey={orderTick} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className="text-[11px] text-zinc-500">
+                  歷史同名星期（已登錄實收）：{sameWeekdayActualStats.dayCount} 日
+                </p>
+              </div>
+
+              <div className="xl:col-span-4 rounded-xl border border-sky-900/35 bg-sky-950/15 p-4 space-y-3">
+                <p className="text-xs font-medium text-sky-200/90">同名星期・歷史實收統計</p>
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  僅統計<strong className="text-zinc-400">截至今日</strong>且<strong className="text-zinc-400">已填盤點後實收</strong>之日。
+                </p>
+                <div className="space-y-2.5 text-sm">
+                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
+                    <span className="text-zinc-500">總營收（實收合計）</span>
+                    <span className="tabular-nums text-sky-100">{moneyTW(sameWeekdayActualStats.sum)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
+                    <span className="text-zinc-500">平均營收</span>
+                    <span className="tabular-nums text-zinc-100">{moneyTW(sameWeekdayActualStats.avg)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
+                    <span className="text-zinc-500">最高營收</span>
+                    <span className="text-right">
+                      <span className="tabular-nums text-emerald-300 block">
+                        {sameWeekdayActualStats.max ? moneyTW(sameWeekdayActualStats.max.actual) : '—'}
+                      </span>
+                      <span className="text-[11px] text-zinc-600 tabular-nums">
+                        {sameWeekdayActualStats.max ? ymdSlash(sameWeekdayActualStats.max.ymd) : ''}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
+                    <span className="text-zinc-500">最低營收</span>
+                    <span className="text-right">
+                      <span className="tabular-nums text-rose-300 block">
+                        {sameWeekdayActualStats.min ? moneyTW(sameWeekdayActualStats.min.actual) : '—'}
+                      </span>
+                      <span className="text-[11px] text-zinc-600 tabular-nums">
+                        {sameWeekdayActualStats.min ? ymdSlash(sameWeekdayActualStats.min.ymd) : ''}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="pt-1 space-y-2">
+                    <div className="flex justify-between gap-2 items-baseline">
+                      <span className="text-zinc-500 shrink-0">業績打底</span>
+                      <span className="tabular-nums text-amber-200/90 text-xs">
+                        已存：
+                        {getWeekdayBaselineTarget(weekdayChainFocusIdx) !== undefined
+                          ? moneyTW(getWeekdayBaselineTarget(weekdayChainFocusIdx)!)
+                          : '未設定'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={weekdayBaselineDraft}
+                        onChange={(e) => setWeekdayBaselineDraft(e.target.value)}
+                        placeholder="目標金額"
+                        className="min-w-[8rem] flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-sm text-zinc-200 tabular-nums focus:outline-none focus:border-sky-600/50"
+                      />
+                      <button
+                        type="button"
+                        onClick={saveWeekdayBaseline}
+                        className="px-3 py-2 rounded-lg border border-sky-700/80 bg-sky-950/40 text-sky-200 text-xs hover:bg-sky-900/40"
+                      >
+                        儲存打底
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+      ) : null}
+
 
       {isAdmin && adminStallGapRange && (
         <StallGapDashboardSection
@@ -1728,7 +1657,7 @@ export default function Dashboard({
                 </>
               ) : (
                 <>
-                  <h3 className="text-lg font-medium text-zinc-100">商品與支出佔比</h3>
+                  <h3 className="text-lg font-medium text-zinc-100">營收與支出佔比</h3>
                   <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
                     依訂單建單日・{summaryRangeLabel(productChartsRange)}・本店可視訂單與流水帳
                     <span className="text-zinc-600 ml-1">（點此展開）</span>

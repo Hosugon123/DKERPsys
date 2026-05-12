@@ -71,6 +71,32 @@ export function saveSalesRecord(ymd: string, snapshot: SalesRecordDaySnapshot) {
   saveStore(s);
 }
 
+/** 僅更新落差備註；無該日紀錄時建立最小快照（與 Dashboard 表格連動）。 */
+export function patchSalesRecordRevenueGapReason(ymd: string, reason: string) {
+  const trimmed = reason.trim();
+  const s = loadStore();
+  const row = s.byDate[ymd];
+  const now = new Date().toISOString();
+  const prev = row
+    ? mergeSnapshotWithCatalog(row.snapshot)
+    : mergeSnapshotWithCatalog({
+        lines: {},
+        actualRevenue: '',
+        updatedAt: '',
+      });
+  const who = getSessionActorDisplayName();
+  s.byDate[ymd] = {
+    completedAt: row?.completedAt ?? now,
+    ...(row?.completedByName ? { completedByName: row.completedByName } : who ? { completedByName: who } : {}),
+    snapshot: {
+      ...prev,
+      revenueGapReason: trimmed,
+      updatedAt: now,
+    },
+  };
+  saveStore(s);
+}
+
 export function getSalesRecord(ymd: string): SalesRecordDaySnapshot | null {
   const s = loadStore();
   const row = s.byDate[ymd];
