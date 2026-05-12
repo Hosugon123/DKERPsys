@@ -873,12 +873,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p
-                      className="text-base sm:text-lg font-mono text-zinc-200 mb-1.5 break-all leading-snug"
-                      title={order.id}
-                    >
-                      訂單編號 {order.id}
-                    </p>
                     <div className="flex items-center gap-3 mb-1 flex-wrap">
                       <h3 className="text-lg font-bold text-[#f5f2ed]">{order.franchisee}</h3>
                       <span className={cn(
@@ -901,6 +895,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                         </span>
                       )}
                     </div>
+                    <p
+                      className="text-base sm:text-lg font-mono text-zinc-200 mb-1.5 mt-1 break-all leading-snug"
+                      title={order.id}
+                    >
+                      訂單編號 {order.id}
+                    </p>
                     <div className="text-sm text-zinc-500 min-w-0 max-w-full space-y-1 leading-relaxed">
                       {raw ? (
                         <>

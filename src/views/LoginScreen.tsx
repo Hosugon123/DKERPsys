@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react';
 import { Lock, User } from 'lucide-react';
-import { SUPER_ADMIN_LOGIN_ID } from '../lib/authConstants';
 import { tryLogin } from '../lib/authSession';
 import RemoteSyncIndicator from '../components/RemoteSyncIndicator';
 import ForgotPasswordModal from './ForgotPasswordModal';
@@ -34,11 +33,14 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
       <ForgotPasswordModal open={forgotOpen} onClose={() => setForgotOpen(false)} />
       <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-[#111111] p-8 shadow-xl shadow-black/40">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-amber-600 text-xl font-black text-white shadow-lg shadow-amber-900/30">
-            東
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-lg shadow-black/30">
+            <img
+              src="/brand-logo-v2.png"
+              alt="達客東山鴨頭 Logo"
+              className="h-full w-full object-contain p-1"
+            />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">東山鴨頭職人管理系統</h1>
-          <p className="mt-2 text-sm text-zinc-500">請使用登入帳號與密碼進入系統</p>
+          <h1 className="text-xl font-bold tracking-tight">達客東山鴨頭訂單系統</h1>
         </div>
 
         <form onSubmit={submit} className="space-y-5">
@@ -56,7 +58,6 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 py-2.5 pl-10 pr-4 text-[#f5f2ed] outline-none transition-colors focus:border-amber-500"
-                placeholder="例如：fr001"
               />
             </div>
           </div>
@@ -71,7 +72,6 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 py-2.5 pl-10 pr-4 text-[#f5f2ed] outline-none transition-colors focus:border-amber-500"
-                placeholder="請輸入密碼"
               />
             </div>
           </div>
@@ -93,12 +93,6 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
             </button>
           </div>
         </form>
-
-        <p className="mt-6 text-center text-xs leading-relaxed text-zinc-600">
-          示範超級管理員預設為 <span className="font-mono text-zinc-500">{SUPER_ADMIN_LOGIN_ID}</span>／初次啟動密碼{' '}
-          <span className="font-mono text-zinc-500">123</span>
-          ，登入後建議立即變更密碼。加盟主與員工須由管理員於「權限編輯」建立帳號後方可登入。
-        </p>
       </div>
     </div>
   );

@@ -454,19 +454,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                     <Package size={24} className="text-amber-500/80" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p
-                      className="text-xs sm:text-sm font-mono text-zinc-200 mb-1.5 break-all leading-snug"
-                      title={order.id}
-                    >
-                      訂單編號 {order.id}
-                    </p>
-                    <div className="flex items-center gap-3 mb-1 flex-wrap">
+                    <div className="flex items-center gap-3 mb-2 flex-wrap">
                       <h3 className="text-lg font-bold text-[#f5f2ed] break-words">
                         {resolveOrderStoreLabel(order)}
                       </h3>
                       <span
                         className={cn(
-                          'px-2.5 py-0.5 rounded text-xs font-medium border',
+                          'px-2.5 py-0.5 rounded text-xs font-medium border shrink-0',
                           order.status === '待出貨'
                             ? 'bg-amber-600/10 text-amber-500 border-amber-600/20'
                             : order.status === '已取消'
@@ -481,25 +475,27 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         stallCountCompletedAt={order.stallCountCompletedAt}
                       />
                     </div>
-                    <div className="min-w-0 max-w-full space-y-2 text-zinc-500">
-                      <div>
-                        <p className="text-xs">訂單日期</p>
-                        <p className="text-base sm:text-lg text-zinc-100 leading-tight break-keep">
-                          {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs">下單時間</p>
-                        <p className="text-sm sm:text-base leading-snug break-keep">
-                          {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-1 min-[430px]:grid-cols-2 gap-y-1 gap-x-3">
-                        <p className="text-sm sm:text-sm break-words [overflow-wrap:anywhere]">
+                    <p
+                      className="text-xs sm:text-sm text-[#f5f2ed] mb-2 leading-snug break-all"
+                      title={order.id}
+                    >
+                      訂單編號 <span className="font-mono">{order.id}</span>
+                    </p>
+                    <div className="min-w-0 max-w-full space-y-2">
+                      <p className="text-base sm:text-lg text-[#f5f2ed] leading-tight break-keep [overflow-wrap:anywhere]">
+                        訂單日期{' '}
+                        {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))}
+                      </p>
+                      <p className="text-sm sm:text-base text-zinc-400 leading-snug break-keep [overflow-wrap:anywhere]">
+                        下單時間 {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}
+                      </p>
+                      <div className="grid grid-cols-1 min-[430px]:grid-cols-2 gap-y-1 gap-x-3 text-sm text-zinc-600">
+                        <p className="break-words [overflow-wrap:anywhere]">
                           下單者：{displayOrderCreatedByLabel(order)}
                         </p>
-                        <p className="text-sm sm:text-sm break-words [overflow-wrap:anywhere]">
-                          盤點者：{order.stallCountCompletedAt
+                        <p className="break-words [overflow-wrap:anywhere]">
+                          盤點者：
+                          {order.stallCountCompletedAt
                             ? displayOrderStallCountCompletedByLabel(order)
                             : '—'}
                         </p>
