@@ -54,6 +54,36 @@ function frozenFinancialsFromSnapshot(snap: SalesRecordDaySnapshot): StallFrozen
   return { retailEstTotal, retailRemainValue, retailSoldRevenue, wholesaleSoldCost };
 }
 
+/**
+ * 僅依銷售紀錄／盤點快照推算：預估帶出金額、餘貨金額、應有營業額（零售×售出量）。
+ * 供無對應訂單但仍存有銷售紀錄之日補齊 Dashboard。
+ */
+export function computeRetailEconomicsFromMergedSnapshot(
+  snap: SalesRecordDaySnapshot,
+  retailView: SupplyRetailView,
+): { estTotal: number; remainValue: number; expectedRetail: number } | null {
+  const merged = mergeSalesRecordWithCatalog(snap);
+  const frozen = frozenFinancialsFromSnapshot(merged);
+  if (frozen) {
+    return {
+      estTotal: frozen.retailEstTotal,
+      remainValue: frozen.retailRemainValue,
+      expectedRetail: frozen.retailSoldRevenue,
+    };
+  }
+  const itemIds = getAllSupplyItems(retailView)
+    .filter((i) => !isConsumableItem(i))
+    .map((i) => i.id);
+  const getLine = (id: string) => merged.lines[id] ?? { out: '', remain: '' };
+  const getItem = (id: string) => getSupplyItem(id, retailView) ?? undefined;
+  const retailK = aggregateStallKpis(itemIds, getLine, getItem, { unitBasis: 'retail' }).retail;
+  return {
+    estTotal: retailK.estTotal,
+    remainValue: retailK.remGoodsValue,
+    expectedRetail: retailK.soldAtRetail,
+  };
+}
+
 function stallSnapshotKpis(
   o: FranchiseManagementOrder | OrderHistoryEntry,
   retailView: SupplyRetailView,

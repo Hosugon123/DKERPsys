@@ -146,7 +146,7 @@ export type AdminDashboardFinance = {
   procurementCostTotal: number;
   /** 本月流水帳「支出」合計 */
   ledgerExpenseTotal: number;
-  /** 支出總計 = 進貨成本 + 流水帳支出 */
+  /** 支出總計＝流水帳支出（不含叫貨／批貨進貨成本） */
   expenseTotal: number;
   netProfit: number;
   /** 僅含金額 &gt; 0 之支出項，供圖表用 */
@@ -251,7 +251,7 @@ export function computeStallGapSummary(
 /**
  * 超級管理員儀表板：本月曆法。
  * 營收：直營＝盤點日歸屬月內之零售×售出；加盟＝建單於本月且已完成叫貨。
- * 支出：本月已完成直營叫貨小計＋流水帳支出（與原邏輯相同）。
+ * 支出：僅本月流水帳支出（不含叫貨／批貨進貨成本）。
  */
 export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance {
   const ymKey = ym.slice(0, 7);

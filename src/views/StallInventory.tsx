@@ -455,9 +455,11 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         </p>
                       )}
                     </div>
-                    <div className="shrink-0 text-zinc-500 text-sm tabular-nums sm:pt-2 sm:text-right">
-                      批貨 $ {money(viewOrder.totalAmount)}
-                    </div>
+                    {userRole !== 'admin' && (
+                      <div className="shrink-0 text-zinc-500 text-sm tabular-nums sm:pt-2 sm:text-right">
+                        批貨 $ {money(viewOrder.totalAmount)}
+                      </div>
+                    )}
                   </div>
                   {importBreakdown && (
                     <div className="mt-0 mx-3 mb-3 rounded-lg border border-zinc-800/80 bg-zinc-950/50 overflow-hidden">

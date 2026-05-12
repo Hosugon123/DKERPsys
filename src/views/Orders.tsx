@@ -946,7 +946,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                 <div className="flex w-full min-w-0 shrink-0 flex-col lg:w-auto lg:flex-none lg:flex-row items-stretch lg:items-end justify-end gap-2 border-t lg:border-t-0 border-zinc-800 pt-3 lg:pt-0">
                   <div className="rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-2.5 w-full min-w-0 lg:min-w-[19rem] lg:max-w-[24rem] lg:shrink-0">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.6875rem] sm:text-xs min-w-0">
-                      {userRole !== 'employee' && (
+                      {userRole !== 'admin' && (
                         <>
                           <span className="text-zinc-500">批貨金額</span>
                           <span className="text-zinc-200 text-right tabular-nums break-all">
@@ -1371,10 +1371,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   detailLines.push(l);
                                   seen.add(l.productId);
                                 }
-
-                                detailLines.sort((a, b) =>
-                                  a.name.localeCompare(b.name, 'zh-Hant')
-                                );
 
                                 return detailLines.map((line, idx) => renderDetailLineRow(line, idx));
                               })()}

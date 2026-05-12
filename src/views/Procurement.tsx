@@ -75,8 +75,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   /** 僅超級管理員可編輯品項、批價、零售；加盟主可編輯本店零售參考價。 */
   const isSuperAdmin = userRole === 'admin';
   const isFranchisee = userRole === 'franchisee';
-  /** 直營店員工不顯示批貨成本，僅顯示零售預估參考 */
-  const showProcurementCost = userRole !== 'employee';
+  /** 管理員不顯示批貨成本；加盟主／門市員工維持原顯示邏輯 */
+  const showProcurementCost = userRole !== 'admin';
   const [view, setView] = useState<'order' | 'catalog' | 'retail'>('order');
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
   const catalogItems = useSupplyCatalogItems(userRole);
