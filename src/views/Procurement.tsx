@@ -88,6 +88,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const [favorites, setFavorites] = useState<FavoriteOrder[]>([]);
   const [newFavoriteName, setNewFavoriteName] = useState('');
   const [favoriteError, setFavoriteError] = useState('');
+  /** 手動購物車「扣除盤點剩餘」流程之錯誤提示（不依賴常用訂單） */
+  const [manualBasisDeduceError, setManualBasisDeduceError] = useState('');
   /** 第一次點刪除後記錄 id，需再點同列刪除才執行；幾秒後自動取消。 */
   const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
   /** 手動輸入份數時的草稿（key 存在表示該欄以輸入字串為準） */
@@ -173,13 +175,13 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     [basisOrders, stallBasisOrderId]
   );
 
-  const { retail: stallDayKpi, consumable: stallConsKpi } = useMemo(() => {
+  const stallDayKpi = useMemo(() => {
     const snap = loadDayForProcurementFromOrder(stallBasisOrderId);
     return aggregateStallKpis(
       catalogItems.map((i) => i.id),
       (id) => snap.lines[id] ?? { out: '', remain: '' },
       (id) => getSupplyItem(id, supplyRetailView)
-    );
+    ).retail;
   }, [stallTick, catalogItems, stallBasisOrderId, supplyRetailView]);
 
   const stallDayRetailSold = useMemo(() => {
@@ -199,7 +201,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     const rows: { item: (typeof catalogItems)[number]; c: ReturnType<typeof computeLine> }[] = [];
     for (const item of catalogItems) {
       const it = getSupplyItem(item.id, supplyRetailView);
-      if (!it) continue;
+      if (!it || isConsumableItem(it)) continue;
       const line = snap.lines[item.id] ?? { out: '', remain: '' };
       const c = computeLine(line.out, line.remain, it);
       if (c.sold > 0 || c.out > 0 || c.remain > 0) {
@@ -261,6 +263,27 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const totalCount = roundProcurementQty(
     (Object.values(cart) as number[]).reduce((a, b) => a + b, 0)
   );
+
+  /** 與常用訂單「扣盤點剩再帶入」相同：以目前購物車為基準量，扣除所選單據之剩餘後覆寫購物車 */
+  const applyManualCartDeductStallBasisRemain = () => {
+    setManualBasisDeduceError('');
+    if (!stallBasisOrderId.trim()) {
+      setManualBasisDeduceError('請先在下拉選單選擇「欲扣除餘貨的訂單」。');
+      return;
+    }
+    if (totalCount <= 0) {
+      setManualBasisDeduceError('請先在下方品項輸入叫貨量（當作尚未扣除剩餘前的基準）。');
+      return;
+    }
+    const next = cartFromFavorite(cartAfterDeductingStallRemainFromOrder(cart, stallBasisOrderId));
+    if (Object.keys(next).length === 0) {
+      setManualBasisDeduceError('扣除剩餘後暫無需補貨。');
+      return;
+    }
+    setCart(next);
+    setQtyInputDraft({});
+  };
+
   const totalPrice = Object.entries(cart).reduce((total, [id, n]) => {
     const item = getSupplyItem(id, supplyRetailView);
     const q = Number(n);
@@ -626,6 +649,23 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
             </button>
           </div>
         </div>
+        {basisOrders.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-zinc-800/80">
+            <button
+              type="button"
+              onClick={applyManualCartDeductStallBasisRemain}
+              disabled={!stallBasisOrderId.trim() || totalCount <= 0}
+              className="w-full sm:w-auto min-h-10 px-4 rounded-xl border border-amber-600/60 bg-amber-600/10 text-amber-200 text-sm font-semibold hover:bg-amber-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              以目前購物車扣除盤點剩餘
+            </button>
+            {manualBasisDeduceError ? (
+              <p className="text-xs text-rose-400/90" role="status">
+                {manualBasisDeduceError}
+              </p>
+            ) : null}
+          </div>
+        )}
         {basisOrders.length === 0 && (
           <p className="text-xs text-amber-200/80 border border-amber-800/50 rounded-lg px-2.5 py-2 bg-amber-950/30">
             尚無「已完成盤點」的叫貨單。請在「攤上盤點」完成一筆後，此處才會出現可扣餘貨的訂單。
@@ -671,9 +711,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 販售品 售出 {stallDayRetailSold.toLocaleString()} 單位 · 應有營收 ${' '}
                 {Math.round(stallDayKpi.shouldRevenue).toLocaleString()} · 帶出 ${' '}
                 {Math.round(stallDayKpi.estTotal).toLocaleString()}
-                {(stallConsKpi.soldVolume > 0 || stallConsKpi.estTotal > 0) && (
-                  <span className="text-amber-400/80"> · 耗材 售出 {stallConsKpi.soldVolume} 單位</span>
-                )}
               </p>
             </div>
           </div>
@@ -692,14 +729,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     key={item.id}
                     className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3 text-zinc-300 border-b border-zinc-800/60 pb-2 last:border-0 last:pb-0"
                   >
-                    <span className="min-w-0 font-medium text-rose-200/90 inline-flex items-center gap-1.5 flex-wrap">
-                      {item.name}
-                      {isConsumableItem(item) && (
-                        <span className="text-[0.5625rem] font-semibold text-amber-300/90 border border-amber-800/50 rounded px-1">
-                          消耗品
-                        </span>
-                      )}
-                    </span>
+                    <span className="min-w-0 font-medium text-rose-200/90">{item.name}</span>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs sm:text-sm text-zinc-500 tabular-nums">
                       <span>
                         帶出 <span className="text-zinc-300">{c.out.toLocaleString()}</span> {item.pieceUnit}
@@ -710,7 +740,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       <span>
                         售出 <span className="text-amber-300/90 font-medium">{c.sold.toLocaleString()}</span> {item.pieceUnit}
                       </span>
-                      <span className={cn('text-zinc-400', isConsumableItem(item) && 'text-amber-400/80')}>
+                      <span className="text-zinc-400">
                         {`售出面額 $ ${Math.round(c.soldRevenue).toLocaleString()}`}
                       </span>
                     </div>

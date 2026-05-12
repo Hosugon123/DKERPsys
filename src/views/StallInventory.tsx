@@ -190,7 +190,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     [ordersInWindow, viewOrderId]
   );
 
-  /** 所選訂單 × 盤點日：前日剩餘 + 本單叫貨 = 實際帶出（與「植入訂單」一致） */
+  /** 所選訂單 × 盤點日：參考剩餘（扣庫單據或前一日）＋本單叫貨＝實際帶出（與「植入訂單」一致） */
   const importBreakdown = useMemo(() => {
     if (!viewOrderId) return null;
     return computeStallOutImportBreakdown(dateStr, viewOrderId);
@@ -462,23 +462,35 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   {importBreakdown && (
                     <div className="mt-0 mx-3 mb-3 rounded-lg border border-zinc-800/80 bg-zinc-950/50 overflow-hidden">
                       <p className="px-3 py-2 text-[0.6875rem] sm:text-xs text-zinc-500 border-b border-zinc-800/80 leading-relaxed">
-                        帶出試算明細（盤點日 {formatSlashYmdWithWeekdayFromYmd(dateStr)}）：前一日
-                        {formatSlashYmdWithWeekdayFromYmd(importBreakdown.prevYmd)} 收攤剩餘 ＋ 本單叫貨 ＝
-                        實際帶出
+                        帶出試算明細（盤點日 {formatSlashYmdWithWeekdayFromYmd(dateStr)}）：
+                        {importBreakdown.carrySource?.kind === 'calendar_prev_day' ? (
+                          <>
+                            前一日 {formatSlashYmdWithWeekdayFromYmd(importBreakdown.carrySource.prevYmd)}{' '}
+                            收攤剩餘 ＋ 本單叫貨 ＝ 實際帶出
+                          </>
+                        ) : importBreakdown.carrySource?.kind === 'basis_order' ? (
+                          <>
+                            扣庫參考單{' '}
+                            <span className="font-mono text-zinc-400">{importBreakdown.carrySource.orderId}</span>{' '}
+                            帳上剩餘 ＋ 本單叫貨 ＝ 實際帶出
+                          </>
+                        ) : (
+                          <>本單叫貨（未併入參考剩餘）＝ 實際帶出</>
+                        )}
                         {!importBreakdown.chainsPriorStallRemain ? (
                           <span className="text-amber-200/85">
                             {' '}
-                            （本單建立時未指定扣庫參考單：前日收攤剩餘依系統以 0 計。）
+                            （本單建立時未指定扣庫參考單：參考剩餘依系統以 0 計。）
                           </span>
                         ) : (
                           <span className="text-zinc-600">
-                            （前日剩餘與銷售紀錄／盤點表讀法同「植入訂單」；按該鈕即寫入下列加總）
+                            （與「植入訂單」寫入公式一致；按該鈕即帶入下列加總）
                           </span>
                         )}
                       </p>
                       {importBreakdown.rows.length === 0 ? (
                         <p className="px-3 py-3 text-xs text-zinc-500">
-                          無販售品可列示（本單無數量且前日無剩餘），或僅含消耗品。
+                          無販售品可列示（本單無叫貨且參考剩餘為 0），或僅含消耗品。
                         </p>
                       ) : (
                         <div className="overflow-x-auto">
@@ -487,7 +499,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                               <tr className="border-b border-zinc-800/80 text-zinc-500">
                                 <th className="px-2 sm:px-3 py-2 font-medium">品項</th>
                                 <th className="px-2 sm:px-3 py-2 font-medium text-right whitespace-nowrap">
-                                  前日剩餘
+                                  參考剩餘
                                 </th>
                                 <th className="px-2 sm:px-3 py-2 font-medium text-right whitespace-nowrap">
                                   本單叫貨

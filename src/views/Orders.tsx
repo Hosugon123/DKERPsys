@@ -29,10 +29,14 @@ import {
 import {
   estimatedRetailPerPackage,
   getSupplyItem,
+  isConsumableItem,
+  pricePerPackage,
   userRoleToSupplyRetailView,
 } from '../lib/supplyCatalog';
-import { computeLine } from '../lib/stallMath';
+import { computeLine, num, roundProcurementQty } from '../lib/stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog } from '../lib/salesRecordStorage';
+import { loadRemainSnapshotForOrderManagementDisplay } from '../lib/stallInventoryStorage';
+import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 
 export type UserRole = 'admin' | 'franchisee' | 'employee';
 
@@ -221,6 +225,8 @@ function parsePickQty(s: string) {
 
 export default function Orders({ userRole }: { userRole: UserRole }) {
   const isHeadquarters = userRole === 'admin';
+  /** 訂單明細表「叫貨金額小計」僅加盟主與管理員可見，員工不顯示 */
+  const showOrderProcurementSubtotalCol = userRole === 'admin' || userRole === 'franchisee';
 
   const [mgmtOrders, setMgmtOrders] = useState<FranchiseManagementOrder[]>([]);
   const [historyOrders, setHistoryOrders] = useState<OrderHistoryEntry[]>([]);
@@ -283,6 +289,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   );
 
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
+  const catalogItemsForOrderDetail = useSupplyCatalogItems(userRole);
 
   const ordersData = useMemo(() => {
     const view = supplyRetailView;
@@ -836,6 +843,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         {filteredOrders.map((order) => {
           const raw = rawList.find((r) => r.id === order.id);
           const stallSnap = raw ? mergeOrderStallSnapshot(raw) : null;
+          const carrySnapForDisplay = raw ? loadRemainSnapshotForOrderManagementDisplay(raw) : null;
           const canEdit = canEditOrderInList(raw, userRole);
           const isExpanded = expandedOrderId === order.id;
           const isPickingThis =
@@ -995,9 +1003,18 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                 <div className="border-t border-zinc-800 bg-zinc-950 p-4 sm:p-6 animate-in slide-in-from-top-2">
                   <div className="min-w-0 w-full max-w-full">
                     <div className="mb-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                      <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest shrink-0">
-                        訂單品項明細
-                      </h4>
+                      <div className="min-w-0 space-y-1.5 flex-1">
+                        <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest shrink-0">
+                          訂單品項明細
+                        </h4>
+                        {raw && !stallSnap && (
+                          <p className="text-[0.6875rem] sm:text-xs text-zinc-500 leading-relaxed max-w-[52rem]">
+                            <span className="block">
+                              尚未完成攤上盤點押記時：下列「叫貨數量」「昨剩餘帶出」「帶出數量」係依叫貨時扣庫／訂單日試算（與批貨頁「昨日剩貨＋叫貨」同源）。
+                            </span>
+                          </p>
+                        )}
+                      </div>
                       {(order.status === '待出貨' || order.status === '已完成') && canEdit && (
                         <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:min-w-0 sm:flex-1">
                           {!isPickingThis &&
@@ -1113,11 +1130,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       </div>
                     )}
 
-                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto">
+                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto w-full min-w-0">
                       <table
                         className={cn(
-                          'w-full text-left',
-                          isPickingThis ? 'min-w-[18rem]' : 'min-w-[56rem]'
+                          'w-full table-fixed border-collapse text-left',
+                          isPickingThis
+                            ? 'min-w-[18rem]'
+                            : showOrderProcurementSubtotalCol
+                              ? 'min-w-[48rem]'
+                              : 'min-w-[40rem]'
                         )}
                       >
                         <thead className="bg-zinc-800/50 text-zinc-400 text-[10px] sm:text-xs uppercase border-b border-zinc-700/50">
@@ -1132,33 +1153,26 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               </>
                             ) : (
                               <>
-                                <th className="py-2 sm:py-2.5 px-2 sm:px-3 font-medium sticky left-0 bg-zinc-800/50 z-[1]">
+                                <th className="py-2 sm:py-2.5 px-2 sm:px-3 font-medium sticky left-0 bg-zinc-800/50 z-[1] w-[34%] min-w-[10rem]">
                                   品項
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                  叫貨數量
+                                </th>
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                  昨剩餘帶出
                                 </th>
                                 <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
                                   帶出數量
                                 </th>
                                 <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
-                                  售出數量
-                                </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
-                                  剩餘數量
-                                </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
-                                  預估金額
-                                </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
-                                  售出金額
-                                </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
-                                  剩餘金額
-                                </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
                                   單價
                                 </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
-                                  餘貨率
-                                </th>
+                                {showOrderProcurementSubtotalCol && (
+                                  <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                    叫貨金額小計
+                                  </th>
+                                )}
                               </>
                             )}
                           </tr>
@@ -1223,77 +1237,147 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   </tr>
                                 );
                               })
-                            : (raw?.lines ?? order.itemLines.map((it, i) => ({
-                                productId: `legacy-${i}`,
-                                name: it.name,
-                                unitPrice: it.qty > 0 ? it.price / it.qty : 0,
-                                qty: it.qty,
-                                unit: it.unit,
-                              }))).map((line, idx) => {
-                                const rowSnap = stallSnap?.lines[line.productId];
-                                const hasRowSnap = Boolean(stallSnap && rowSnap);
-                                const frozenR = Number(stallSnap?.frozenRetailUnitPriceByItem?.[line.productId]);
-                                const item = getSupplyItem(line.productId, supplyRetailView);
-                                let c = item
-                                  ? computeLine(rowSnap?.out ?? '', rowSnap?.remain ?? '', item, {
-                                      unitBasis: 'retail',
-                                    })
-                                  : null;
-                                if (c && Number.isFinite(frozenR)) {
-                                  c = {
-                                    ...c,
-                                    estPrice: c.out * frozenR,
-                                    remValue: c.remain * frozenR,
-                                    soldRevenue: c.sold * frozenR,
-                                  };
+                            : (() => {
+                                const renderDetailLineRow = (line: OrderHistoryLine, idx: number) => {
+                                  const rowSnap = stallSnap?.lines[line.productId];
+                                  const hasRowSnap = Boolean(stallSnap && rowSnap);
+                                  const frozenR = Number(stallSnap?.frozenRetailUnitPriceByItem?.[line.productId]);
+                                  const item = getSupplyItem(line.productId, supplyRetailView);
+                                  const legacyPid = String(line.productId).startsWith('legacy-');
+                                  const carryRemainQty =
+                                    carrySnapForDisplay && !legacyPid
+                                      ? Math.max(
+                                          0,
+                                          roundProcurementQty(
+                                            num(carrySnapForDisplay.lines[line.productId]?.remain)
+                                          )
+                                        )
+                                      : null;
+                                  const orderQtyRounded = roundProcurementQty(Number(line.qty) || 0);
+                                  let c = item
+                                    ? computeLine(rowSnap?.out ?? '', rowSnap?.remain ?? '', item, {
+                                        unitBasis: 'retail',
+                                      })
+                                    : null;
+                                  if (c && Number.isFinite(frozenR)) {
+                                    c = {
+                                      ...c,
+                                      estPrice: c.out * frozenR,
+                                      remValue: c.remain * frozenR,
+                                      soldRevenue: c.sold * frozenR,
+                                    };
+                                  }
+                                  const plannedBringOutQty =
+                                    carryRemainQty !== null
+                                      ? roundProcurementQty(carryRemainQty + orderQtyRounded)
+                                      : roundProcurementQty(orderQtyRounded);
+                                  const displayedBringOut =
+                                    hasRowSnap && c ? c.out : plannedBringOutQty;
+                                  const unitRetail = Number.isFinite(frozenR)
+                                    ? frozenR
+                                    : item
+                                      ? estimatedRetailPerPackage(item)
+                                      : line.unitPrice;
+                                  const orderSub = Math.round(line.unitPrice * line.qty * 100) / 100;
+                                  const procurementQtyFromDiff =
+                                    carryRemainQty !== null
+                                      ? roundProcurementQty(Math.max(0, displayedBringOut - carryRemainQty))
+                                      : null;
+                                  const procurementQtyCellText =
+                                    procurementQtyFromDiff !== null
+                                      ? fmtLineQty(procurementQtyFromDiff)
+                                      : fmtLineQty(orderQtyRounded);
+                                  return (
+                                    <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
+                                      <td className="py-2 sm:py-2.5 px-2 sm:px-3 align-top sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)] w-[34%] min-w-[10rem]">
+                                        <div className="font-medium text-[#f5f2ed] leading-tight break-keep">
+                                          {line.name}
+                                        </div>
+                                        <div className="mt-0.5 text-[0.65rem] text-zinc-500 leading-tight">
+                                          單位：{line.unit}・叫貨 {fmtLineQty(line.qty)}
+                                        </div>
+                                      </td>
+                                      <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/90">
+                                        {procurementQtyCellText}
+                                      </td>
+                                      <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-400">
+                                        {carryRemainQty !== null ? fmtLineQty(carryRemainQty) : '—'}
+                                      </td>
+                                      <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
+                                        {fmtLineQty(displayedBringOut)}
+                                      </td>
+                                      <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
+                                        {unitRetail.toLocaleString()}
+                                      </td>
+                                      {showOrderProcurementSubtotalCol && (
+                                        <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-amber-400/95 whitespace-nowrap">
+                                          $ {orderSub.toLocaleString('zh-TW')}
+                                        </td>
+                                      )}
+                                    </tr>
+                                  );
+                                };
+
+                                if (!raw) {
+                                  return order.itemLines
+                                    .map((it, i) => ({
+                                      productId: `legacy-${i}`,
+                                      name: it.name,
+                                      unitPrice: it.qty > 0 ? it.price / it.qty : 0,
+                                      qty: it.qty,
+                                      unit: it.unit,
+                                    }))
+                                    .map((line, idx) => renderDetailLineRow(line, idx));
                                 }
-                                const unitRetail = Number.isFinite(frozenR)
-                                  ? frozenR
-                                  : item
-                                    ? estimatedRetailPerPackage(item)
-                                    : line.unitPrice;
-                                const orderSub = Math.round(line.unitPrice * line.qty * 100) / 100;
-                                return (
-                                  <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
-                                    <td className="py-2 sm:py-2.5 px-2 sm:px-3 align-top sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
-                                      <div className="font-medium text-[#f5f2ed] leading-tight break-keep">{line.name}</div>
-                                      <div className="mt-0.5 text-[0.65rem] text-zinc-500 leading-tight">
-                                        單位：{line.unit}・叫貨 {fmtLineQty(line.qty)}
-                                      </div>
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
-                                      {hasRowSnap && c ? fmtLineQty(c.out) : '—'}
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
-                                      {hasRowSnap && c && !c.remainUnfilled ? fmtLineQty(c.sold) : '—'}
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
-                                      {hasRowSnap && c && !c.remainUnfilled ? fmtLineQty(c.remain) : '—'}
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
-                                      {hasRowSnap && c ? `$ ${Math.round(c.estPrice).toLocaleString()}` : '—'}
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
-                                      {hasRowSnap && c && !c.remainUnfilled
-                                        ? `$ ${Math.round(c.soldRevenue).toLocaleString()}`
-                                        : '—'}
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
-                                      {hasRowSnap && c && !c.remainUnfilled
-                                        ? `$ ${Math.round(c.remValue).toLocaleString()}`
-                                        : '—'}
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
-                                      {unitRetail.toLocaleString()}
-                                    </td>
-                                    <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
-                                      {hasRowSnap && c && !c.remainUnfilled && c.out > 0
-                                        ? `${c.leftRatePct.toFixed(2)}%`
-                                        : '—'}
-                                    </td>
-                                  </tr>
+
+                                const qtyByProductId: Record<string, number> = {};
+                                for (const l of raw.lines) {
+                                  const q = roundProcurementQty(Number(l.qty) || 0);
+                                  qtyByProductId[l.productId] = roundProcurementQty(
+                                    (qtyByProductId[l.productId] ?? 0) + q
+                                  );
+                                }
+
+                                const detailLines: OrderHistoryLine[] = [];
+                                const seen = new Set<string>();
+
+                                for (const catalogEntry of catalogItemsForOrderDetail) {
+                                  const pid = catalogEntry.id;
+                                  const item = getSupplyItem(pid, supplyRetailView);
+                                  if (!item) continue;
+
+                                  const orderQtyRounded = qtyByProductId[pid] ?? 0;
+                                  if (isConsumableItem(item) && orderQtyRounded <= 0) continue;
+
+                                  const existingLine = raw.lines.find((l) => l.productId === pid);
+                                  const line: OrderHistoryLine = existingLine
+                                    ? { ...existingLine, qty: orderQtyRounded }
+                                    : {
+                                        productId: pid,
+                                        name: item.name,
+                                        unitPrice: pricePerPackage(item),
+                                        qty: orderQtyRounded,
+                                        unit: item.pieceUnit,
+                                      };
+
+                                  detailLines.push(line);
+                                  seen.add(pid);
+                                }
+
+                                for (const l of raw.lines) {
+                                  if (seen.has(l.productId)) continue;
+                                  const q = roundProcurementQty(Number(l.qty) || 0);
+                                  if (q <= 0) continue;
+                                  detailLines.push(l);
+                                  seen.add(l.productId);
+                                }
+
+                                detailLines.sort((a, b) =>
+                                  a.name.localeCompare(b.name, 'zh-Hant')
                                 );
-                              })}
+
+                                return detailLines.map((line, idx) => renderDetailLineRow(line, idx));
+                              })()}
                         </tbody>
                         <tfoot className="bg-zinc-800/20 border-t border-zinc-700/50">
                           <tr>
@@ -1312,7 +1396,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                             ) : (
                               <>
                                 <td
-                                  colSpan={8}
+                                  colSpan={showOrderProcurementSubtotalCol ? 5 : 4}
                                   className="py-2.5 sm:py-4 px-2 sm:px-3 text-right text-xs sm:text-sm font-medium text-zinc-400"
                                 >
                                   叫貨合計（下單）

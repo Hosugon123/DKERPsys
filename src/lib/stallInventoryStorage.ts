@@ -213,8 +213,57 @@ function procurementOrderChainsPriorStallRemain(o: { procurementDeductionBasisOr
 }
 
 /**
- * 依所選**單一訂單**帶出叫貨量、並以**盤點曆法日 (stallYmd)** 決定前一日收攤剩餘，重寫各品「帶出」。
- * 帶出[品] ＝ 盤點日之前一日**收攤剩餘** ＋ **該筆**訂單內同品訂量合計（多店則一單一盤、各選各單再植入／完成）。
+ * 與批貨頁「昨日剩貨」一致之剩餘來源，供植入帳上「帶出」：
+ * - 舊單（無 procurementDeductionBasisOrderId）：盤點日**曆法**前一日之收攤剩餘。
+ * - 新制有存單號：該扣庫參考訂單之帳上剩餘（內嵌盤點快照／銷售紀錄讀法）。
+ * - 新制未指定（空字串）：不併入剩餘。
+ */
+function loadRemainSnapshotForProcurementBringOut(
+  o: { procurementDeductionBasisOrderId?: string },
+  stallYmd: string
+): DaySnapshot {
+  if (!procurementOrderChainsPriorStallRemain(o)) {
+    return mergeDayWithCurrentCatalog(emptyDay());
+  }
+  if (o.procurementDeductionBasisOrderId === undefined) {
+    const prevYmd = addDaysYmd(stallYmd, -1);
+    return loadDayForProcurement(prevYmd);
+  }
+  const bid = o.procurementDeductionBasisOrderId.trim();
+  if (!bid) return mergeDayWithCurrentCatalog(emptyDay());
+  return loadDayForProcurementFromOrder(bid);
+}
+
+/**
+ * 訂單管理明細：顯示「剩餘貨量（參考）」用。與 {@link loadRemainSnapshotForProcurementBringOut} 語意一致，
+ * 唯舊單改以**訂單歸屬日**之前一日收攤剩餘近似（因明細頁無盤點曆法日）。
+ */
+export function loadRemainSnapshotForOrderManagementDisplay(o: {
+  procurementDeductionBasisOrderId?: string;
+  orderDateYmd?: string;
+  createdAt: string;
+}): DaySnapshot {
+  if (!procurementOrderChainsPriorStallRemain(o)) {
+    return mergeDayWithCurrentCatalog(emptyDay());
+  }
+  if (o.procurementDeductionBasisOrderId === undefined) {
+    const orderYmd = effectiveOrderDateYmd(o);
+    const prevYmd = orderYmd ? addDaysYmd(orderYmd, -1) : '';
+    if (!prevYmd) return mergeDayWithCurrentCatalog(emptyDay());
+    return loadDayForProcurement(prevYmd);
+  }
+  const bid = o.procurementDeductionBasisOrderId.trim();
+  if (!bid) return mergeDayWithCurrentCatalog(emptyDay());
+  return loadDayForProcurementFromOrder(bid);
+}
+
+export type StallOutCarryRemainSource =
+  | { kind: 'calendar_prev_day'; prevYmd: string }
+  | { kind: 'basis_order'; orderId: string };
+
+/**
+ * 依所選**單一訂單**帶出叫貨量、並依扣庫參考（或舊制前一日曆法剩餘）重寫各品「帶出」。
+ * 帶出[品] ＝ **參考剩餘** ＋ **該筆**訂單內同品訂量合計（消耗品訂量不計入加總，但剩餘仍可反應於帶出）。
  * @param opts.clearRemain 盤上「植入訂單」時設為 true，重算帶出後一併將**剩餘貨量**欄全數清零；揀貨／訂單同步重算則不傳。
  */
 export function recomputeStallOutForStallYmdAndOrder(
@@ -233,10 +282,7 @@ export function recomputeStallOutForStallYmdAndOrder(
     if (q <= 0) continue;
     sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
   }
-  const prevYmd = addDaysYmd(stallYmd, -1);
-  /** 與批貨扣庫一致：前一日若已完成盤點，剩餘以銷售紀錄為準（未選扣庫參考單之叫貨單則不併入） */
-  const prevDay =
-    procurementOrderChainsPriorStallRemain(o) ? loadDayForProcurement(prevYmd) : mergeDayWithCurrentCatalog(emptyDay());
+  const prevDay = loadRemainSnapshotForProcurementBringOut(o, stallYmd);
   const fromStorage = loadDay(stallYmd);
   const base: DaySnapshot = editorSnap
     ? {
@@ -269,20 +315,24 @@ export type StallOutImportBreakdownRow = {
   productId: string;
   name: string;
   orderQty: number;
-  /** 盤點日前一日收攤剩餘（`loadDayForProcurement`） */
+  /** 參考剩餘（舊制：前一日曆法；新制：扣庫參考訂單帳上剩餘） */
   prevRemain: number;
   /** 前項＋本單叫貨；等同按「植入訂單」寫入之實際帶出 */
   suggestedOut: number;
 };
 
 /**
- * 依盤點曆法日與所選叫貨單，列出「前日剩餘 + 本單叫貨 = 實際帶出」。
+ * 依盤點曆法日與所選叫貨單，列出「參考剩餘 + 本單叫貨 = 實際帶出」。
  * 與 {@link recomputeStallOutForStallYmdAndOrder} 計算一致；單據無效時回傳 null。
  */
 export function computeStallOutImportBreakdown(
   stallYmd: string,
   orderId: string,
-): { prevYmd: string; rows: StallOutImportBreakdownRow[]; chainsPriorStallRemain: boolean } | null {
+): {
+  carrySource: StallOutCarryRemainSource | null;
+  rows: StallOutImportBreakdownRow[];
+  chainsPriorStallRemain: boolean;
+} | null {
   const o = findOrderByIdInStores(orderId);
   if (!o || o.status === '已取消') return null;
   const chainsPriorStallRemain = procurementOrderChainsPriorStallRemain(o);
@@ -292,8 +342,17 @@ export function computeStallOutImportBreakdown(
     if (q <= 0) continue;
     sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
   }
-  const prevYmd = addDaysYmd(stallYmd, -1);
-  const prevDay = chainsPriorStallRemain ? loadDayForProcurement(prevYmd) : mergeDayWithCurrentCatalog(emptyDay());
+  const prevDay = loadRemainSnapshotForProcurementBringOut(o, stallYmd);
+
+  let carrySource: StallOutCarryRemainSource | null = null;
+  if (chainsPriorStallRemain) {
+    if (o.procurementDeductionBasisOrderId === undefined) {
+      carrySource = { kind: 'calendar_prev_day', prevYmd: addDaysYmd(stallYmd, -1) };
+    } else if (o.procurementDeductionBasisOrderId.trim()) {
+      carrySource = { kind: 'basis_order', orderId: o.procurementDeductionBasisOrderId.trim() };
+    }
+  }
+
   const rows: StallOutImportBreakdownRow[] = [];
   for (const it of getAllSupplyItems()) {
     const item = getSupplyItem(it.id);
@@ -311,7 +370,7 @@ export function computeStallOutImportBreakdown(
     });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-  return { prevYmd, rows, chainsPriorStallRemain };
+  return { carrySource, rows, chainsPriorStallRemain };
 }
 
 /**
