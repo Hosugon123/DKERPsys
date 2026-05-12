@@ -539,11 +539,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
             <ShoppingBasket className="text-amber-500 shrink-0" size={26} />
             批貨與下單
           </h2>
-          {!showProcurementCost && (
-            <p className="text-sm text-zinc-500 mt-1.5 max-w-xl leading-relaxed">
-              品項與合計僅顯示<strong className="text-zinc-400">零售預估</strong>（依單價推估售完面額），不顯示進貨成本；實際售價以門市為準。
-            </p>
-          )}
         </div>
         {isSuperAdmin ? (
           <div className="flex rounded-xl border border-zinc-700 bg-zinc-900/80 p-1 w-full sm:w-auto">

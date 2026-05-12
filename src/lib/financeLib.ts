@@ -20,6 +20,7 @@ import {
   listAccountingLedgerEntriesForMonth,
   ingredientSubSpendBreakdownForMonth,
   sumFoodExpenseCOGSAndSeasoningForMonth,
+  listAccountingLedgerEntriesInDateRange,
 } from './accountingLedgerStorage';
 
 /** 總部儀表板盤點營收／KPI 使用之零售檢視（與超管預設一致） */
@@ -89,11 +90,6 @@ function mergeOrdersForAdminFinance(): OrderHistoryEntry[] {
 export function currentYmLocal(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function orderBookkeepingYmdStartsWithYm(o: OrderHistoryEntry, ym: string): boolean {
-  const ymd0 = effectiveOrderDateYmd(o);
-  return ymd0.length >= 7 && ymd0.slice(0, 7) === ym.slice(0, 7);
 }
 
 export type ExpenseBreakdownRow = {
@@ -249,42 +245,40 @@ export function computeStallGapSummary(
 }
 
 /**
- * 超級管理員儀表板：本月曆法。
- * 營收：直營＝盤點日歸屬月內之零售×售出；加盟＝建單於本月且已完成叫貨。
- * 支出：僅本月流水帳支出（不含叫貨／批貨進貨成本）。
+ * 超級管理員儀表板：依日期區間（含端點）。
+ * 營收：直營＝盤點歸屬日落於區間；加盟＝建單日落於區間且已完成叫貨。
+ * 支出：同期流水帳支出（不含叫貨／批貨進貨成本）。
  */
-export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance {
-  const ymKey = ym.slice(0, 7);
+export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd: string): AdminDashboardFinance {
+  const a = startYmd <= endYmd ? startYmd : endYmd;
+  const b = startYmd <= endYmd ? endYmd : startYmd;
+  const ymMeta = a.slice(0, 7);
+
   const merged = mergeOrdersForAdminFinance();
-  /** 總部營運卡：僅直營／總部視角之盤點落差（不含加盟門市單） */
   const stallGapOrders = merged.filter((o) => orderIsHeadquartersDirectScoped(o));
-  const stallGap = computeStallGapSummary(stallGapOrders, { type: 'ym', ymKey });
+  const stallGap = computeStallGapSummary(stallGapOrders, { type: 'ymd', startYmd: a, endYmd: b });
 
   let directStoreStallRetailTotal = 0;
   let franchiseeOrderTotal = 0;
   const procurementCostTotal = 0;
 
   for (const o of merged) {
-    if (
-      orderIsFranchiseBusinessScoped(o) &&
-      o.status === '已完成' &&
-      orderBookkeepingYmdStartsWithYm(o, ymKey)
-    ) {
+    if (orderIsFranchiseBusinessScoped(o) && o.status === '已完成') {
+      const ymd0 = effectiveOrderDateYmd(o);
+      if (ymd0 < a || ymd0 > b) continue;
       const selfSupplied =
         o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
       franchiseeOrderTotal += Math.max(0, o.totalAmount - selfSupplied);
     }
-    if (
-      orderIsHeadquartersDirectScoped(o) &&
-      o.stallCountCompletedAt &&
-      stallCountAttributeYmKey(o) === ymKey
-    ) {
+    if (orderIsHeadquartersDirectScoped(o) && o.stallCountCompletedAt) {
+      const stallYmd = stallCountAttributeYmd(o);
+      if (!stallYmd || stallYmd < a || stallYmd > b) continue;
       const stallRev = getStallDisplaySoldAtRetail(o, HQ_STALL_RETAIL_VIEW);
       if (stallRev != null) directStoreStallRetailTotal += stallRev;
     }
   }
 
-  const ledgerRows = listAccountingLedgerEntriesForMonth(ymKey);
+  const ledgerRows = listAccountingLedgerEntriesInDateRange(a, b);
   let ledgerIncomeTotal = 0;
   let ledgerExpenseTotal = 0;
   const ledgerExpenseByCategory = new Map<string, number>();
@@ -318,7 +312,7 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
       : [];
 
   return {
-    ym: ymKey,
+    ym: ymMeta,
     directStoreStallRetailTotal,
     franchiseeOrderTotal,
     ledgerIncomeTotal,
@@ -330,6 +324,24 @@ export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance 
     expenseBreakdown,
     stallGap,
   };
+}
+
+/**
+ * 超級管理員儀表板：指定曆月（該月 1 日～月底）。
+ * 營收／支出計算語意與 {@link computeAdminDashboardFinanceForYmdRange} 相同。
+ */
+export function computeAdminDashboardFinance(ym: string): AdminDashboardFinance {
+  const ymKey = ym.slice(0, 7);
+  const y = Number(ymKey.slice(0, 4));
+  const mo = Number(ymKey.slice(5, 7));
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) {
+    return computeAdminDashboardFinanceForYmdRange(`${ymKey}-01`, `${ymKey}-01`);
+  }
+  const lastDay = new Date(y, mo, 0).getDate();
+  const startYmd = `${ymKey}-01`;
+  const endYmd = `${ymKey}-${String(lastDay).padStart(2, '0')}`;
+  const result = computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
+  return { ...result, ym: ymKey };
 }
 
 export type IngredientMonthDashboard = {

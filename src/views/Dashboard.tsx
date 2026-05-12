@@ -26,9 +26,8 @@ import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import {
-  computeAdminDashboardFinance,
+  computeAdminDashboardFinanceForYmdRange,
   computeStallGapSummary,
-  currentYmLocal,
   stallCountAttributeYmd,
   type StallGapSummary,
 } from '../lib/financeLib';
@@ -237,6 +236,238 @@ function directStallGapRangeLabel(mode: DirectStallGapRangeMode): string {
   return `${startYmd}～${endYmd}`;
 }
 
+const SUMMARY_RANGE_SELECT_CLASS =
+  'w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
+
+const SUMMARY_RANGE_INLINE_BUTTON_CLASS =
+  'inline-flex h-[26px] w-24 items-center justify-between gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-xs font-medium leading-none text-zinc-200 transition-colors hover:border-amber-600/45 hover:text-amber-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
+
+function summaryRangeToggleClass(active: boolean) {
+  return cn(
+    'px-2.5 py-1 rounded-md text-xs border transition-colors',
+    active
+      ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
+      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
+  );
+}
+
+function DashboardSummaryRangePicker({
+  value,
+  onChange,
+  isNarrow,
+  ariaLabel = '區間',
+  narrowSelectClassName,
+  selectClassName,
+  wideGapClass = 'gap-1.5',
+}: {
+  value: SummaryRangeKey;
+  onChange: (key: SummaryRangeKey) => void;
+  isNarrow: boolean;
+  ariaLabel?: string;
+  narrowSelectClassName?: string;
+  selectClassName?: string;
+  wideGapClass?: string;
+}) {
+  if (isNarrow) {
+    return (
+      <select
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(e) => onChange(e.target.value as SummaryRangeKey)}
+        className={cn(narrowSelectClassName ?? SUMMARY_RANGE_SELECT_CLASS, selectClassName)}
+      >
+        {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+          <option key={key} value={key}>
+            {label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <div className={cn('flex flex-wrap items-center', wideGapClass)}>
+      {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+        <button key={key} type="button" onClick={() => onChange(key)} className={summaryRangeToggleClass(value === key)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DashboardInlineSummaryRangePicker({
+  value,
+  onChange,
+  isNarrow,
+  ariaLabel = '區間',
+  wideGapClass = 'gap-1.5',
+}: {
+  value: SummaryRangeKey;
+  onChange: (key: SummaryRangeKey) => void;
+  isNarrow: boolean;
+  ariaLabel?: string;
+  wideGapClass?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = SUMMARY_RANGE_OPTIONS.find((option) => option.key === value);
+
+  if (!isNarrow) {
+    return (
+      <DashboardSummaryRangePicker
+        value={value}
+        onChange={onChange}
+        isNarrow={isNarrow}
+        ariaLabel={ariaLabel}
+        wideGapClass={wideGapClass}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="relative"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
+      <button
+        type="button"
+        className={SUMMARY_RANGE_INLINE_BUTTON_CLASS}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <span className="truncate">{current?.label ?? summaryRangeLabel(value)}</span>
+        <ChevronDown
+          size={12}
+          className={cn('shrink-0 text-zinc-500 transition-transform', open ? 'rotate-180 text-amber-400' : null)}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label={ariaLabel}
+          className="absolute right-0 top-full z-30 mt-1 w-28 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30"
+        >
+          {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              role="option"
+              aria-selected={value === key}
+              className={cn(
+                'block w-full px-3 py-2 text-left text-xs transition-colors',
+                value === key ? 'bg-amber-600/20 text-amber-300' : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100',
+              )}
+              onClick={() => {
+                onChange(key);
+                setOpen(false);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StallGapQuickPresetRow(props: {
+  range: DirectStallGapRangeMode;
+  onPreset: (key: SummaryRangeKey) => void;
+  onPickCustom: () => void;
+  isNarrow: boolean;
+}) {
+  const { range, onPreset, onPickCustom, isNarrow } = props;
+  const selectVal = range.kind === 'preset' ? range.key : 'custom';
+
+  if (isNarrow) {
+    return (
+      <select
+        aria-label="快速選擇區間"
+        value={selectVal}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === 'custom') onPickCustom();
+          else onPreset(v as SummaryRangeKey);
+        }}
+        className={SUMMARY_RANGE_SELECT_CLASS}
+      >
+        {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+          <option key={key} value={key}>
+            {label}
+          </option>
+        ))}
+        <option value="custom">自訂起訖</option>
+      </select>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+      <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
+      {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onPreset(key)}
+          className={summaryRangeToggleClass(range.kind === 'preset' && range.key === key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function WeekdayChainPicker({
+  focusIdx,
+  onChange,
+  isNarrow,
+}: {
+  focusIdx: number;
+  onChange: (idx: number) => void;
+  isNarrow: boolean;
+}) {
+  if (isNarrow) {
+    return (
+      <select
+        aria-label="對照星期"
+        value={focusIdx}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className={SUMMARY_RANGE_SELECT_CLASS}
+      >
+        {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
+          <option key={label} value={idx}>
+            {label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+      {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => onChange(idx)}
+          className={cn(
+            'px-2.5 py-1 rounded-md text-xs border transition-colors min-h-[32px]',
+            focusIdx === idx
+              ? 'bg-amber-600/25 border-amber-500/45 text-amber-200'
+              : 'bg-zinc-950 border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600',
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function moneyTW(n: number) {
   return `$ ${Math.round(n).toLocaleString('zh-TW')}`;
 }
@@ -441,6 +672,8 @@ export default function Dashboard({
   const [financeTick, setFinanceTick] = useState(0);
   const [orderTick, setOrderTick] = useState(0);
   const [summaryRange, setSummaryRange] = useState<SummaryRangeKey>('month');
+  /** 總部頂部三卡（營收／支出／淨利）專用區間，與下方「營運摘要」summaryRange 可分開設定 */
+  const [adminFinanceSummaryRange, setAdminFinanceSummaryRange] = useState<SummaryRangeKey>('month');
   /** 商品營收圓餅專用區間（總部與本店共用；本店僅含可視訂單）；與營運摘要 summaryRange 分開 */
   const [productChartsRange, setProductChartsRange] = useState<SummaryRangeKey>('month');
   const [showAllDirect, setShowAllDirect] = useState(false);
@@ -487,8 +720,9 @@ export default function Dashboard({
 
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
-    return computeAdminDashboardFinance(currentYmLocal());
-  }, [isAdmin, financeTick]);
+    const { startYmd, endYmd } = resolveRange(adminFinanceSummaryRange);
+    return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
+  }, [isAdmin, financeTick, orderTick, adminFinanceSummaryRange]);
 
   useEffect(() => {
     const bump = () => setOrderTick((t) => t + 1);
@@ -947,179 +1181,181 @@ export default function Dashboard({
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <LayoutDashboard className="text-amber-500 shrink-0" size={28} />
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <h2 className="min-w-0 text-3xl font-bold tracking-tight flex flex-wrap items-center gap-2 gap-y-1">
+          <LayoutDashboard className="text-amber-500 shrink-0" size={28} />
+          <span className="min-w-0 truncate sm:truncate-none">
             {viewAsFranchisee
               ? `${viewAsFranchisee.label} 營運概況`
               : realIsAdmin
                 ? '總部營運概況'
                 : '我的營運概況'}
-          </h2>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setFranchisePickerOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-zinc-900/80 border border-zinc-700 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:border-amber-600/50 hover:text-amber-200 transition-colors font-medium text-xs"
-              title="點此挑選一家加盟店，以該加盟主視角檢視完整營運概況"
-              aria-haspopup="dialog"
-              aria-expanded={franchisePickerOpen}
-            >
-              <Store size={14} className="shrink-0" aria-hidden />
-              各加盟店概況
-              {franchiseStoreBreakdown.length > 0 && (
-                <span className="text-[10px] font-semibold text-amber-400 tabular-nums">
-                  {franchiseStoreBreakdown.length}
-                </span>
-              )}
-            </button>
-          )}
-          <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 hover:bg-zinc-700 transition-colors font-medium text-xs">
-            今日
+          </span>
+        </h2>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setFranchisePickerOpen(true)}
+            className="inline-flex shrink-0 items-center gap-1.5 px-3 py-2 bg-zinc-900/80 border border-zinc-700 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:border-amber-600/50 hover:text-amber-200 transition-colors font-medium text-[0.825rem]"
+            title="點此挑選一家加盟店，以該加盟主視角檢視完整營運概況"
+            aria-haspopup="dialog"
+            aria-expanded={franchisePickerOpen}
+          >
+            <Store size={14} className="shrink-0" aria-hidden />
+            各加盟店概況
+            {franchiseStoreBreakdown.length > 0 && (
+              <span className="text-[10px] font-semibold text-amber-400 tabular-nums">
+                {franchiseStoreBreakdown.length}
+              </span>
+            )}
           </button>
-          <button className="px-4 py-2 bg-zinc-800 border border-zinc-700 text-amber-500 rounded-lg hover:bg-zinc-700 transition-colors font-medium text-xs">
-            匯出報表
-          </button>
-        </div>
+        )}
       </div>
-
-      {!isAdmin && (
-        <div className="flex items-center gap-1 flex-wrap">
-          {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setSummaryRange(key)}
-              className={cn(
-                'px-2.5 py-1 rounded-md text-xs border transition-colors',
-                summaryRange === key
-                  ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
-                  : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {isAdmin && adminFinance ? (
-          <>
-            <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
-              <div className="flex items-center gap-2 mb-2 text-zinc-500">
-                <HandCoins size={18} className="text-amber-500" />
-                <p className="text-sm">營收總計（本月）</p>
+          <div className="lg:col-span-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-[1.15rem] sm:p-7">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-500/90">
+                <HandCoins size={22} className="shrink-0 text-amber-500/90" aria-hidden />
+                <h3 className="text-lg font-medium leading-snug text-zinc-100 sm:text-xl">總部營運總覽</h3>
               </div>
-              <div>
-                <h2 className="text-3xl font-light mt-1 text-amber-500 tabular-nums">{moneyTW(adminFinance.revenueTotal)}</h2>
+              <div
+                className={cn(
+                  'ml-auto flex shrink-0 items-center',
+                  isNarrow ? 'w-24 sm:w-auto sm:max-w-[min(12rem,calc(100vw-12rem))]' : '',
+                )}
+              >
+                <DashboardInlineSummaryRangePicker
+                  value={adminFinanceSummaryRange}
+                  onChange={setAdminFinanceSummaryRange}
+                  isNarrow={isNarrow}
+                  ariaLabel="總部營運總覽區間"
+                  wideGapClass="justify-end gap-1.5"
+                />
               </div>
             </div>
+            <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
+              <div className="grid grid-cols-3 divide-x divide-zinc-800/80">
+                <div className="min-w-0 px-2 sm:px-4 first:pl-0">
+                  <div className="flex items-center gap-1.5 text-zinc-500">
+                    <HandCoins size={16} className="text-amber-500 shrink-0" />
+                    <p className="truncate text-xs sm:text-[0.95rem]">
+                      營收總計（{summaryRangeLabel(adminFinanceSummaryRange)}）
+                    </p>
+                  </div>
+                  <h2 className="mt-2.5 truncate text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
+                    {moneyTW(adminFinance.revenueTotal)}
+                  </h2>
+                </div>
 
-            <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
-              <div className="flex items-center gap-2 mb-2 text-zinc-500">
-                <Store size={18} className="text-amber-400" />
-                <p className="text-sm">支出總計（本月）</p>
-              </div>
-              <div>
-                <h2 className="text-3xl font-light mt-1 text-[#f5f2ed] tabular-nums">{moneyTW(adminFinance.expenseTotal)}</h2>
-              </div>
-            </div>
+                <div className="min-w-0 px-2 sm:px-4">
+                  <div className="flex items-center gap-1.5 text-zinc-500">
+                    <Store size={16} className="text-amber-400 shrink-0" />
+                    <p className="truncate text-xs sm:text-[0.95rem]">
+                      支出總計（{summaryRangeLabel(adminFinanceSummaryRange)}）
+                    </p>
+                  </div>
+                  <h2 className="mt-2.5 truncate text-xl font-light text-[#f5f2ed] tabular-nums sm:text-[2.1rem]">
+                    {moneyTW(adminFinance.expenseTotal)}
+                  </h2>
+                </div>
 
-            <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
-              <div className="flex items-center gap-2 mb-2 text-zinc-500">
-                <TrendingUp size={18} className="text-emerald-400" />
-                <p className="text-sm">淨利（本月）</p>
-              </div>
-              <div>
-                <h2
-                  className={cn(
-                    'text-3xl font-light mt-1 tabular-nums',
-                    adminFinance.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'
-                  )}
-                >
-                  {moneyTW(adminFinance.netProfit)}
-                </h2>
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
-              <div className="flex items-center gap-2 mb-2 text-zinc-500">
-                <TrendingUp size={18} className="text-amber-500" />
-                <p className="text-sm">{nonAdminSummary?.rangeLabel ?? '本月'}營收</p>
-              </div>
-              <div>
-                <h2 className="text-3xl font-light mt-1 text-amber-500">{moneyTW(nonAdminSummary?.revenue ?? 0)}</h2>
-                <div className="text-xs mt-2 text-zinc-500">依已完成訂單統計</div>
-              </div>
-            </div>
-
-            <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
-              <div className="flex items-center gap-2 mb-2 text-zinc-500">
-                <FileText size={18} />
-                <p className="text-sm">{nonAdminSummary?.rangeLabel ?? '本月'}營收毛利</p>
-              </div>
-              <div>
-                <h2 className={cn('text-3xl font-light mt-1', (nonAdminSummary?.gross ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
-                  {moneyTW(nonAdminSummary?.gross ?? 0)}
-                </h2>
-                <div className="text-xs mt-2 text-zinc-500">
-                  {franchiseOperatingExpenseModel ? (
-                    <>
-                      營收 − 批貨與自備成本 {moneyTW(nonAdminSummary?.procurementCost ?? 0)}（毛利率{' '}
-                      {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%）；右欄總支出含批貨與流水帳。
-                    </>
-                  ) : (
-                    <>
-                      營收 − 批貨與自備成本 {moneyTW(nonAdminSummary?.procurementCost ?? 0)}（毛利率{' '}
-                      {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%）；批貨僅供參考，右欄營運支出僅計流水帳。
-                    </>
-                  )}
+                <div className="min-w-0 px-2 sm:px-4 last:pr-0">
+                  <div className="flex items-center gap-1.5 text-zinc-500">
+                    <TrendingUp size={16} className="text-emerald-400 shrink-0" />
+                    <p className="truncate text-xs sm:text-[0.95rem]">
+                      淨利（{summaryRangeLabel(adminFinanceSummaryRange)}）
+                    </p>
+                  </div>
+                  <h2
+                    className={cn(
+                      'mt-2.5 truncate text-xl font-light tabular-nums sm:text-[2.1rem]',
+                      adminFinance.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                    )}
+                  >
+                    {moneyTW(adminFinance.netProfit)}
+                  </h2>
                 </div>
               </div>
             </div>
-
-            <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
-              <div className="flex items-center gap-2 mb-2 text-zinc-500">
-                <Target size={18} />
-                <p className="text-sm">
-                  {franchiseOperatingExpenseModel
-                    ? `${nonAdminSummary?.rangeLabel ?? '本月'}支出與淨利`
-                    : `${nonAdminSummary?.rangeLabel ?? '本月'}流水帳支出與淨利`}
-                </p>
+          </div>
+        ) : (
+          <div className="lg:col-span-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-[1.15rem] sm:p-7">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-500/90">
+                <TrendingUp size={22} className="shrink-0" aria-hidden />
+                <h3 className="text-lg font-medium leading-snug text-zinc-100 sm:text-xl">
+                  {nonAdminSummary?.rangeLabel ?? '本月'}營運摘要
+                </h3>
               </div>
-              <div>
-                {franchiseOperatingExpenseModel ? (
-                  <>
-                    <div className="flex justify-between items-end mb-1">
-                      <h2 className="text-3xl font-light mt-1 text-rose-300">{moneyTW(nonAdminSummary?.expense ?? 0)}</h2>
-                      <div className="text-xs text-zinc-500">總支出</div>
-                    </div>
-                    <div className={cn('text-xs mt-2', (nonAdminSummary?.net ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
-                      淨利 {moneyTW(nonAdminSummary?.net ?? 0)}（營收 − 總支出；淨利率{' '}
-                      {nonAdminSummary?.netRate.toFixed(1) ?? '0.0'}%）
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex justify-between items-end mb-1">
-                      <h2 className="text-3xl font-light mt-1 text-rose-300">{moneyTW(nonAdminSummary?.ledgerExpense ?? 0)}</h2>
-                      <div className="text-xs text-zinc-500">流水帳支出</div>
-                    </div>
-                    <div className={cn('text-xs mt-2', (nonAdminSummary?.net ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
-                      淨利 {moneyTW(nonAdminSummary?.net ?? 0)}（營收 − 流水帳支出；淨利率{' '}
-                      {nonAdminSummary?.netRate.toFixed(1) ?? '0.0'}%）
-                    </div>
-                  </>
+              <div
+                className={cn(
+                  'ml-auto flex shrink-0 items-center',
+                  isNarrow ? 'w-24 sm:w-auto sm:max-w-[min(12rem,calc(100vw-12rem))]' : '',
                 )}
+              >
+                <DashboardInlineSummaryRangePicker
+                  value={summaryRange}
+                  onChange={setSummaryRange}
+                  isNarrow={isNarrow}
+                  ariaLabel="營運摘要區間"
+                  wideGapClass="justify-end gap-1.5"
+                />
               </div>
             </div>
-          </>
+            <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
+              <div className="grid grid-cols-3 divide-x divide-zinc-800/80">
+                <div className="min-w-0 px-2 sm:px-4 first:pl-0">
+                  <div className="flex items-center gap-1.5 text-zinc-500">
+                    <TrendingUp size={16} className="shrink-0 text-amber-500" aria-hidden />
+                    <p className="truncate text-xs sm:text-[0.95rem]">營收（{nonAdminSummary?.rangeLabel ?? '本月'}）</p>
+                  </div>
+                  <p className="mt-2.5 truncate text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
+                    {moneyTW(nonAdminSummary?.revenue ?? 0)}
+                  </p>
+                </div>
+
+                <div className="min-w-0 px-2 sm:px-4">
+                  <div className="flex items-center gap-1.5 text-zinc-500">
+                    <FileText size={16} className="shrink-0 text-emerald-400" aria-hidden />
+                    <p className="truncate text-xs sm:text-[0.95rem]">營收毛利</p>
+                  </div>
+                  <p
+                    className={cn(
+                      'mt-2.5 truncate text-xl font-light tabular-nums sm:text-[2.1rem]',
+                      (nonAdminSummary?.gross ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300',
+                    )}
+                  >
+                    {moneyTW(nonAdminSummary?.gross ?? 0)}
+                  </p>
+                  <p className="mt-1.5 truncate text-[11px] text-zinc-500 sm:text-sm">
+                    毛利率 {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%
+                  </p>
+                </div>
+
+                <div className="min-w-0 px-2 sm:px-4 last:pr-0">
+                  <div className="flex items-center gap-1.5 text-zinc-500">
+                    <Target size={16} className="shrink-0 text-rose-300" aria-hidden />
+                    <p className="truncate text-xs sm:text-[0.95rem]">
+                      {franchiseOperatingExpenseModel ? '總支出' : '流水帳支出'}
+                    </p>
+                  </div>
+                  <p className="mt-2.5 truncate text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
+                    {moneyTW(franchiseOperatingExpenseModel ? (nonAdminSummary?.expense ?? 0) : (nonAdminSummary?.ledgerExpense ?? 0))}
+                  </p>
+                  <p
+                    className={cn(
+                      'mt-1.5 truncate text-[11px] sm:text-sm',
+                      (nonAdminSummary?.net ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300',
+                    )}
+                  >
+                    淨利 {moneyTW(nonAdminSummary?.net ?? 0)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -1130,24 +1366,18 @@ export default function Dashboard({
           summary={nonAdminStallGap}
           filterSlot={
             <div className="space-y-2.5">
-              <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
-                <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
-                {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setNonAdminStallGapRange({ kind: 'preset', key })}
-                    className={cn(
-                      'px-2.5 py-1 rounded-md text-xs border transition-colors',
-                      nonAdminStallGapRange.kind === 'preset' && nonAdminStallGapRange.key === key
-                        ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
-                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <StallGapQuickPresetRow
+                range={nonAdminStallGapRange}
+                onPreset={(key) => setNonAdminStallGapRange({ kind: 'preset', key })}
+                onPickCustom={() =>
+                  setNonAdminStallGapRange({
+                    kind: 'custom',
+                    startYmd: nonAdminStallGapResolvedYmd.startYmd,
+                    endYmd: nonAdminStallGapResolvedYmd.endYmd,
+                  })
+                }
+                isNarrow={isNarrow}
+              />
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                 <span className="text-[11px] text-zinc-500 shrink-0">自訂起訖</span>
                 <input
@@ -1189,45 +1419,49 @@ export default function Dashboard({
       )}
 
       {isAdmin && adminRangeSummary && (
-        <div className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <div className="flex items-center gap-2 text-amber-500/90">
-            <TrendingUp size={20} className="shrink-0" />
-              <h3 className="text-lg font-medium text-zinc-100">{adminRangeSummary.rangeLabel}直營店營運摘要</h3>
+        <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-[1.15rem] sm:p-7">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-500/90">
+              <TrendingUp size={22} className="shrink-0" aria-hidden />
+              <h3 className="text-lg font-medium leading-snug text-zinc-100 sm:text-xl">
+                {adminRangeSummary.rangeLabel}直營店營運摘要
+              </h3>
             </div>
-            <div className="flex items-center gap-1">
-              {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setSummaryRange(key)}
-                  className={cn(
-                    'px-2.5 py-1 rounded-md text-xs border transition-colors',
-                    summaryRange === key
-                      ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
-                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
+            <div
+              className={cn(
+                'ml-auto flex shrink-0 items-center',
+                isNarrow ? 'w-24 sm:w-auto sm:max-w-[min(12rem,calc(100vw-12rem))]' : '',
+              )}
+            >
+              <DashboardInlineSummaryRangePicker
+                value={summaryRange}
+                onChange={setSummaryRange}
+                isNarrow={isNarrow}
+                ariaLabel="直營店營運摘要區間"
+                wideGapClass="justify-end gap-1.5"
+              />
             </div>
           </div>
-          <p className="text-xs text-zinc-500 mb-4">
-            直營依盤點日區間加總零售營收；加盟依建單日區間之已完成叫貨（批貨營收）；右欄為同期流水帳支出。總部檢視不列批貨進貨成本，營運支出以流水帳為準。
-          </p>
-          <div className="grid lg:grid-cols-3 gap-4">
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4">
-              <p className="text-xs text-zinc-500">直營店營收</p>
-              <p className="text-2xl mt-1 text-amber-300 tabular-nums">{moneyTW(adminRangeSummary.directRevenue)}</p>
-            </div>
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4">
-              <p className="text-xs text-zinc-500">加盟主批貨營收</p>
-              <p className="text-2xl mt-1 text-amber-300 tabular-nums">{moneyTW(adminRangeSummary.franchiseRevenue)}</p>
-            </div>
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4">
-              <p className="text-xs text-zinc-500">流水帳支出（營運）</p>
-              <p className="text-2xl mt-1 text-rose-300 tabular-nums">{moneyTW(adminRangeSummary.totalExpense)}</p>
+          <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
+            <div className="grid grid-cols-3 divide-x divide-zinc-800/80">
+              <div className="min-w-0 px-2 sm:px-4 first:pl-0">
+                <p className="truncate text-xs text-zinc-500 sm:text-[0.95rem]">直營店營收</p>
+                <p className="mt-2.5 truncate text-xl font-light text-amber-300 tabular-nums sm:text-[2.1rem]">
+                  {moneyTW(adminRangeSummary.directRevenue)}
+                </p>
+              </div>
+              <div className="min-w-0 px-2 sm:px-4">
+                <p className="truncate text-xs text-zinc-500 sm:text-[0.95rem]">加盟主批貨營收</p>
+                <p className="mt-2.5 truncate text-xl font-light text-amber-300 tabular-nums sm:text-[2.1rem]">
+                  {moneyTW(adminRangeSummary.franchiseRevenue)}
+                </p>
+              </div>
+              <div className="min-w-0 px-2 sm:px-4 last:pr-0">
+                <p className="truncate text-xs text-zinc-500 sm:text-[0.95rem]">流水帳支出（營運）</p>
+                <p className="mt-2.5 truncate text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
+                  {moneyTW(adminRangeSummary.totalExpense)}
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -1258,23 +1492,11 @@ export default function Dashboard({
           </summary>
           <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setWeekdayChainFocusIdx(idx)}
-                    className={cn(
-                      'px-2.5 py-1 rounded-md text-xs border transition-colors min-h-[32px]',
-                      weekdayChainFocusIdx === idx
-                        ? 'bg-amber-600/25 border-amber-500/45 text-amber-200'
-                        : 'bg-zinc-950 border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <WeekdayChainPicker
+                focusIdx={weekdayChainFocusIdx}
+                onChange={setWeekdayChainFocusIdx}
+                isNarrow={isNarrow}
+              />
               <p className="text-[11px] text-zinc-500 leading-relaxed max-w-xl lg:text-right lg:self-end">
                 選取日期：<span className="tabular-nums text-zinc-300">{ymdSlash(calendarWeekFocusYmd)}</span>
               </p>
@@ -1458,24 +1680,18 @@ export default function Dashboard({
           summary={adminStallGapRange}
           filterSlot={
             <div className="space-y-2.5">
-              <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
-                <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
-                {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setDirectStallGapRange({ kind: 'preset', key })}
-                    className={cn(
-                      'px-2.5 py-1 rounded-md text-xs border transition-colors',
-                      directStallGapRange.kind === 'preset' && directStallGapRange.key === key
-                        ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
-                        : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <StallGapQuickPresetRow
+                range={directStallGapRange}
+                onPreset={(key) => setDirectStallGapRange({ kind: 'preset', key })}
+                onPickCustom={() =>
+                  setDirectStallGapRange({
+                    kind: 'custom',
+                    startYmd: directStallGapResolvedYmd.startYmd,
+                    endYmd: directStallGapResolvedYmd.endYmd,
+                  })
+                }
+                isNarrow={isNarrow}
+              />
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                 <span className="text-[11px] text-zinc-500 shrink-0">自訂起訖</span>
                 <input
@@ -1673,25 +1889,20 @@ export default function Dashboard({
           <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-4 border-t border-zinc-800/80 flex flex-col gap-5 bg-zinc-900/30">
           {isAdmin ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800/80">
-                <p className="text-xs text-zinc-500">商品營收排行區間（依訂單建單日）</p>
-                <div className="flex flex-wrap items-center gap-1">
-                  {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setProductChartsRange(key)}
-                      className={cn(
-                        'px-2.5 py-1 rounded-md text-xs border transition-colors',
-                        productChartsRange === key
-                          ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
-                          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div
+                className={cn(
+                  'flex gap-3 pb-4 border-b border-zinc-800/80',
+                  isNarrow ? 'flex-col items-stretch' : 'flex-row flex-wrap items-center justify-between',
+                )}
+              >
+                <p className="text-xs text-zinc-500 shrink-0">商品營收排行區間（依訂單建單日）</p>
+                <DashboardSummaryRangePicker
+                  value={productChartsRange}
+                  onChange={setProductChartsRange}
+                  isNarrow={isNarrow}
+                  ariaLabel="商品營收排行區間"
+                  wideGapClass="gap-1"
+                />
               </div>
               <div>
                 <h3 className="text-base font-medium">直營商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
@@ -1808,25 +2019,20 @@ export default function Dashboard({
             </>
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800/80">
-                <p className="text-xs text-zinc-500">商品營收排行區間（依訂單建單日・本店資料）</p>
-                <div className="flex flex-wrap items-center gap-1">
-                  {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setProductChartsRange(key)}
-                      className={cn(
-                        'px-2.5 py-1 rounded-md text-xs border transition-colors',
-                        productChartsRange === key
-                          ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
-                          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div
+                className={cn(
+                  'flex gap-3 pb-4 border-b border-zinc-800/80',
+                  isNarrow ? 'flex-col items-stretch' : 'flex-row flex-wrap items-center justify-between',
+                )}
+              >
+                <p className="text-xs text-zinc-500 shrink-0">商品營收排行區間（依訂單建單日・本店資料）</p>
+                <DashboardSummaryRangePicker
+                  value={productChartsRange}
+                  onChange={setProductChartsRange}
+                  isNarrow={isNarrow}
+                  ariaLabel="商品營收排行區間"
+                  wideGapClass="gap-1"
+                />
               </div>
               <h3 className="text-base font-medium">商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
               <div className="flex-1">

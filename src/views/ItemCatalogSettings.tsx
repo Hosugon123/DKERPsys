@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, Tags, Plus, Trash2 } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { Search, Tags, Plus, Trash2, Save } from 'lucide-react';
 import {
   CATEGORY_CHIPS,
   getBaseSupplyItem,
@@ -61,6 +61,88 @@ async function commitBaseFromForm(
   else await products.catalog.setSupplyItemOverride(id, patch);
 }
 
+type CatalogRowForm = {
+  name: string;
+  price: string;
+  unit: string;
+  tag: string;
+  category: ItemCategory;
+  franchiseeSelfSuppliedForPayable: boolean;
+  retail: string;
+};
+
+function isDraftCatalogRowId(id: string): boolean {
+  return id.startsWith('__draft__');
+}
+
+async function persistCatalogRowFromSnapshot(
+  id: string,
+  item: SupplyItem | null,
+  f: CatalogRowForm
+): Promise<void> {
+  if (isDraftCatalogRowId(id)) {
+    const priceN = Math.round((Number.parseFloat(f.price) || 0) * 100) / 100;
+    if (priceN < 0) return;
+    const newId = await products.catalog.addCustomItem({
+      name: f.name.trim() || '新品項',
+      pricePerPiece: priceN,
+      pieceUnit: f.unit.trim() || '份',
+      category: f.category,
+      tag: f.tag.trim() || undefined,
+    });
+    const defaultR = Math.min(1_000_000, Math.round(priceN * 1.45 * 100) / 100);
+    const retailParsed = Number.parseFloat(f.retail);
+    const retailN = Number.isFinite(retailParsed)
+      ? Math.min(1_000_000, Math.round(retailParsed * 100) / 100)
+      : defaultR;
+    const patch: Parameters<typeof products.catalog.updateCustomItem>[1] = {
+      franchiseeSelfSuppliedForPayable: f.franchiseeSelfSuppliedForPayable,
+    };
+    if (Math.abs(retailN - defaultR) < 0.0001) patch.retailPerPiece = null;
+    else patch.retailPerPiece = retailN;
+    await products.catalog.updateCustomItem(newId, patch);
+    return;
+  }
+  if (!item) return;
+  if (isCustomItemId(item.id)) {
+    const priceN = Math.round((Number.parseFloat(f.price) || 0) * 100) / 100;
+    const defaultR = Math.min(1_000_000, Math.round(priceN * 1.45 * 100) / 100);
+    const retailParsed = Number.parseFloat(f.retail);
+    const retailN = Number.isFinite(retailParsed)
+      ? Math.min(1_000_000, Math.round(retailParsed * 100) / 100)
+      : defaultR;
+    const patch: Partial<SupplyItem> & { retailPerPiece?: number | null } = {
+      name: f.name.trim() || '未命名',
+      pricePerPiece: priceN,
+      pieceUnit: f.unit.trim() || '份',
+      tag: f.tag.trim() || undefined,
+      category: f.category,
+      franchiseeSelfSuppliedForPayable: f.franchiseeSelfSuppliedForPayable,
+    };
+    if (Math.abs(retailN - defaultR) < 0.0001) {
+      if (item.retailPerPiece != null) patch.retailPerPiece = null;
+    } else {
+      patch.retailPerPiece = retailN;
+    }
+    await products.catalog.updateCustomItem(item.id, patch);
+  } else {
+    await commitBaseFromForm(item.id, f);
+  }
+}
+
+function makeDraftSupplyItem(draftKey: string): SupplyItem {
+  return {
+    id: `__draft__${draftKey}`,
+    name: '新品項',
+    pricePerPiece: 0,
+    pieceUnit: '份',
+    orderUnit: '份',
+    piecesPerPackage: 1,
+    status: '庫存充足',
+    category: 'tofu',
+  };
+}
+
 /** 加盟主「本店零售價」專用寫入，與總部 `userCatalog` 的零售覆寫分庫。 */
 function applyRetailForItemOnly(item: SupplyItem, retailStr: string) {
   const defaultR = defaultRetailPerPieceFromWholesale(item);
@@ -82,6 +164,21 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState<'all' | ItemCategory>('all');
   const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
+  const deferSaveCatalog = Boolean(embedded && !retailOnly);
+  const [draftNewKeys, setDraftNewKeys] = useState<string[]>([]);
+  const [dirtyIds, setDirtyIds] = useState<Set<string>>(() => new Set());
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(() => new Set());
+  const [savingCatalog, setSavingCatalog] = useState(false);
+  const snapshotGettersRef = useRef<Map<string, () => CatalogRowForm>>(new Map());
+
+  const markRowDirty = useCallback((id: string) => {
+    setDirtyIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const h = () => setV((x) => x + 1);
@@ -123,6 +220,52 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
     });
   }, [items, search, cat]);
 
+  const visibleFiltered = useMemo(
+    () => filtered.filter((it) => !pendingDeleteIds.has(it.id)),
+    [filtered, pendingDeleteIds]
+  );
+
+  const canSaveCatalog =
+    deferSaveCatalog &&
+    (dirtyIds.size > 0 || pendingDeleteIds.size > 0 || draftNewKeys.length > 0);
+
+  const handleSaveCatalog = useCallback(async () => {
+    if (!deferSaveCatalog || savingCatalog) return;
+    if (dirtyIds.size === 0 && pendingDeleteIds.size === 0 && draftNewKeys.length === 0) return;
+    setSavingCatalog(true);
+    try {
+      const itemsBaseline = getAllSupplyItems('headquarter');
+      const idsPersist = [...dirtyIds].filter((id) => !pendingDeleteIds.has(id));
+      for (const id of idsPersist) {
+        const snapFn = snapshotGettersRef.current.get(id);
+        if (!snapFn) continue;
+        const f = snapFn();
+        const rowItem = isDraftCatalogRowId(id)
+          ? null
+          : itemsBaseline.find((x) => x.id === id) ?? null;
+        await persistCatalogRowFromSnapshot(id, rowItem, f);
+      }
+      for (const id of pendingDeleteIds) {
+        if (isCustomItemId(id)) {
+          await products.catalog.removeCustomItem(id);
+        } else {
+          await products.catalog.clearSupplyItemOverride(id);
+          await products.catalog.hideBaseItem(id);
+        }
+      }
+      setDraftNewKeys([]);
+      setDirtyIds(new Set());
+      setPendingDeleteIds(new Set());
+      setDeleteArmedId(null);
+      snapshotGettersRef.current.clear();
+      setV((x) => x + 1);
+      const nextSt = await products.catalog.loadUserCatalogState();
+      setSt(nextSt);
+    } finally {
+      setSavingCatalog(false);
+    }
+  }, [deferSaveCatalog, savingCatalog, dirtyIds, pendingDeleteIds, draftNewKeys.length]);
+
   const onDeleteForId = useCallback(
     (id: string) => {
       if (deleteArmedId !== id) {
@@ -130,6 +273,25 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
         return;
       }
       setDeleteArmedId(null);
+      if (deferSaveCatalog) {
+        if (isDraftCatalogRowId(id)) {
+          const key = id.slice('__draft__'.length);
+          setDraftNewKeys((keys) => keys.filter((k) => k !== key));
+          setDirtyIds((prev) => {
+            const n = new Set(prev);
+            n.delete(id);
+            return n;
+          });
+          return;
+        }
+        setPendingDeleteIds((prev) => new Set(prev).add(id));
+        setDirtyIds((prev) => {
+          const n = new Set(prev);
+          n.delete(id);
+          return n;
+        });
+        return;
+      }
       if (isCustomItemId(id)) {
         void products.catalog.removeCustomItem(id);
       } else {
@@ -137,7 +299,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
         void products.catalog.hideBaseItem(id);
       }
     },
-    [deleteArmedId]
+    [deleteArmedId, deferSaveCatalog]
   );
 
   return (
@@ -159,29 +321,61 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
       )}
 
       {!retailOnly && (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-start gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-start gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => {
-              void products.catalog.addCustomItem({
-                name: '新品項',
-                pricePerPiece: 0,
-                pieceUnit: '份',
-                category: 'tofu',
-              });
+              if (deferSaveCatalog) {
+                const k =
+                  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                    ? crypto.randomUUID()
+                    : `k${Date.now()}`;
+                const id = `__draft__${k}`;
+                setDraftNewKeys((rows) => [k, ...rows]);
+                setDirtyIds((prev) => new Set(prev).add(id));
+              } else {
+                void products.catalog.addCustomItem({
+                  name: '新品項',
+                  pricePerPiece: 0,
+                  pieceUnit: '份',
+                  category: 'tofu',
+                });
+              }
             }}
             className="inline-flex items-center justify-center gap-2 min-h-10 px-4 rounded-xl bg-amber-600/25 border border-amber-500/50 text-amber-200 text-sm font-semibold hover:bg-amber-600/35"
           >
             <Plus size={18} />
             新增品項
           </button>
+          {deferSaveCatalog && (
+            <button
+              type="button"
+              disabled={!canSaveCatalog || savingCatalog}
+              onClick={() => void handleSaveCatalog()}
+              className={cn(
+                'inline-flex items-center justify-center gap-2 min-h-10 px-4 rounded-xl border text-sm font-semibold',
+                canSaveCatalog && !savingCatalog
+                  ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-200 hover:bg-emerald-600/35'
+                  : 'bg-zinc-800/40 border-zinc-700 text-zinc-500 cursor-not-allowed'
+              )}
+            >
+              <Save size={18} />
+              {savingCatalog ? '儲存中…' : '儲存'}
+            </button>
+          )}
         </div>
       )}
 
       {!retailOnly && (
         <p className="text-[0.6875rem] text-rose-300/80">
-          刪除：第一次點選後再點一次「刪除」才會生效。內建品刪除後不會再出現於叫貨清單。
+          刪除：第一次點選後再點一次「刪除」才會生效。
+          {deferSaveCatalog
+            ? ' 標記刪除後須按「儲存」才會寫入並從叫貨清單移除。'
+            : ' 內建品刪除後不會再出現於叫貨清單。'}
         </p>
+      )}
+      {deferSaveCatalog && (
+        <p className="text-[0.6875rem] text-zinc-500">修改品項後請按「儲存」才會寫入本機資料。</p>
       )}
       <div className="space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
         <div className="relative flex-1 min-w-0 sm:max-w-sm">
@@ -249,13 +443,37 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((it) => (
+              {deferSaveCatalog &&
+                draftNewKeys.map((k) => {
+                  const draftItem = makeDraftSupplyItem(k);
+                  return (
+                    <Fragment key={draftItem.id}>
+                      <ItemRow
+                        item={draftItem}
+                        isCustom
+                        hasOverride={false}
+                        deleteArmed={deleteArmedId === draftItem.id}
+                        deferSave
+                        snapshotGettersRef={snapshotGettersRef}
+                        markRowDirty={markRowDirty}
+                        onPatchBase={() => {}}
+                        onUpdateCustom={() => {}}
+                        onDeleteClick={() => onDeleteForId(draftItem.id)}
+                        onOtherAction={() => setDeleteArmedId(null)}
+                      />
+                    </Fragment>
+                  );
+                })}
+              {visibleFiltered.map((it) => (
                 <Fragment key={it.id}>
                   <ItemRow
                     item={it}
                     isCustom={isCustomItemId(it.id)}
                     hasOverride={isCustomItemId(it.id) || Boolean(overrideOnly[it.id])}
                     deleteArmed={deleteArmedId === it.id}
+                    deferSave={deferSaveCatalog}
+                    snapshotGettersRef={snapshotGettersRef}
+                    markRowDirty={markRowDirty}
                     onPatchBase={(f) => void commitBaseFromForm(it.id, f)}
                     onUpdateCustom={(next) => void products.catalog.updateCustomItem(it.id, next)}
                     onDeleteClick={() => onDeleteForId(it.id)}
@@ -266,7 +484,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
             </tbody>
           </table>
         )}
-        {filtered.length === 0 && (
+        {filtered.length === 0 && (!deferSaveCatalog || draftNewKeys.length === 0) && (
           <p className="p-6 text-center text-zinc-500 text-sm">
             {retailOnly ? '沒有符合的品項。' : '沒有符合的品項。可點「新增品項」。'}
           </p>
@@ -330,6 +548,9 @@ function ItemRow({
   isCustom,
   hasOverride,
   deleteArmed,
+  deferSave = false,
+  snapshotGettersRef,
+  markRowDirty,
   onPatchBase,
   onUpdateCustom,
   onDeleteClick,
@@ -339,20 +560,16 @@ function ItemRow({
   isCustom: boolean;
   hasOverride: boolean;
   deleteArmed: boolean;
-  onPatchBase: (f: {
-    name: string;
-    price: string;
-    unit: string;
-    tag: string;
-    category: ItemCategory;
-    franchiseeSelfSuppliedForPayable: boolean;
-    retail: string;
-  }) => void;
+  deferSave?: boolean;
+  snapshotGettersRef?: MutableRefObject<Map<string, () => CatalogRowForm>>;
+  markRowDirty?: (id: string) => void;
+  onPatchBase: (f: CatalogRowForm) => void;
   onUpdateCustom: (next: Partial<SupplyItem> & { retailPerPiece?: number | null }) => void;
   onDeleteClick: () => void;
   onOtherAction: () => void;
 }) {
   const b = getBaseSupplyItem(item.id);
+  const draftRow = isDraftCatalogRowId(item.id);
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(String(item.pricePerPiece));
   const [retail, setRetail] = useState(() =>
@@ -386,6 +603,35 @@ function ItemRow({
     setFranchiseeSelfSuppliedForPayable(!!item.franchiseeSelfSuppliedForPayable);
   }, [item.id, item.name, item.pricePerPiece, item.pieceUnit, item.tag, item.category, item.retailPerPiece, item.franchiseeSelfSuppliedForPayable]);
 
+  useEffect(() => {
+    if (!deferSave || !snapshotGettersRef) return;
+    snapshotGettersRef.current.set(item.id, () => ({
+      name,
+      price,
+      unit,
+      tag,
+      category,
+      franchiseeSelfSuppliedForPayable,
+      retail,
+    }));
+    return () => {
+      snapshotGettersRef.current.delete(item.id);
+    };
+  }, [
+    deferSave,
+    snapshotGettersRef,
+    item.id,
+    name,
+    price,
+    unit,
+    tag,
+    category,
+    franchiseeSelfSuppliedForPayable,
+    retail,
+  ]);
+
+  const touchDirty = () => markRowDirty?.(item.id);
+
   const doCommit = () => {
     onOtherAction();
     const priceN = Math.round((Number.parseFloat(price) || 0) * 100) / 100;
@@ -414,6 +660,11 @@ function ItemRow({
     }
   };
 
+  const blurCommit = () => {
+    if (deferSave) touchDirty();
+    else doCommit();
+  };
+
   return (
     <tr
       className={cn(
@@ -422,14 +673,19 @@ function ItemRow({
       )}
     >
       <td className="py-2.5 px-2 align-top">
-        <div className="font-mono text-xs text-zinc-500">{item.id}</div>
-        {hasOverride && <span className="text-[0.5625rem] text-amber-500/90 font-medium">已調整</span>}
+        <div className="font-mono text-xs text-zinc-500">{draftRow ? '草稿' : item.id}</div>
+        {hasOverride && !draftRow && (
+          <span className="text-[0.5625rem] text-amber-500/90 font-medium">已調整</span>
+        )}
       </td>
       <td className="py-2.5 px-2 align-top">
         <input
           value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={doCommit}
+          onChange={(e) => {
+            setName(e.target.value);
+            if (deferSave) touchDirty();
+          }}
+          onBlur={blurCommit}
           onFocus={onOtherAction}
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-2 text-zinc-100 text-sm"
         />
@@ -440,8 +696,11 @@ function ItemRow({
       <td className="py-2.5 px-2 align-top text-right">
         <input
           value={price}
-          onChange={(e) => setPrice(e.target.value.replace(/[^\d.]/g, ''))}
-          onBlur={doCommit}
+          onChange={(e) => {
+            setPrice(e.target.value.replace(/[^\d.]/g, ''));
+            if (deferSave) touchDirty();
+          }}
+          onBlur={blurCommit}
           onFocus={onOtherAction}
           inputMode="decimal"
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-2 text-right font-mono text-amber-200 text-sm"
@@ -453,8 +712,11 @@ function ItemRow({
       <td className="py-2.5 px-2 align-top text-right">
         <input
           value={retail}
-          onChange={(e) => setRetail(e.target.value.replace(/[^\d.]/g, ''))}
-          onBlur={doCommit}
+          onChange={(e) => {
+            setRetail(e.target.value.replace(/[^\d.]/g, ''));
+            if (deferSave) touchDirty();
+          }}
+          onBlur={blurCommit}
           onFocus={onOtherAction}
           inputMode="decimal"
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-2 text-right font-mono text-emerald-300/95 text-sm"
@@ -468,8 +730,11 @@ function ItemRow({
       <td className="py-2.5 px-2 align-top">
         <input
           value={unit}
-          onChange={(e) => setUnit(e.target.value)}
-          onBlur={doCommit}
+          onChange={(e) => {
+            setUnit(e.target.value);
+            if (deferSave) touchDirty();
+          }}
+          onBlur={blurCommit}
           onFocus={onOtherAction}
           placeholder="份、兩、條…"
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-1.5 text-sm"
@@ -482,7 +747,8 @@ function ItemRow({
             onOtherAction();
             const c = e.target.value as ItemCategory;
             setCategory(c);
-            if (isCustom) onUpdateCustom({ category: c });
+            if (deferSave) touchDirty();
+            else if (isCustom) onUpdateCustom({ category: c });
             else
               onPatchBase({
                 name,
@@ -512,7 +778,8 @@ function ItemRow({
             onOtherAction();
             const checked = e.target.checked;
             setFranchiseeSelfSuppliedForPayable(checked);
-            if (isCustom) onUpdateCustom({ franchiseeSelfSuppliedForPayable: checked });
+            if (deferSave) touchDirty();
+            else if (isCustom) onUpdateCustom({ franchiseeSelfSuppliedForPayable: checked });
             else
               onPatchBase({
                 name,
@@ -532,8 +799,11 @@ function ItemRow({
       <td className="py-2.5 px-2 align-top">
         <input
           value={tag}
-          onChange={(e) => setTag(e.target.value)}
-          onBlur={doCommit}
+          onChange={(e) => {
+            setTag(e.target.value);
+            if (deferSave) touchDirty();
+          }}
+          onBlur={blurCommit}
           onFocus={onOtherAction}
           placeholder="選填"
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-2 text-sm placeholder:text-zinc-600"

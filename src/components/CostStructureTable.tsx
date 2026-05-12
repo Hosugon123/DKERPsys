@@ -883,9 +883,6 @@ export default function CostStructureTable() {
         )}
       </div>
 
-      <p className="shrink-0 px-2 pb-1.5 pt-1 text-center text-[0.6875rem] text-amber-200/80 lg:hidden">
-        下方表格可<strong className="font-semibold">左右滑動</strong>；必要時可拖曳底部橫向捲軸。
-      </p>
       <div
         className="cost-table-scroll max-w-full min-w-0 flex-1 touch-pan-x overscroll-x-contain rounded-b-2xl pb-2 [-webkit-overflow-scrolling:touch]"
         ref={tableWrapRef}

@@ -944,41 +944,29 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                 </div>
 
                 <div className="flex w-full min-w-0 shrink-0 flex-col lg:w-auto lg:flex-none lg:flex-row items-stretch lg:items-end justify-end gap-2 border-t lg:border-t-0 border-zinc-800 pt-3 lg:pt-0">
-                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-2.5 w-full min-w-0 lg:min-w-[19rem] lg:max-w-[24rem] lg:shrink-0">
+                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-2.5 w-full min-w-0 lg:min-w-[21rem] lg:max-w-[26rem] lg:shrink-0">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.6875rem] sm:text-xs min-w-0">
-                      {userRole !== 'admin' && (
-                        <>
-                          <span className="text-zinc-500">批貨金額</span>
-                          <span className="text-zinc-200 text-right tabular-nums break-all">
-                            $ {Math.round(order.procurementAmount).toLocaleString()}
-                          </span>
-                          <span className="text-zinc-500">自備扣除</span>
-                          <span className="text-zinc-300 text-right tabular-nums break-all">
-                            {order.selfSuppliedDeduction > 0
-                              ? `$ ${Math.round(order.selfSuppliedDeduction).toLocaleString()}`
-                              : '—'}
-                          </span>
-                          <span className="text-zinc-500">實際應付/應收</span>
-                          <span className="text-amber-300 text-right tabular-nums break-all">
-                            $ {Math.round(order.netPayableAmount).toLocaleString()}
-                          </span>
-                        </>
-                      )}
+                      <span className="text-zinc-500 leading-snug">叫貨金額</span>
+                      <span className="text-zinc-200 text-right tabular-nums break-all self-center">
+                        $ {Math.round(order.franchisee === HQ_STORE_LABEL ? 0 : order.netPayableAmount).toLocaleString()}
+                      </span>
+                      <span className="text-zinc-500 leading-snug">自備貨物金額</span>
+                      <span className="text-zinc-300 text-right tabular-nums break-all self-center">
+                        {order.selfSuppliedDeduction > 0
+                          ? `$ ${Math.round(order.selfSuppliedDeduction).toLocaleString()}`
+                          : '—'}
+                      </span>
                       <span className="text-zinc-500">預估金額</span>
-                      <span className="text-zinc-300 text-right tabular-nums break-all">
+                      <span className="text-zinc-300 text-right tabular-nums break-all self-center">
                         {order.estimatedAmount == null ? '—' : `$ ${Math.round(order.estimatedAmount).toLocaleString()}`}
                       </span>
-                      <span className="text-zinc-500">餘貨金額</span>
-                      <span className="text-zinc-300 text-right tabular-nums break-all">
-                        {order.remainAmount == null ? '—' : `$ ${Math.round(order.remainAmount).toLocaleString()}`}
-                      </span>
-                      <span className="text-zinc-500">盤點後營業額</span>
-                      <span className="text-zinc-100 text-right tabular-nums break-all">
+                      <span className="text-zinc-500">盤點後金額</span>
+                      <span className="text-zinc-100 text-right tabular-nums break-all self-center">
                         {order.countedRevenueAmount == null ? '—' : `$ ${Math.round(order.countedRevenueAmount).toLocaleString()}`}
                       </span>
                     </div>
                     <div className="mt-2 pt-2 border-t border-zinc-800/80 flex items-end justify-between gap-3">
-                      <span className="text-[0.6875rem] sm:text-xs text-zinc-400">實際收入金額</span>
+                      <span className="text-[0.6875rem] sm:text-xs text-zinc-400 leading-snug">實際金額</span>
                       <span className="text-xl sm:text-2xl font-light text-amber-500 tabular-nums break-all text-right">
                         {order.actualIncomeAmount == null ? '—' : `$ ${Math.round(order.actualIncomeAmount).toLocaleString()}`}
                       </span>
@@ -1130,15 +1118,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       </div>
                     )}
 
-                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto w-full min-w-0">
+                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto overscroll-x-contain touch-pan-x w-full min-w-0 pb-px">
                       <table
                         className={cn(
                           'w-full table-fixed border-collapse text-left',
                           isPickingThis
                             ? 'min-w-[18rem]'
                             : showOrderProcurementSubtotalCol
-                              ? 'min-w-[48rem]'
-                              : 'min-w-[40rem]'
+                              ? 'min-w-[32rem] sm:min-w-[40rem] md:min-w-[46rem]'
+                              : 'min-w-[26rem] sm:min-w-[34rem] md:min-w-[38rem]',
                         )}
                       >
                         <thead className="bg-zinc-800/50 text-zinc-400 text-[10px] sm:text-xs uppercase border-b border-zinc-700/50">
@@ -1153,7 +1141,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               </>
                             ) : (
                               <>
-                                <th className="py-2 sm:py-2.5 px-2 sm:px-3 font-medium sticky left-0 bg-zinc-800/50 z-[1] w-[34%] min-w-[10rem]">
+                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium max-md:relative max-md:left-auto md:sticky md:left-0 bg-zinc-800/95 md:bg-zinc-800/50 z-[1] w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]">
                                   品項
                                 </th>
                                 <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
@@ -1289,12 +1277,9 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                       : fmtLineQty(orderQtyRounded);
                                   return (
                                     <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
-                                      <td className="py-2 sm:py-2.5 px-2 sm:px-3 align-top sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)] w-[34%] min-w-[10rem]">
-                                        <div className="font-medium text-[#f5f2ed] leading-tight break-keep">
+                                      <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 align-top max-md:relative max-md:left-auto max-md:z-0 max-md:shadow-none md:sticky md:left-0 md:z-[2] bg-zinc-900 md:shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)] w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]">
+                                        <div className="font-medium text-[#f5f2ed] text-[11px] sm:text-sm leading-tight max-md:break-words sm:break-keep">
                                           {line.name}
-                                        </div>
-                                        <div className="mt-0.5 text-[0.65rem] text-zinc-500 leading-tight">
-                                          單位：{line.unit}・叫貨 {fmtLineQty(line.qty)}
                                         </div>
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/90">

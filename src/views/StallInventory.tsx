@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 import {
   Boxes,
   CheckCircle2,
@@ -50,6 +50,11 @@ import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
+}
+
+/** 數量欄旁按鈕不搶焦點；避免虛擬鍵盤收起（touch + pointer／mouse）。 */
+function preventAdjacentInputBlurActivate(e: SyntheticEvent<Element>) {
+  e.preventDefault();
 }
 
 /** 叫貨單內部狀態「已完成」在攤上盤點語境顯示為「已出貨」 */
@@ -545,84 +550,114 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       <div
-        className="rounded-xl border border-amber-800/55 bg-amber-950/20 p-3 sm:p-4 grid sm:grid-cols-2 gap-3 sm:gap-3"
+        className="rounded-xl border border-amber-800/55 bg-amber-950/20 overflow-hidden divide-y divide-amber-900/40"
         role="region"
         aria-label="盤點彙總"
       >
-        <div className="space-y-1.5 border-b sm:border-b-0 sm:border-r border-amber-900/50 pb-3 sm:pb-0 sm:pr-3">
-          <p className="text-[0.6875rem] text-amber-300/80 uppercase tracking-wider">預估與帳面</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs sm:text-sm">
-            <div>
-              <p className="text-zinc-500 text-[0.6875rem] sm:text-xs">預估金額</p>
-              <p className="text-base font-semibold text-emerald-400 tabular-nums">
+        <section className="p-3 sm:p-5 space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 border border-amber-600/35"
+              aria-hidden
+            >
+              <ClipboardList className="text-amber-400/95" size={15} strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-amber-100 tracking-wide">預估與帳面</h3>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 min-[380px]:grid-cols-3 gap-2.5 sm:gap-3">
+            <div className="rounded-lg border border-zinc-800/90 bg-black/25 px-3 py-2.5 sm:py-3">
+              <p className="text-[0.65rem] sm:text-xs text-zinc-500 uppercase tracking-wide">預估金額</p>
+              <p className="mt-1 text-lg sm:text-xl font-semibold text-emerald-400 tabular-nums leading-none">
                 $ {money(dayKpi.estTotal)}
               </p>
             </div>
-            <div>
-              <p className="text-zinc-500 text-[0.6875rem] sm:text-xs">剩餘貨品金額</p>
-              <p className="text-base font-semibold text-emerald-400/90 tabular-nums">
+            <div className="rounded-lg border border-zinc-800/90 bg-black/25 px-3 py-2.5 sm:py-3">
+              <p className="text-[0.65rem] sm:text-xs text-zinc-500 uppercase tracking-wide">
+                剩餘貨品金額
+              </p>
+              <p className="mt-1 text-lg sm:text-xl font-semibold text-emerald-400/90 tabular-nums leading-none">
                 $ {money(dayKpi.remGoodsValue)}
               </p>
             </div>
-            <div>
-              <p className="text-zinc-500 text-[0.6875rem] sm:text-xs">應有營業額</p>
-              <p className="text-base font-semibold text-rose-400 tabular-nums">
+            <div className="rounded-lg border border-rose-900/45 bg-rose-950/[0.14] px-3 py-2.5 sm:py-3 ring-1 ring-rose-500/10 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+              <p className="text-[0.65rem] sm:text-xs text-rose-200/65 font-medium uppercase tracking-wide">
+                應有營業額
+              </p>
+              <p className="mt-1 text-lg sm:text-xl font-semibold text-rose-300 tabular-nums leading-none">
                 $ {money(dayKpi.shouldRevenue)}
               </p>
             </div>
           </div>
-        </div>
-        <div className="space-y-1.5">
-          <p className="text-[0.6875rem] text-amber-300/80 uppercase tracking-wider">實收對帳</p>
-          <div>
-            <label className="text-zinc-500 text-xs">實收現金</label>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+        </section>
+
+        <section className="p-3 sm:p-5 space-y-4 sm:space-y-5">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 border border-amber-600/35"
+              aria-hidden
+            >
+              <Wallet className="text-amber-400/95" size={15} strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-amber-100 tracking-wide">實收對帳</h3>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-4">
+            <label className="block min-w-0 flex-1 space-y-1.5 lg:max-w-[16rem]">
+              <span className="text-xs font-medium text-zinc-400">實收現金</span>
               <input
                 type="text"
                 inputMode="decimal"
                 value={snap.actualRevenue}
-                onChange={(e) =>
-                  setSnap((p) => ({ ...p, actualRevenue: e.target.value }))
-                }
-                className="w-36 min-h-9 rounded-md border border-zinc-600 bg-zinc-900 px-2.5 py-1.5 text-sm text-amber-100 font-mono"
+                onChange={(e) => setSnap((p) => ({ ...p, actualRevenue: e.target.value }))}
+                className="w-full min-h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-base text-amber-100 font-mono tabular-nums shadow-inner"
                 placeholder="0"
+                aria-describedby="stall-diff-explainer"
               />
-              <p className="text-base font-semibold text-emerald-400 tabular-nums">
-                落差{' '}
-                <span className={diff < 0 ? 'text-rose-400' : 'text-zinc-200'}>
-                  {diff < 0 ? '' : '+'}${money(diff)}
-                </span>
+            </label>
+            <div
+              id="stall-diff-explainer"
+              className="flex flex-1 flex-col justify-center rounded-xl border border-amber-900/45 bg-black/35 px-3.5 py-3 sm:px-4 sm:py-4 min-h-[5.75rem]"
+            >
+              <p className="text-[0.65rem] sm:text-xs text-zinc-500 leading-snug">帳面落差</p>
+              <p
+                className={cn(
+                  'mt-1.5 text-2xl sm:text-3xl font-semibold tabular-nums tracking-tight',
+                  diff < 0 ? 'text-rose-400' : diff > 0 ? 'text-emerald-400' : 'text-zinc-200',
+                )}
+              >
+                {diff === 0 ? '$0' : `${diff < 0 ? '−' : '+'}$${money(Math.abs(diff))}`}
               </p>
             </div>
           </div>
-          <div className="mt-2 pt-2 border-t border-amber-900/40 space-y-2">
-            <div>
-              <label className="text-zinc-500 text-[0.6875rem]">認列金額</label>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,13rem)_1fr] sm:gap-4 sm:items-start pt-1 border-t border-amber-900/35">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-zinc-400">認列金額</label>
               <input
                 type="text"
                 inputMode="decimal"
                 value={snap.revenueGapAmount ?? ''}
-                onChange={(e) =>
-                  setSnap((p) => ({ ...p, revenueGapAmount: e.target.value }))
-                }
-                className="mt-0.5 w-full max-w-xs min-h-9 rounded-md border border-zinc-600 bg-zinc-900 px-2.5 py-1.5 text-amber-100 font-mono text-xs sm:text-sm"
+                onChange={(e) => setSnap((p) => ({ ...p, revenueGapAmount: e.target.value }))}
+                className="w-full min-h-10 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-amber-100 font-mono text-sm shadow-inner placeholder:text-zinc-600"
                 placeholder="例：500 或 -200"
               />
             </div>
-            <div>
-              <label className="text-zinc-500 text-[0.6875rem]">落差原因</label>
+            <div className="space-y-1.5 min-w-0">
+              <label className="text-xs font-medium text-zinc-400">落差原因</label>
               <textarea
                 value={snap.revenueGapReason ?? ''}
-                onChange={(e) =>
-                  setSnap((p) => ({ ...p, revenueGapReason: e.target.value }))
-                }
-                rows={2}
-                className="mt-0.5 w-full rounded-md border border-zinc-600 bg-zinc-900 px-2.5 py-1.5 text-xs sm:text-sm text-zinc-200 placeholder:text-zinc-600 resize-y min-h-[3.25rem]"
+                onChange={(e) => setSnap((p) => ({ ...p, revenueGapReason: e.target.value }))}
+                rows={1}
+                className="w-full resize-none min-h-10 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600"
                 placeholder="例：請客、食材耗損、收銀短溢、零錢誤差…"
               />
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950/40 -mx-1 px-1">
@@ -653,6 +688,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   <div className="flex items-center justify-end gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
                     <button
                       type="button"
+                      onPointerDown={preventAdjacentInputBlurActivate}
+                      onTouchStart={preventAdjacentInputBlurActivate}
                       onClick={() => bumpLine(item.id, 'out', -1)}
                       disabled={num(snap.lines[item.id]?.out ?? '') <= 0}
                       className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
@@ -669,6 +706,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     />
                     <button
                       type="button"
+                      onPointerDown={preventAdjacentInputBlurActivate}
+                      onTouchStart={preventAdjacentInputBlurActivate}
                       onClick={() => bumpLine(item.id, 'out', 1)}
                       className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
                       aria-label={`${item.name} 帶出加一`}
@@ -681,6 +720,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap min-w-0">
                     <button
                       type="button"
+                      onPointerDown={preventAdjacentInputBlurActivate}
+                      onTouchStart={preventAdjacentInputBlurActivate}
                       onClick={() => bumpLine(item.id, 'remain', -1)}
                       disabled={c.remainUnfilled || num(snap.lines[item.id]?.remain ?? '') <= 0}
                       className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -693,7 +734,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       onChange={(e) => setLine(item.id, 'remain', e.target.value)}
                       placeholder="必填"
                       className={cn(
-                        'w-8 sm:w-16 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border rounded px-0.5 sm:px-1 font-mono text-[19px] leading-none text-center',
+                        'w-8 sm:w-16 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border rounded px-0.5 sm:px-1 font-mono text-[11px] sm:text-[19px] leading-none text-center placeholder:text-[10px] sm:placeholder:text-[13px]',
                         c.remainUnfilled
                           ? 'border-amber-800/50 border-dashed text-zinc-400 placeholder:text-zinc-600'
                           : c.remain > 0
@@ -705,6 +746,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     />
                     <button
                       type="button"
+                      onPointerDown={preventAdjacentInputBlurActivate}
+                      onTouchStart={preventAdjacentInputBlurActivate}
                       onClick={() => bumpLine(item.id, 'remain', 1)}
                       className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
                       aria-label={`${item.name} 剩餘加一`}
@@ -713,6 +756,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     </button>
                     <button
                       type="button"
+                      onPointerDown={preventAdjacentInputBlurActivate}
+                      onTouchStart={preventAdjacentInputBlurActivate}
                       onClick={() => setLine(item.id, 'remain', '0')}
                       className="shrink-0 h-8 rounded border border-zinc-600 bg-zinc-800/60 px-1 sm:px-1.5 py-0 sm:py-1 text-[14px] sm:text-xs leading-none text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
                     >
