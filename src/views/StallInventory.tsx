@@ -360,10 +360,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             植入訂單
           </button>
         </div>
-        <p className="text-[0.6875rem] sm:text-xs text-zinc-500 mt-2 leading-relaxed">
-          加盟主實際帶出量＝<strong className="text-zinc-400 font-medium">前一日收攤剩餘</strong>
-          ＋<strong className="text-zinc-400 font-medium">本筆訂單叫貨量</strong>（僅限叫貨時有選「欲扣除餘貨的訂單」才會併入前日剩餘；選「不指定」則前日剩餘視為 0）。按「植入訂單」會依此自動填寫各品項帶出（前一日剩餘優先採用已盤點之銷售紀錄）；亦可再手動微調。
-        </p>
         {recomputeMsg && <p className="text-sm text-amber-200/90 mt-3">{recomputeMsg}</p>}
         {ordersInWindow.length === 0 ? (
           <p className="text-sm text-zinc-500 mt-3">

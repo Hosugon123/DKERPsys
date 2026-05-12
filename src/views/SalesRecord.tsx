@@ -13,7 +13,13 @@ import {
   getStallDisplaySoldAtRetail,
 } from '../lib/orderStallDisplayRevenue';
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
-import { num, aggregateStallKpis, computeLine, isStallRemainEntryValid } from '../lib/stallMath';
+import {
+  num,
+  aggregateStallKpis,
+  computeLine,
+  isStallRemainEntryValid,
+  roundProcurementQty,
+} from '../lib/stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry, UpdateStallSnapshotResult } from '../lib/orderHistoryStorage';
@@ -55,8 +61,39 @@ function orderSalesOutletChannel(o: OrderHistoryEntry): 'franchise' | 'direct' {
 type OutletFilter = 'all' | 'direct' | 'franchise';
 const STALL_MAX_Q = 99_999;
 
-function parseStallQty(s: string) {
-  return Math.max(0, Math.min(STALL_MAX_Q, Math.floor(parseInt(s.replace(/[^\d]/g, ''), 10) || 0)));
+/** 輸入欄僅保留數字與單一小數點，小數至多三位（與叫貨量 roundProcurementQty 一致）；允許打字中末尾「.」。 */
+function sanitizeStallQtyTyping(raw: string): string {
+  const cleaned = String(raw).replace(/,/g, '').replace(/[^\d.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  if (firstDot === -1) return cleaned.slice(0, 14);
+
+  const intPart = cleaned.slice(0, firstDot).replace(/\./g, '');
+  let fracPart = cleaned.slice(firstDot + 1).replace(/\./g, '');
+  fracPart = fracPart.slice(0, 3);
+
+  const rawNoComma = String(raw).replace(/,/g, '');
+  const wantsTrailingDot = rawNoComma.endsWith('.') && fracPart === '';
+
+  if (firstDot === 0 && intPart === '') {
+    return fracPart ? `.${fracPart}` : wantsTrailingDot ? '.' : '';
+  }
+  if (wantsTrailingDot) return `${intPart}.`;
+  return fracPart !== '' ? `${intPart}.${fracPart}` : intPart;
+}
+
+/** ±1／上下限判定用：已四捨五入至三位小數並夹在 0～STALL_MAX_Q */
+function stallQtyEffectiveNum(s: string | undefined): number {
+  const n = roundProcurementQty(num(String(s ?? '')));
+  return Math.min(STALL_MAX_Q, Math.max(0, n));
+}
+
+/** ±1 後寫入字串（與 StallInventory bump 格式化一致） */
+function formatStallBumpedQty(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '0';
+  const rounded = Math.min(STALL_MAX_Q, roundProcurementQty(n));
+  if (Number.isInteger(rounded)) return String(rounded);
+  const t = rounded.toFixed(4).replace(/\.?0+$/, '');
+  return t === '' ? '0' : t;
 }
 
 function resolveRecordSnapshot(order: OrderHistoryEntry) {
@@ -227,8 +264,8 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   const bumpStallLineValue = (itemId: string, field: 'out' | 'remain', delta: number) => {
     setStallEditDraft((prev) => {
       if (!prev) return prev;
-      const current = parseStallQty(String(num(prev.lines[itemId]?.[field])));
-      const next = Math.max(0, Math.min(STALL_MAX_Q, current + delta));
+      const current = stallQtyEffectiveNum(prev.lines[itemId]?.[field]);
+      const next = formatStallBumpedQty(current + delta);
       return {
         ...prev,
         lines: {
@@ -237,7 +274,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
             ...prev.lines[itemId],
             out: prev.lines[itemId]?.out ?? '',
             remain: prev.lines[itemId]?.remain ?? '',
-            [field]: String(next),
+            [field]: next,
           },
         },
       };
@@ -245,7 +282,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   };
 
   const setStallLineQtyInput = (itemId: string, field: 'out' | 'remain', raw: string) => {
-    const next = parseStallQty(raw);
+    const next = sanitizeStallQtyTyping(raw);
     setStallEditDraft((prev) => {
       if (!prev) return prev;
       return {
@@ -256,7 +293,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
             ...prev.lines[itemId],
             out: prev.lines[itemId]?.out ?? '',
             remain: prev.lines[itemId]?.remain ?? '',
-            [field]: String(next),
+            [field]: next,
           },
         },
       };
@@ -632,7 +669,8 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                       {isStallEditThis && stallEditDraft && (
                         <div className="space-y-2">
                           <p className="text-xs text-amber-500/90 font-medium">
-                            編輯盤點：可用＋/－或直接輸入；每列 0～{STALL_MAX_Q.toLocaleString()}。
+                            編輯盤點：可用＋/－或直接輸入；每列 0～{STALL_MAX_Q.toLocaleString()}
+                            （至多三位小數）。
                           </p>
                           {stallEditError && (
                             <p className="text-sm text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
@@ -721,7 +759,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           <button
                                             type="button"
                                             onClick={() => bumpStallLineValue(item.id, 'out', -1)}
-                                            disabled={parseStallQty(line.out) <= 0}
+                                            disabled={stallQtyEffectiveNum(line.out) <= 0}
                                             className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                             aria-label={`${item.name} 帶出減一`}
                                           >
@@ -729,8 +767,8 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           </button>
                                           <input
                                             type="text"
-                                            inputMode="numeric"
-                                            value={String(parseStallQty(line.out))}
+                                            inputMode="decimal"
+                                            value={line.out}
                                             onChange={(e) => setStallLineQtyInput(item.id, 'out', e.target.value)}
                                             onFocus={(e) => e.target.select()}
                                             className="w-12 min-w-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1"
@@ -739,7 +777,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           <button
                                             type="button"
                                             onClick={() => bumpStallLineValue(item.id, 'out', 1)}
-                                            disabled={parseStallQty(line.out) >= STALL_MAX_Q}
+                                            disabled={stallQtyEffectiveNum(line.out) >= STALL_MAX_Q}
                                             className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                             aria-label={`${item.name} 帶出加一`}
                                           >
@@ -755,7 +793,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           <button
                                             type="button"
                                             onClick={() => bumpStallLineValue(item.id, 'remain', -1)}
-                                            disabled={parseStallQty(line.remain) <= 0}
+                                            disabled={stallQtyEffectiveNum(line.remain) <= 0}
                                             className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                             aria-label={`${item.name} 剩餘減一`}
                                           >
@@ -763,9 +801,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           </button>
                                           <input
                                             type="text"
-                                            inputMode="numeric"
-                                            value={String(parseStallQty(line.remain))}
-                                            onChange={(e) => setStallLineQtyInput(item.id, 'remain', e.target.value)}
+                                            inputMode="decimal"
+                                            value={line.remain}
+                                            onChange={(e) =>
+                                              setStallLineQtyInput(item.id, 'remain', e.target.value)
+                                            }
                                             onFocus={(e) => e.target.select()}
                                             className={cn(
                                               'w-12 min-w-0 text-center text-base font-bold tabular-nums bg-zinc-900/80 border rounded py-1',
@@ -780,7 +820,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           <button
                                             type="button"
                                             onClick={() => bumpStallLineValue(item.id, 'remain', 1)}
-                                            disabled={parseStallQty(line.remain) >= STALL_MAX_Q}
+                                            disabled={stallQtyEffectiveNum(line.remain) >= STALL_MAX_Q}
                                             className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                             aria-label={`${item.name} 剩餘加一`}
                                           >
