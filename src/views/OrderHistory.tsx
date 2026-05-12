@@ -133,13 +133,13 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
           return (
             <div
               key={order.id}
-              className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden"
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
             >
-              <div className="flex min-w-0 w-full flex-col sm:flex-row">
+              <div className="flex min-w-0 w-full flex-col lg:flex-row">
               <button
                 type="button"
                 onClick={() => setExpandedId(open ? null : order.id)}
-                className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
+                className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-zinc-900/80 transition-colors"
               >
                 <div className="flex items-start gap-4 min-w-0">
                   <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 flex-shrink-0">
@@ -182,7 +182,7 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch sm:self-center">
+                <div className="flex items-center justify-between lg:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch lg:self-center">
                   <div className="text-left sm:text-right min-w-0 sm:max-w-none">
                     <p className="text-xs text-zinc-500">{listAmountLabel}</p>
                     <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums whitespace-nowrap">
@@ -193,7 +193,7 @@ export default function OrderHistory({ userRole }: { userRole: UserRole }) {
                 </div>
               </button>
               {isSuperAdmin && (
-                <div className="flex items-stretch border-t sm:border-t-0 sm:border-l border-zinc-800/80 bg-zinc-900/30">
+                <div className="flex items-stretch border-t lg:border-t-0 lg:border-l border-zinc-800/80 bg-zinc-900">
                   <button
                     type="button"
                     onClick={() => setDeleteModalId(order.id)}

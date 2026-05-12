@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   TrendingUp,
   FileText,
@@ -49,6 +49,12 @@ import {
   type OrderHistoryEntry,
   type OrderActorRole,
 } from '../lib/orderHistoryStorage';
+import { formatSlashDateTimeFromIso } from '../lib/dateDisplay';
+import {
+  DASHBOARD_REVENUE_NOTES_UPDATED_EVENT,
+  getWeekRevenueNote,
+  setWeekRevenueNote,
+} from '../lib/dashboardRevenueNotesStorage';
 
 const HQ_STALL_VIEW = 'headquarter' as const;
 
@@ -65,7 +71,15 @@ function roleVisible(actorRole: OrderActorRole, userRole: UserRole): boolean {
 }
 
 type ProductRevenueRow = { id: number; name: string; revenue: number; qty: number; pct: number };
-type SummaryRangeKey = 'today' | 'week' | 'month' | 'year';
+type SummaryRangeKey = 'today' | 'week' | 'days7' | 'days30' | 'month' | 'year';
+const SUMMARY_RANGE_OPTIONS: ReadonlyArray<{ key: SummaryRangeKey; label: string }> = [
+  { key: 'today', label: '本日' },
+  { key: 'week', label: '本週' },
+  { key: 'days7', label: '7天' },
+  { key: 'days30', label: '30天' },
+  { key: 'month', label: '本月' },
+  { key: 'year', label: '本年' },
+];
 /** 總部「直營盤點落差」專用；與下方營運摘要的 summaryRange 分開，避免必須捲動才能換區間 */
 type DirectStallGapRangeMode =
   | { kind: 'preset'; key: SummaryRangeKey }
@@ -122,9 +136,33 @@ function toYmd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function parseYmdToDate(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function addDaysYmd(ymd: string, days: number): string {
+  const dt = parseYmdToDate(ymd);
+  dt.setDate(dt.getDate() + days);
+  return toYmd(dt);
+}
+
+function startOfWeekMondayYmd(baseYmd: string): string {
+  const dt = parseYmdToDate(baseYmd);
+  const shift = (dt.getDay() + 6) % 7;
+  dt.setDate(dt.getDate() - shift);
+  return toYmd(dt);
+}
+
+function ymdSlash(ymd: string): string {
+  return ymd.replace(/-/g, '/');
+}
+
 function summaryRangeLabel(key: SummaryRangeKey): string {
   if (key === 'today') return '本日';
   if (key === 'week') return '本週';
+  if (key === 'days7') return '7天';
+  if (key === 'days30') return '30天';
   if (key === 'year') return '本年';
   return '本月';
 }
@@ -134,6 +172,16 @@ function resolveRange(key: SummaryRangeKey): { startYmd: string; endYmd: string 
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const end = toYmd(today);
   if (key === 'today') return { startYmd: end, endYmd: end };
+  if (key === 'days7') {
+    const start = new Date(today);
+    start.setDate(today.getDate() - 6);
+    return { startYmd: toYmd(start), endYmd: end };
+  }
+  if (key === 'days30') {
+    const start = new Date(today);
+    start.setDate(today.getDate() - 29);
+    return { startYmd: toYmd(start), endYmd: end };
+  }
   if (key === 'month') {
     const start = new Date(today.getFullYear(), today.getMonth(), 1);
     return { startYmd: toYmd(start), endYmd: end };
@@ -220,8 +268,8 @@ function StallGapDashboardSection({
       </summary>
       <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-0 space-y-4 border-t border-zinc-800/80">
       {filterSlot ? <div className="pt-4 pb-4 border-b border-zinc-800/80">{filterSlot}</div> : null}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
+      <div className="grid lg:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900 p-3">
           <p className="text-xs text-zinc-500">已知原因落差</p>
           <p
             className={cn(
@@ -236,7 +284,7 @@ function StallGapDashboardSection({
             {moneySignedInt(summary.loggedGapSum)}
           </p>
         </div>
-        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
+        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900 p-3">
           <p className="text-xs text-zinc-500">落差總和</p>
           <p className="text-xl font-light text-amber-300/90 tabular-nums mt-1">
             {moneyTW(summary.bookShortfallSum)}
@@ -361,6 +409,12 @@ export default function Dashboard({
     kind: 'preset',
     key: 'month',
   });
+  const [selectedWeekStartYmd, setSelectedWeekStartYmd] = useState(() =>
+    startOfWeekMondayYmd(toYmd(new Date())),
+  );
+  const [weekHighReasonDraft, setWeekHighReasonDraft] = useState('');
+  const [weekLowReasonDraft, setWeekLowReasonDraft] = useState('');
+  const [weekNoteSavedAt, setWeekNoteSavedAt] = useState('');
 
   useEffect(() => {
     if (!isAdmin && franchisePickerOpen) {
@@ -376,6 +430,18 @@ export default function Dashboard({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [franchisePickerOpen]);
+
+  useEffect(() => {
+    const sync = () => {
+      const note = getWeekRevenueNote(selectedWeekStartYmd);
+      setWeekHighReasonDraft(note.highReason);
+      setWeekLowReasonDraft(note.lowReason);
+      setWeekNoteSavedAt(note.updatedAt);
+    };
+    sync();
+    window.addEventListener(DASHBOARD_REVENUE_NOTES_UPDATED_EVENT, sync);
+    return () => window.removeEventListener(DASHBOARD_REVENUE_NOTES_UPDATED_EVENT, sync);
+  }, [selectedWeekStartYmd]);
 
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
@@ -462,6 +528,68 @@ export default function Dashboard({
     }
     return listAccountingLedgerEntries();
   }, [viewAsFranchisee, financeTick, userRole]);
+
+  const revenueByYmd = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const o of effectiveOrders) {
+      if (!o.stallCountCompletedAt) continue;
+      const stallYmd = stallCountAttributeYmd(o);
+      if (!stallYmd) continue;
+      const rev = getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW) ?? 0;
+      map.set(stallYmd, (map.get(stallYmd) ?? 0) + rev);
+    }
+    return map;
+  }, [effectiveOrders]);
+
+  const weekDailyRows = useMemo(() => {
+    const weekdayLabels = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'] as const;
+    return weekdayLabels.map((label, idx) => {
+      const ymd = addDaysYmd(selectedWeekStartYmd, idx);
+      return { label, ymd, revenue: revenueByYmd.get(ymd) ?? 0 };
+    });
+  }, [revenueByYmd, selectedWeekStartYmd]);
+
+  const weekRevenueTotal = useMemo(
+    () => weekDailyRows.reduce((sum, row) => sum + row.revenue, 0),
+    [weekDailyRows],
+  );
+
+  const historyWeekStats = useMemo(() => {
+    const weekMap = new Map<string, number>();
+    for (const [ymd, amount] of revenueByYmd.entries()) {
+      const weekStart = startOfWeekMondayYmd(ymd);
+      weekMap.set(weekStart, (weekMap.get(weekStart) ?? 0) + amount);
+    }
+    const rows = Array.from(weekMap.entries()).map(([weekStartYmd, revenue]) => ({ weekStartYmd, revenue }));
+    rows.sort((a, b) => a.weekStartYmd.localeCompare(b.weekStartYmd));
+    if (rows.length === 0) return { weekCount: 0, avg: 0, max: null as null | { weekStartYmd: string; revenue: number }, min: null as null | { weekStartYmd: string; revenue: number } };
+    const total = rows.reduce((s, r) => s + r.revenue, 0);
+    const max = rows.reduce((best, cur) => (cur.revenue > best.revenue ? cur : best), rows[0]!);
+    const min = rows.reduce((best, cur) => (cur.revenue < best.revenue ? cur : best), rows[0]!);
+    return { weekCount: rows.length, avg: total / rows.length, max, min };
+  }, [revenueByYmd]);
+
+  const weekdayHistoryAverages = useMemo(() => {
+    const sums = [0, 0, 0, 0, 0, 0, 0];
+    const counts = [0, 0, 0, 0, 0, 0, 0];
+    for (const [ymd, amount] of revenueByYmd.entries()) {
+      const dt = parseYmdToDate(ymd);
+      const mondayFirst = (dt.getDay() + 6) % 7;
+      sums[mondayFirst] += amount;
+      counts[mondayFirst] += 1;
+    }
+    return sums.map((sum, idx) => ({ idx, avg: counts[idx] > 0 ? sum / counts[idx] : 0 }));
+  }, [revenueByYmd]);
+
+  const weekHighestDay = useMemo(() => {
+    if (weekDailyRows.length === 0) return null;
+    return weekDailyRows.reduce((best, cur) => (cur.revenue > best.revenue ? cur : best), weekDailyRows[0]!);
+  }, [weekDailyRows]);
+
+  const weekLowestDay = useMemo(() => {
+    if (weekDailyRows.length === 0) return null;
+    return weekDailyRows.reduce((best, cur) => (cur.revenue < best.revenue ? cur : best), weekDailyRows[0]!);
+  }, [weekDailyRows]);
 
   const nonAdminSummary = useMemo(() => {
     if (isAdmin) return null;
@@ -750,10 +878,20 @@ export default function Dashboard({
       );
   }, [dashboardOrders, realIsAdmin, summaryRange]);
 
+  const saveWeekRevenueReasons = useCallback(() => {
+    const note = setWeekRevenueNote(selectedWeekStartYmd, {
+      highReason: weekHighReasonDraft.trim(),
+      lowReason: weekLowReasonDraft.trim(),
+    });
+    setWeekHighReasonDraft(note.highReason);
+    setWeekLowReasonDraft(note.lowReason);
+    setWeekNoteSavedAt(note.updatedAt);
+  }, [selectedWeekStartYmd, weekHighReasonDraft, weekLowReasonDraft]);
+
   return (
     <div className="space-y-6">
       {viewAsFranchisee && (
-        <div className="rounded-xl border border-amber-600/40 bg-amber-600/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="rounded-xl border border-amber-600/40 bg-amber-600/10 px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
           <div className="flex items-start sm:items-center gap-2 min-w-0">
             <Eye size={18} className="text-amber-400 shrink-0 mt-0.5 sm:mt-0" aria-hidden />
             <p className="text-sm text-amber-100 leading-relaxed">
@@ -774,7 +912,7 @@ export default function Dashboard({
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <LayoutDashboard className="text-amber-500 shrink-0" size={28} />
@@ -815,12 +953,7 @@ export default function Dashboard({
 
       {!isAdmin && (
         <div className="flex items-center gap-1 flex-wrap">
-          {([
-            ['today', '本日'],
-            ['week', '本週'],
-            ['month', '本月'],
-            ['year', '本年'],
-          ] as const).map(([key, label]) => (
+          {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
@@ -838,7 +971,7 @@ export default function Dashboard({
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {isAdmin && adminFinance ? (
           <>
             <div className="bg-zinc-900/50 rounded-2xl p-5 border border-zinc-800 flex flex-col justify-between">
@@ -925,6 +1058,150 @@ export default function Dashboard({
         )}
       </div>
 
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
+        <details className="group" open>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-5 text-left [&::-webkit-details-marker]:hidden">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base sm:text-lg font-medium text-zinc-100">週營業額分析（週一～週日）</h3>
+              <p className="text-xs text-zinc-500 mt-1">
+                目前週期：{ymdSlash(selectedWeekStartYmd)} ～ {ymdSlash(addDaysYmd(selectedWeekStartYmd, 6))}
+                <span className="text-zinc-600 ml-1">（點此收折/展開）</span>
+              </p>
+            </div>
+            <ChevronDown
+              className="h-5 w-5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+          <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedWeekStartYmd((prev) => addDaysYmd(prev, -7))}
+                  className="px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 text-xs hover:text-zinc-100"
+                >
+                  上一週
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedWeekStartYmd(startOfWeekMondayYmd(toYmd(new Date())))}
+                  className="px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 text-xs hover:text-zinc-100"
+                >
+                  本週
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedWeekStartYmd((prev) => addDaysYmd(prev, 7))}
+                  className="px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 text-xs hover:text-zinc-100"
+                >
+                  下一週
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+            <p className="text-xs text-zinc-500">本週營業額</p>
+            <p className="text-xl font-light text-amber-300 tabular-nums mt-1">{moneyTW(weekRevenueTotal)}</p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+            <p className="text-xs text-zinc-500">歷史平均（每週）</p>
+            <p className="text-xl font-light text-zinc-100 tabular-nums mt-1">{moneyTW(historyWeekStats.avg)}</p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+            <p className="text-xs text-zinc-500">歷史最高（每週）</p>
+            <p className="text-lg font-light text-emerald-300 tabular-nums mt-1">
+              {historyWeekStats.max ? moneyTW(historyWeekStats.max.revenue) : '—'}
+            </p>
+            <p className="text-[11px] text-zinc-500 mt-1">
+              {historyWeekStats.max ? ymdSlash(historyWeekStats.max.weekStartYmd) : '尚無資料'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+            <p className="text-xs text-zinc-500">歷史最低（每週）</p>
+            <p className="text-lg font-light text-rose-300 tabular-nums mt-1">
+              {historyWeekStats.min ? moneyTW(historyWeekStats.min.revenue) : '—'}
+            </p>
+            <p className="text-[11px] text-zinc-500 mt-1">
+              {historyWeekStats.min ? ymdSlash(historyWeekStats.min.weekStartYmd) : '尚無資料'}
+            </p>
+          </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <table className="w-full min-w-[780px] text-left text-sm">
+            <thead className="bg-zinc-900/90 border-b border-zinc-800 text-zinc-500 text-xs">
+              <tr>
+                <th className="px-3 py-2 font-medium">星期</th>
+                <th className="px-3 py-2 font-medium">日期</th>
+                <th className="px-3 py-2 font-medium text-right">本週營業額</th>
+                <th className="px-3 py-2 font-medium text-right">歷史同星期平均</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/70">
+              {weekDailyRows.map((row, idx) => (
+                <tr key={row.ymd} className="text-zinc-300 hover:bg-white/[0.02]">
+                  <td className="px-3 py-2 whitespace-nowrap">{row.label}</td>
+                  <td className="px-3 py-2 tabular-nums text-zinc-400">{ymdSlash(row.ymd)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-amber-200">{moneyTW(row.revenue)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                    {moneyTW(weekdayHistoryAverages[idx]?.avg ?? 0)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
+            <p className="text-xs text-zinc-500">
+              本週最高日：
+              {weekHighestDay ? `${weekHighestDay.label}（${ymdSlash(weekHighestDay.ymd)}，${moneyTW(weekHighestDay.revenue)}）` : '—'}
+            </p>
+            <label className="block mt-2 text-xs text-zinc-400">最高原因備註</label>
+            <textarea
+              value={weekHighReasonDraft}
+              onChange={(e) => setWeekHighReasonDraft(e.target.value)}
+              rows={2}
+              className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-600/60"
+              placeholder="例：連假活動、外送平台曝光、團購訂單"
+            />
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
+            <p className="text-xs text-zinc-500">
+              本週最低日：
+              {weekLowestDay ? `${weekLowestDay.label}（${ymdSlash(weekLowestDay.ymd)}，${moneyTW(weekLowestDay.revenue)}）` : '—'}
+            </p>
+            <label className="block mt-2 text-xs text-zinc-400">最低原因備註</label>
+            <textarea
+              value={weekLowReasonDraft}
+              onChange={(e) => setWeekLowReasonDraft(e.target.value)}
+              rows={2}
+              className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-600/60"
+              placeholder="例：下雨、臨時公休、人力不足、來客下滑"
+            />
+          </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] text-zinc-500">
+            歷史週數：{historyWeekStats.weekCount} 週
+            {weekNoteSavedAt ? ` ・上次儲存：${formatSlashDateTimeFromIso(weekNoteSavedAt)}` : ''}
+          </p>
+          <button
+            type="button"
+            onClick={saveWeekRevenueReasons}
+            className="px-3.5 py-1.5 rounded-md bg-amber-600 text-zinc-950 text-xs font-semibold hover:bg-amber-500"
+          >
+            儲存高低原因備註
+          </button>
+            </div>
+          </div>
+        </details>
+      </div>
+
       {!isAdmin && nonAdminStallGap && (
         <StallGapDashboardSection
           title={`本店盤點落差與呆帳（${directStallGapRangeLabel(nonAdminStallGapRange)}）`}
@@ -933,7 +1210,7 @@ export default function Dashboard({
             <div className="space-y-2.5">
               <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
                 <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
-                {(['today', 'week', 'month', 'year'] as const).map((key) => (
+                {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
                   <button
                     key={key}
                     type="button"
@@ -945,7 +1222,7 @@ export default function Dashboard({
                         : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
                     )}
                   >
-                    {summaryRangeLabel(key)}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -990,19 +1267,14 @@ export default function Dashboard({
       )}
 
       {isAdmin && adminRangeSummary && (
-        <div className="bg-zinc-900/40 rounded-2xl p-6 border border-zinc-800">
+        <div className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
           <div className="flex items-center justify-between gap-2 mb-1">
             <div className="flex items-center gap-2 text-amber-500/90">
             <TrendingUp size={20} className="shrink-0" />
               <h3 className="text-lg font-medium text-zinc-100">{adminRangeSummary.rangeLabel}直營店營運摘要</h3>
             </div>
             <div className="flex items-center gap-1">
-              {([
-                ['today', '本日'],
-                ['week', '本週'],
-                ['month', '本月'],
-                ['year', '本年'],
-              ] as const).map(([key, label]) => (
+              {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
                 <button
                   key={key}
                   type="button"
@@ -1053,7 +1325,7 @@ export default function Dashboard({
             <div className="space-y-2.5">
               <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
                 <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
-                {(['today', 'week', 'month', 'year'] as const).map((key) => (
+                {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
                   <button
                     key={key}
                     type="button"
@@ -1065,7 +1337,7 @@ export default function Dashboard({
                         : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
                     )}
                   >
-                    {summaryRangeLabel(key)}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -1154,7 +1426,7 @@ export default function Dashboard({
                 <p className="text-sm text-zinc-500 text-center py-8">
                   本期間（{summaryRangeLabel(summaryRange)}）尚無加盟店訂單或盤點資料可彙整。
                   <br />
-                  可關閉本視窗後切換上方時段（本日／本週／本月／本年）試試。
+                  可關閉本視窗後切換上方時段（本日／本週／7天／30天／本月／本年）試試。
                 </p>
               ) : (
                 <>
@@ -1288,12 +1560,7 @@ export default function Dashboard({
               <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800/80">
                 <p className="text-xs text-zinc-500">商品營收排行區間（依訂單建單日）</p>
                 <div className="flex flex-wrap items-center gap-1">
-                  {([
-                    ['today', '本日'],
-                    ['week', '本週'],
-                    ['month', '本月'],
-                    ['year', '本年'],
-                  ] as const).map(([key, label]) => (
+                  {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
                     <button
                       key={key}
                       type="button"
@@ -1428,12 +1695,7 @@ export default function Dashboard({
               <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800/80">
                 <p className="text-xs text-zinc-500">商品營收排行區間（依訂單建單日・本店資料）</p>
                 <div className="flex flex-wrap items-center gap-1">
-                  {([
-                    ['today', '本日'],
-                    ['week', '本週'],
-                    ['month', '本月'],
-                    ['year', '本年'],
-                  ] as const).map(([key, label]) => (
+                  {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
                     <button
                       key={key}
                       type="button"

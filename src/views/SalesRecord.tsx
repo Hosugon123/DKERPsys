@@ -60,6 +60,7 @@ function orderSalesOutletChannel(o: OrderHistoryEntry): 'franchise' | 'direct' {
 
 type OutletFilter = 'all' | 'direct' | 'franchise';
 const STALL_MAX_Q = 99_999;
+const SALES_RECORD_MAX_VISIBLE = 5;
 
 /** 輸入欄僅保留數字與單一小數點，小數至多三位（與叫貨量 roundProcurementQty 一致）；允許打字中末尾「.」。 */
 function sanitizeStallQtyTyping(raw: string): string {
@@ -206,6 +207,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
       );
     });
   }, [orders, searchQuery, activeWeekdays, isSuperAdmin, outletFilter]);
+  const visibleOrders = useMemo(
+    () => filtered.slice(0, SALES_RECORD_MAX_VISIBLE),
+    [filtered]
+  );
 
   /** 與攤上盤點一致：消耗品不納入帳上明細與帶出彙總 */
   const stallDisplayItems = useMemo(
@@ -372,7 +377,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
       )}
 
       <div className="space-y-3">
-        {filtered.map((order) => {
+        {visibleOrders.map((order) => {
           const listStallRetail = getStallDisplaySoldAtRetail(order, supplyRetailView);
           const listAmount =
             listStallRetail != null
@@ -436,13 +441,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           return (
             <div
               key={order.id}
-              className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden"
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
             >
-              <div className="relative min-w-0 w-full flex flex-col sm:flex-row">
+              <div className="relative min-w-0 w-full flex flex-col lg:flex-row">
                 <button
                   type="button"
                   onClick={() => setExpandedId(open ? null : order.id)}
-                  className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-white/[0.02] transition-colors"
+                  className="min-w-0 flex-1 p-4 sm:p-5 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 sm:gap-4 text-left hover:bg-zinc-900/80 transition-colors"
                 >
                 <div className="flex items-start gap-3 sm:gap-4 min-w-0">
                   <div className="hidden sm:flex w-12 h-12 rounded-full bg-zinc-800 items-center justify-center border border-zinc-700 flex-shrink-0">
@@ -450,7 +455,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p
-                      className="text-xs sm:text-[calc(0.75rem*1.3)] font-mono text-zinc-200 mb-1.5 break-words leading-snug"
+                      className="text-xs sm:text-sm font-mono text-zinc-200 mb-1.5 break-all leading-snug"
                       title={order.id}
                     >
                       訂單編號 {order.id}
@@ -478,14 +483,14 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                     </div>
                     <div className="min-w-0 max-w-full space-y-2 text-zinc-500">
                       <div>
-                        <p className="text-[14px] sm:text-xs">訂單日期</p>
-                        <p className="text-[1.35rem] sm:text-[calc(0.875rem*1.56)] text-zinc-100 leading-tight break-keep">
+                        <p className="text-xs">訂單日期</p>
+                        <p className="text-base sm:text-lg text-zinc-100 leading-tight break-keep">
                           {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))}
                         </p>
                       </div>
                       <div>
-                        <p className="text-[14px] sm:text-xs">下單時間</p>
-                        <p className="text-[1.05rem] sm:text-[calc(0.875rem*0.7*1.38)] leading-snug break-keep">
+                        <p className="text-xs">下單時間</p>
+                        <p className="text-sm sm:text-base leading-snug break-keep">
                           {formatSlashDateTimeWithWeekdayFromIso(order.createdAt)}
                         </p>
                       </div>
@@ -507,7 +512,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch sm:self-center">
+                <div className="flex items-center justify-between lg:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch lg:self-center">
                   <div className="text-left sm:text-right min-w-0 sm:max-w-none">
                     <p className="text-xs text-zinc-500">{listAmountLabel}</p>
                     <p className="text-base sm:text-lg font-light text-amber-500 tabular-nums whitespace-nowrap">
@@ -704,7 +709,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                             <table className="w-full text-[11px] sm:text-sm min-w-[56rem]">
                               <thead>
                                 <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[10px] sm:text-xs uppercase">
-                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900/80 z-[1]">
+                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                     品項
                                   </th>
                                   <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
@@ -751,7 +756,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                     : estimatedRetailPerPackage(item);
                                   return (
                                     <tr key={item.id} className="border-b border-zinc-800/60">
-                                      <td className="px-2 sm:px-3 py-2 text-zinc-200 whitespace-nowrap sticky left-0 bg-zinc-900/40 z-[1]">
+                                      <td className="px-2 sm:px-3 py-2 text-zinc-200 whitespace-nowrap sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                         {item.name}
                                       </td>
                                       <td className="px-1.5 sm:px-2 py-2 p-0">
@@ -858,7 +863,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                             <table className="w-full text-[11px] sm:text-sm min-w-[56rem]">
                               <thead>
                                 <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[10px] sm:text-xs uppercase">
-                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900/80 z-[1]">
+                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                     品項
                                   </th>
                                   <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
@@ -890,7 +895,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                               <tbody>
                                 {tableRows.map(({ item, c, unitRetail }) => (
                                   <tr key={item.id} className="border-b border-zinc-800/60">
-                                    <td className="px-2 sm:px-3 py-2 text-zinc-200 sticky left-0 bg-zinc-900/40 z-[1]">
+                                    <td className="px-2 sm:px-3 py-2 text-zinc-200 sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                       {item.name}
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
@@ -941,6 +946,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           );
         })}
       </div>
+      {filtered.length > SALES_RECORD_MAX_VISIBLE && (
+        <p className="text-xs text-zinc-500">
+          僅顯示最新 {SALES_RECORD_MAX_VISIBLE} 筆已盤點訂單（目前符合條件共 {filtered.length} 筆）。
+        </p>
+      )}
 
       {deleteModalId && (
         <div

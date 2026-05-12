@@ -162,7 +162,7 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
 
   if (!isAdmin) {
     return (
-      <div className="max-w-xl mx-auto rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 text-zinc-400 text-sm">
+      <div className="max-w-xl mx-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-400 text-sm">
         數據中心僅限超級管理員使用。
       </div>
     );
@@ -186,7 +186,7 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
         </p>
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-4">
+      <div className="grid lg:grid-cols-2 gap-4">
         <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 p-5 flex flex-col gap-4">
           <div>
             <h3 className="text-base font-semibold text-zinc-100 flex items-center gap-2">

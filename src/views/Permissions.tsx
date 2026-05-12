@@ -368,7 +368,7 @@ export default function Permissions({
 
   if (!isSuperAdmin) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/40 px-6 py-16 text-center">
+      <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 px-6 py-16 text-center">
         <ShieldAlert className="mb-4 text-amber-500" size={48} />
         <p className="text-lg font-semibold text-[#f5f2ed]">無權限瀏覽此頁面</p>
         <p className="mt-2 max-w-sm text-sm text-zinc-500">
@@ -381,7 +381,7 @@ export default function Permissions({
 
   return (
     <div className="space-y-6 pb-24">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <ShieldAlert className="text-amber-500 shrink-0" size={28} />
@@ -400,7 +400,7 @@ export default function Permissions({
         )}
       </div>
 
-      <div className="rounded-2xl border border-amber-800/50 bg-amber-950/25 px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="rounded-2xl border border-amber-800/50 bg-amber-950/25 px-4 py-3 sm:px-5 sm:py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div className="flex items-start gap-2 min-w-0">
           <Hash className="shrink-0 text-amber-500/90 mt-0.5" size={20} />
           <div>
@@ -435,7 +435,7 @@ export default function Permissions({
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 flex flex-col gap-2 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-24 h-24 bg-zinc-800/20 rounded-bl-full -mr-4 -mt-4 z-0"></div>
           <div className="flex items-center gap-2 text-zinc-500 relative z-10">
@@ -471,7 +471,7 @@ export default function Permissions({
       </div>
 
       <div className="bg-zinc-900/30 rounded-2xl border border-zinc-800 overflow-hidden flex flex-col">
-        <div className="p-4 flex flex-col sm:flex-row gap-4 justify-between items-center mb-2">
+        <div className="p-4 flex flex-col lg:flex-row gap-4 justify-between items-center mb-2">
           <div className="flex items-center gap-4 w-full sm:w-auto">
             <div className="relative flex-1 sm:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />

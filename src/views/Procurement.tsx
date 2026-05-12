@@ -19,6 +19,7 @@ import { orders as ordersApi } from '../services/apiService';
 import {
   displayOrderCreatedByLabel,
   effectiveOrderDateYmd,
+  resolveOrderDataScopeId,
   type OrderHistoryLine,
   type OrderHistoryEntry,
 } from '../lib/orderHistoryStorage';
@@ -55,9 +56,9 @@ import { computeLine, aggregateStallKpis, roundProcurementQty, PROCUREMENT_QTY_M
 import {
   formatSlashDateTimeFromIso,
   formatSlashYmdWithWeekdayFromYmd,
-  formatTimeHmFromIso,
 } from '../lib/dateDisplay';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
+import { getDataScopeContext } from '../lib/dataScope';
 import ItemCatalogSettings from './ItemCatalogSettings';
 
 function parseQtyInput(raw: string): number {
@@ -145,7 +146,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   useEffect(() => {
     void (async () => {
       const all = await ordersApi.listOrdersWithStallCountCompleted();
-      setBasisOrdersList(all);
+      const ctx = getDataScopeContext();
+      const scoped = all.filter((o) => {
+        const scope = resolveOrderDataScopeId(o);
+        return Boolean(scope && scope === ctx.scopeId);
+      });
+      setBasisOrdersList(scoped);
     })();
   }, [stallTick]);
 
@@ -596,11 +602,11 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     <option value="">（不指定，下單不扣盤點剩餘）</option>
                     {basisOrders.map((o) => (
                       <option key={o.id} value={o.id}>
-                        訂單日 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ・ 下單 {formatTimeHmFromIso(o.createdAt)} ・ 建單{' '}
-                        {displayOrderCreatedByLabel(o)} · {resolveOrderStoreLabel(o)} · {o.id.slice(0, 12)}…
-                        {o.stallCountBasisYmd
-                          ? ` · 盤點 ${formatYmdWithWeekday(o.stallCountBasisYmd)}`
-                          : ''}
+                        {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ·
+                        建單 {displayOrderCreatedByLabel(o)} ·
+                        {resolveOrderStoreLabel(o)} ·
+                        單號 {o.id} ·
+                        {o.status === '已完成' ? '已出貨' : o.status}／{o.stallCountCompletedAt ? '已盤點' : '未盤點'}
                       </option>
                     ))}
                   </>

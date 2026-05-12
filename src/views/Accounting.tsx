@@ -454,7 +454,7 @@ export default function Accounting({ userRole: _userRole }: { userRole: UserRole
       <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-5 md:p-6">
         <h3 className="text-lg font-semibold text-zinc-200 mb-4">新增紀錄</h3>
         <form onSubmit={onSubmit} className="space-y-4">
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid lg:grid-cols-2 gap-4">
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
                 <CalendarDays size={14} className="text-amber-600/80" />
@@ -510,7 +510,7 @@ export default function Accounting({ userRole: _userRole }: { userRole: UserRole
             </label>
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid lg:grid-cols-2 gap-4">
             <label className="block space-y-1.5 sm:col-span-1">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">類別</span>
               <select
@@ -795,7 +795,7 @@ export default function Accounting({ userRole: _userRole }: { userRole: UserRole
             {filtered.map((row) => (
               <li
                 key={row.id}
-                className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40 px-3 py-3"
+                className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-3 rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-3"
               >
                 <div className="shrink-0 text-xs text-zinc-500 tabular-nums w-[88px]">
                   {ymdDashToSlash(row.dateYmd)}

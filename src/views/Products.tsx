@@ -23,7 +23,7 @@ async function downloadCostBackup() {
 export default function Products() {
   return (
     <div className="min-w-0 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <Boxes className="text-amber-500 shrink-0" size={28} />

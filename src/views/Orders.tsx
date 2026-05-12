@@ -852,16 +852,16 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           return (
             <div
               key={order.id}
-              className="bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden transition-all duration-200"
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden transition-colors"
             >
               {/* Order Header / Summary：左側＋金額可點展開；刪除鈕僅超級管理員，浮在右上角 */}
               <div
                 className={cn(
-                  'relative min-w-0 w-full p-4 sm:p-6 cursor-pointer hover:bg-white/[0.02] flex flex-col sm:flex-row sm:items-stretch gap-3 sm:gap-4'
+                  'relative min-w-0 w-full p-4 sm:p-6 cursor-pointer hover:bg-zinc-900/80 flex flex-col lg:flex-row lg:items-stretch gap-3 sm:gap-4'
                 )}
                 onClick={() => toggleOrder(order.id)}
               >
-                <div className="flex min-w-0 w-full items-center gap-5 sm:min-w-0 sm:flex-1 sm:basis-0 sm:self-center">
+                <div className="flex min-w-0 w-full items-center gap-4 sm:gap-5 lg:min-w-0 lg:flex-1 lg:basis-0 lg:self-center">
                   <div className="hidden sm:flex w-12 h-12 rounded-full bg-zinc-800 items-center justify-center border border-zinc-700 flex-shrink-0">
                     <Package
                       size={24}
@@ -874,7 +874,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p
-                      className="text-[20px] sm:text-[calc(0.75rem*1.3)] font-mono text-zinc-200 mb-1.5 break-words leading-snug"
+                      className="text-base sm:text-lg font-mono text-zinc-200 mb-1.5 break-all leading-snug"
                       title={order.id}
                     >
                       訂單編號 {order.id}
@@ -904,17 +904,17 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     <div className="text-sm text-zinc-500 min-w-0 max-w-full space-y-1 leading-relaxed">
                       {raw ? (
                         <>
-                          <p className="break-words [overflow-wrap:anywhere] text-[19px] sm:text-[calc(0.875rem*1.3)] text-zinc-100 leading-tight">
+                          <p className="break-words [overflow-wrap:anywhere] text-base sm:text-lg text-zinc-100 leading-tight">
                             訂單日期 {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(raw))}
                           </p>
-                          <p className="break-words [overflow-wrap:anywhere] text-[12px] sm:text-[calc(0.875rem*0.7*1.15)]">
+                          <p className="break-words [overflow-wrap:anywhere] text-xs sm:text-sm">
                             下單時間 {formatSlashDateTimeWithWeekdayFromIso(raw.createdAt)}
                           </p>
                           <div className="grid grid-cols-1 min-[430px]:grid-cols-2 gap-y-1 gap-x-3">
-                            <p className="break-words [overflow-wrap:anywhere] text-[16px] sm:text-sm">
+                            <p className="break-words [overflow-wrap:anywhere] text-sm">
                               下單者：{displayOrderCreatedByLabel(raw)}
                             </p>
-                            <p className="break-words [overflow-wrap:anywhere] text-[16px] sm:text-sm">
+                            <p className="break-words [overflow-wrap:anywhere] text-sm">
                               盤點者：{raw.stallCountCompletedAt
                                 ? displayOrderStallCountCompletedByLabel(raw)
                                 : '—'}
@@ -935,8 +935,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   </div>
                 </div>
 
-                <div className="flex w-full min-w-0 shrink-0 flex-col sm:w-auto sm:flex-none sm:flex-row items-stretch sm:items-end justify-end gap-2 border-t sm:border-t-0 border-zinc-800 pt-3 sm:pt-0">
-                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/35 px-3 py-2.5 w-full min-w-0 sm:min-w-[19rem] sm:max-w-[24rem] sm:shrink-0">
+                <div className="flex w-full min-w-0 shrink-0 flex-col lg:w-auto lg:flex-none lg:flex-row items-stretch lg:items-end justify-end gap-2 border-t lg:border-t-0 border-zinc-800 pt-3 lg:pt-0">
+                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-2.5 w-full min-w-0 lg:min-w-[19rem] lg:max-w-[24rem] lg:shrink-0">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.6875rem] sm:text-xs min-w-0">
                       {userRole !== 'employee' && (
                         <>
@@ -978,7 +978,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   </div>
                   <button
                     type="button"
-                    className="self-end sm:self-auto p-2 text-zinc-500 rounded-lg hover:bg-zinc-800 hover:text-zinc-300 transition-colors shrink-0"
+                    className="self-end lg:self-auto p-2 text-zinc-500 rounded-lg hover:bg-zinc-800 hover:text-zinc-300 transition-colors shrink-0"
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleOrder(order.id);
@@ -992,7 +992,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
               {/* Order Details (Expanded) */}
               {isExpanded && (
-                <div className="border-t border-zinc-800 bg-zinc-900/60 p-4 sm:p-6 animate-in slide-in-from-top-2">
+                <div className="border-t border-zinc-800 bg-zinc-950 p-4 sm:p-6 animate-in slide-in-from-top-2">
                   <div className="min-w-0 w-full max-w-full">
                     <div className="mb-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                       <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest shrink-0">
@@ -1255,7 +1255,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 const orderSub = Math.round(line.unitPrice * line.qty * 100) / 100;
                                 return (
                                   <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
-                                    <td className="py-2 sm:py-2.5 px-2 sm:px-3 align-top sticky left-0 bg-zinc-900/40 z-[1]">
+                                    <td className="py-2 sm:py-2.5 px-2 sm:px-3 align-top sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                       <div className="font-medium text-[#f5f2ed] leading-tight break-keep">{line.name}</div>
                                       <div className="mt-0.5 text-[0.65rem] text-zinc-500 leading-tight">
                                         單位：{line.unit}・叫貨 {fmtLineQty(line.qty)}
