@@ -77,13 +77,12 @@ function deleteConfirmMatches(snapshot: DeleteConfirmSnapshot, rawInput: string)
 }
 
 export default function Permissions({
-  userRole: _userRole,
+  userRole,
   sessionLoginId,
 }: {
   userRole: UserRole;
   sessionLoginId: string;
 }) {
-  void _userRole;
   const isSuperAdmin = isSuperAdminSession(sessionLoginId);
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -229,6 +228,7 @@ export default function Permissions({
   };
 
   const submitAdd = async () => {
+    if (!isSuperAdmin) return;
     setAddError(null);
     if (!addLoginId.trim()) {
       setAddError('請填寫登入帳號。');
@@ -264,6 +264,7 @@ export default function Permissions({
 
   const submitEdit = async () => {
     if (!editing) return;
+    if (!isSuperAdmin) return;
     if (!isEditingPrimarySuper && !editLoginId.trim()) {
       setEditError('請填寫登入帳號。');
       return;
@@ -341,7 +342,15 @@ export default function Permissions({
 
   const submitPwdReset = async () => {
     if (!pwdResetFor?.loginId) {
-      setPwdResetErr('此使用者尚未設定登入帳號，請先於「編輯」中補上。');
+      setPwdResetErr(
+        isSuperAdmin
+          ? '此使用者尚未設定登入帳號，請先於「編輯」中補上。'
+          : '此使用者尚未設定登入帳號，請聯絡主要超級管理員於權限編輯中補上。',
+      );
+      return;
+    }
+    if (isPrimarySuperUser(pwdResetFor) && !isSuperAdmin) {
+      setPwdResetErr('主要超級管理員（dk001）登入密碼僅能由該帳號本人變更，或由具超管身分之帳號重設。');
       return;
     }
     setPwdResetErr(null);
@@ -366,14 +375,13 @@ export default function Permissions({
     }
   };
 
-  if (!isSuperAdmin) {
+  if (userRole !== 'admin') {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 px-6 py-16 text-center">
         <ShieldAlert className="mb-4 text-amber-500" size={48} />
         <p className="text-lg font-semibold text-[#f5f2ed]">無權限瀏覽此頁面</p>
         <p className="mt-2 max-w-sm text-sm text-zinc-500">
-          僅主要超級管理員（登入帳號 <span className="font-mono text-zinc-400">{SUPER_ADMIN_LOGIN_ID}</span>
-          ）可使用權限編輯與建立帳號。
+          僅具 BOSS（系統管理員）身分可進入帳號與密碼管理；加盟主與員工請洽店內管理員。
         </p>
       </div>
     );
@@ -387,7 +395,10 @@ export default function Permissions({
             <ShieldAlert className="text-amber-500 shrink-0" size={28} />
             權限設定
           </h2>
-          <p className="text-zinc-500 mt-1">管理系統使用者帳號、角色配置與存取權限。</p>
+          <p className="text-zinc-500 mt-1">
+            管理系統使用者帳號、角色配置與存取權限。
+            {!isSuperAdmin ? ' 您目前可檢視名冊並重設他人登入密碼；新增／刪除帳號與編輯使用者資料僅限主要超級管理員。' : ''}
+          </p>
         </div>
         {isSuperAdmin && (
           <button
@@ -567,8 +578,8 @@ export default function Permissions({
                       </span>
                     </td>
                     <td className="py-4 px-6 text-right whitespace-nowrap">
-                      {isSuperAdmin ? (
-                        <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-2">
+                        {isSuperAdmin && (
                           <button
                             type="button"
                             onClick={() => openEdit(u)}
@@ -577,6 +588,8 @@ export default function Permissions({
                           >
                             <Edit size={18} />
                           </button>
+                        )}
+                        {userRole === 'admin' && (
                           <button
                             type="button"
                             onClick={() => {
@@ -590,10 +603,8 @@ export default function Permissions({
                           >
                             <KeyRound size={18} />
                           </button>
-                        </div>
-                      ) : (
-                        <span className="text-zinc-600 text-xs">—</span>
-                      )}
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

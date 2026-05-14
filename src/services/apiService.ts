@@ -315,6 +315,12 @@ export const accounts = {
       credentialStorage.setCredential(loginId, newPassword);
     });
   },
+  /** 已登入者變更自己的密碼（須通過目前密碼）；remote 模式會一併推送 bundle，避免下次載入被舊雲端覆蓋） */
+  async changeOwnPassword(loginId: string, currentPassword: string, newPassword: string): Promise<void> {
+    return withRemoteStorageWrite(() => {
+      credentialStorage.changeCredential(loginId, currentPassword, newPassword);
+    });
+  },
 };
 
 export type { SystemUser, SystemUserRole, SystemUserStatus, NewSystemUserInput, SystemUserUpdate } from '../lib/systemUsersStorage';

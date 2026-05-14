@@ -5,6 +5,7 @@ import {
   Target,
   Store,
   HandCoins,
+  Package,
   LayoutDashboard,
   ChevronRight,
   ChevronDown,
@@ -242,6 +243,10 @@ const SUMMARY_RANGE_SELECT_CLASS =
 const SUMMARY_RANGE_INLINE_BUTTON_CLASS =
   'inline-flex h-[26px] w-24 items-center justify-between gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-xs font-medium leading-none text-zinc-200 transition-colors hover:border-amber-600/45 hover:text-amber-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
 
+/** 營運 KPI 卡：窄螢幕區間觸發鈕（與卡片同寬、對齊分頁列） */
+const ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS =
+  'flex min-h-10 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm font-medium text-zinc-200 transition-colors hover:border-amber-600/45 hover:text-amber-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
+
 function summaryRangeToggleClass(active: boolean) {
   return cn(
     'px-2.5 py-1 rounded-md text-xs border transition-colors',
@@ -259,6 +264,8 @@ function DashboardSummaryRangePicker({
   narrowSelectClassName,
   selectClassName,
   wideGapClass = 'gap-1.5',
+  /** 寬螢幕時讓各預設區間鈕均分寬度（營運 KPI 工具列用） */
+  wideStretch = false,
 }: {
   value: SummaryRangeKey;
   onChange: (key: SummaryRangeKey) => void;
@@ -267,6 +274,7 @@ function DashboardSummaryRangePicker({
   narrowSelectClassName?: string;
   selectClassName?: string;
   wideGapClass?: string;
+  wideStretch?: boolean;
 }) {
   if (isNarrow) {
     return (
@@ -285,9 +293,22 @@ function DashboardSummaryRangePicker({
     );
   }
   return (
-    <div className={cn('flex flex-wrap items-center', wideGapClass)}>
+    <div
+      className={cn(
+        'flex flex-wrap items-center',
+        wideStretch ? 'w-full min-w-0 gap-1.5 sm:flex-nowrap' : wideGapClass,
+      )}
+    >
       {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-        <button key={key} type="button" onClick={() => onChange(key)} className={summaryRangeToggleClass(value === key)}>
+        <button
+          key={key}
+          type="button"
+          onClick={() => onChange(key)}
+                  className={cn(
+            summaryRangeToggleClass(value === key),
+            wideStretch && 'flex min-h-9 min-w-0 flex-1 basis-0 items-center justify-center text-center',
+          )}
+        >
           {label}
         </button>
       ))}
@@ -301,38 +322,53 @@ function DashboardInlineSummaryRangePicker({
   isNarrow,
   ariaLabel = '區間',
   wideGapClass = 'gap-1.5',
+  narrowTriggerClassName,
+  /** 窄螢幕下列表寬度；預設靠右固定 w-28 */
+  narrowMenuClassName,
+  narrowWrapperClassName,
+  /** 寬螢幕時區間鈕均分整列寬度 */
+  wideStretch = false,
 }: {
   value: SummaryRangeKey;
   onChange: (key: SummaryRangeKey) => void;
   isNarrow: boolean;
   ariaLabel?: string;
   wideGapClass?: string;
+  /** 窄螢幕下拉觸發鈕 class（預設為 {@link SUMMARY_RANGE_INLINE_BUTTON_CLASS}） */
+  narrowTriggerClassName?: string;
+  narrowMenuClassName?: string;
+  /** 窄螢幕時外層容器 class（例：w-full min-w-0 與觸發鈕同寬） */
+  narrowWrapperClassName?: string;
+  wideStretch?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const current = SUMMARY_RANGE_OPTIONS.find((option) => option.key === value);
 
   if (!isNarrow) {
     return (
-      <DashboardSummaryRangePicker
-        value={value}
-        onChange={onChange}
-        isNarrow={isNarrow}
-        ariaLabel={ariaLabel}
-        wideGapClass={wideGapClass}
-      />
+      <div className={cn(wideStretch && 'w-full min-w-0')}>
+        <DashboardSummaryRangePicker
+          value={value}
+          onChange={onChange}
+          isNarrow={isNarrow}
+          ariaLabel={ariaLabel}
+          wideGapClass={wideGapClass}
+          wideStretch={wideStretch}
+        />
+      </div>
     );
   }
 
   return (
     <div
-      className="relative"
+      className={cn('relative', narrowWrapperClassName)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
       }}
     >
       <button
         type="button"
-        className={SUMMARY_RANGE_INLINE_BUTTON_CLASS}
+        className={narrowTriggerClassName ?? SUMMARY_RANGE_INLINE_BUTTON_CLASS}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -349,7 +385,10 @@ function DashboardInlineSummaryRangePicker({
         <div
           role="listbox"
           aria-label={ariaLabel}
-          className="absolute right-0 top-full z-30 mt-1 w-28 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30"
+          className={cn(
+            'absolute top-full z-30 mt-1 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30',
+            narrowMenuClassName ?? 'right-0 w-28',
+          )}
         >
           {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
             <button
@@ -672,8 +711,10 @@ export default function Dashboard({
   const [financeTick, setFinanceTick] = useState(0);
   const [orderTick, setOrderTick] = useState(0);
   const [summaryRange, setSummaryRange] = useState<SummaryRangeKey>('month');
-  /** 總部頂部三卡（營收／支出／淨利）專用區間，與下方「營運摘要」summaryRange 可分開設定 */
+  /** 總部合併 KPI 卡（總部營運總覽／直營店營運摘要）專用區間；與其他區塊的 summaryRange 可分開設定 */
   const [adminFinanceSummaryRange, setAdminFinanceSummaryRange] = useState<SummaryRangeKey>('month');
+  /** 總部合併 KPI 卡：總覽四欄 vs 直營兩欄 */
+  const [adminKpiTab, setAdminKpiTab] = useState<'hq-overview' | 'direct-stall'>('hq-overview');
   /** 商品營收圓餅專用區間（總部與本店共用；本店僅含可視訂單）；與營運摘要 summaryRange 分開 */
   const [productChartsRange, setProductChartsRange] = useState<SummaryRangeKey>('month');
   const [showAllDirect, setShowAllDirect] = useState(false);
@@ -785,6 +826,30 @@ export default function Dashboard({
     all.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     return all;
   }, [userRole, orderTick]);
+
+  /**
+   * 與本店營運摘要「營收毛利」一致：直營盤點零售 − 同期直營已完成盤點訂單叫貨合計（訂單 totalAmount）。
+   * 總覽淨利旁之毛利：營收總計 − 上述直營叫貨合計（加盟批貨收入不另扣進貨）；毛利率皆以對應營收為分母。
+   */
+  const adminFinanceGrossMetrics = useMemo(() => {
+    if (!isAdmin || !adminFinance) return null;
+    const { startYmd, endYmd } = resolveRange(adminFinanceSummaryRange);
+    let directProcurement = 0;
+    for (const o of dashboardOrders) {
+      if (!orderIsHeadquartersDirectScoped(o)) continue;
+      if (!o.stallCountCompletedAt) continue;
+      const stallYmd = stallCountAttributeYmd(o);
+      if (!stallYmd || stallYmd < startYmd || stallYmd > endYmd) continue;
+      directProcurement += o.totalAmount;
+    }
+    const directRev = adminFinance.directStoreStallRetailTotal;
+    const directGross = directRev - directProcurement;
+    const directGrossRate = pct(directGross, directRev);
+    const revTotal = adminFinance.revenueTotal;
+    const overviewGross = revTotal - directProcurement;
+    const overviewGrossRate = pct(overviewGross, revTotal);
+    return { directProcurement, directGross, directGrossRate, overviewGross, overviewGrossRate };
+  }, [isAdmin, adminFinance, adminFinanceSummaryRange, dashboardOrders]);
 
   /**
    * 「實際渲染」用的訂單清單：view-as 時限縮為該加盟主之單，其他情境同 dashboardOrders。
@@ -1033,41 +1098,6 @@ export default function Dashboard({
     [nonAdminStallGapRange],
   );
 
-  const adminRangeSummary = useMemo(() => {
-    if (!isAdmin) return null;
-    const { startYmd, endYmd } = resolveRange(summaryRange);
-
-    let directRevenue = 0;
-    let franchiseRevenue = 0;
-
-    for (const o of dashboardOrders) {
-      if (orderIsHeadquartersDirectScoped(o)) {
-        const stallYmd = stallCountAttributeYmd(o);
-        if (o.stallCountCompletedAt && stallYmd && stallYmd >= startYmd && stallYmd <= endYmd) {
-          const rev = getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW);
-          if (rev != null) directRevenue += rev;
-        }
-      } else if (orderIsFranchiseBusinessScoped(o) && o.status === '已完成') {
-        const ymd0 = effectiveOrderDateYmd(o);
-        if (ymd0 >= startYmd && ymd0 <= endYmd) {
-          const selfSupplied = o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
-          franchiseRevenue += Math.max(0, o.totalAmount - selfSupplied);
-        }
-      }
-    }
-
-    const totalExpense = listAccountingLedgerEntries()
-      .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
-      .reduce((s, e) => s + e.amount, 0);
-
-    return {
-      directRevenue,
-      franchiseRevenue,
-      totalExpense,
-      rangeLabel: summaryRangeLabel(summaryRange),
-    };
-  }, [dashboardOrders, isAdmin, summaryRange, financeTick]);
-
   const adminDirectProducts = useMemo(() => {
     if (!isAdmin) return [];
     return aggregateProductRevenue(
@@ -1215,69 +1245,155 @@ export default function Dashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {isAdmin && adminFinance ? (
           <div className="lg:col-span-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-[1.15rem] sm:p-7">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-500/90">
-                <HandCoins size={22} className="shrink-0 text-amber-500/90" aria-hidden />
-                <h3 className="text-lg font-medium leading-snug text-zinc-100 sm:text-xl">總部營運總覽</h3>
-              </div>
-              <div
-                className={cn(
-                  'ml-auto flex shrink-0 items-center',
-                  isNarrow ? 'w-24 sm:w-auto sm:max-w-[min(12rem,calc(100vw-12rem))]' : '',
-                )}
-              >
-                <DashboardInlineSummaryRangePicker
-                  value={adminFinanceSummaryRange}
-                  onChange={setAdminFinanceSummaryRange}
-                  isNarrow={isNarrow}
-                  ariaLabel="總部營運總覽區間"
-                  wideGapClass="justify-end gap-1.5"
-                />
-              </div>
-            </div>
-            <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
-              <div className="grid grid-cols-3 divide-x divide-zinc-800/80">
-                <div className="min-w-0 px-2 sm:px-4 first:pl-0">
-                  <div className="flex items-center gap-1.5 text-zinc-500">
-                    <HandCoins size={16} className="text-amber-500 shrink-0" />
-                    <p className="truncate text-xs sm:text-[0.95rem]">
-                      營收總計（{summaryRangeLabel(adminFinanceSummaryRange)}）
-                    </p>
-                  </div>
-                  <h2 className="mt-2.5 truncate text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
-                    {moneyTW(adminFinance.revenueTotal)}
-                  </h2>
-                </div>
-
-                <div className="min-w-0 px-2 sm:px-4">
-                  <div className="flex items-center gap-1.5 text-zinc-500">
-                    <Store size={16} className="text-amber-400 shrink-0" />
-                    <p className="truncate text-xs sm:text-[0.95rem]">
-                      支出總計（{summaryRangeLabel(adminFinanceSummaryRange)}）
-                    </p>
-                  </div>
-                  <h2 className="mt-2.5 truncate text-xl font-light text-[#f5f2ed] tabular-nums sm:text-[2.1rem]">
-                    {moneyTW(adminFinance.expenseTotal)}
-                  </h2>
-                </div>
-
-                <div className="min-w-0 px-2 sm:px-4 last:pr-0">
-                  <div className="flex items-center gap-1.5 text-zinc-500">
-                    <TrendingUp size={16} className="text-emerald-400 shrink-0" />
-                    <p className="truncate text-xs sm:text-[0.95rem]">
-                      淨利（{summaryRangeLabel(adminFinanceSummaryRange)}）
-                    </p>
-                  </div>
-                  <h2
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-2">
+              <div className="flex flex-col gap-2.5">
+                <div
+                  className="grid w-full grid-cols-2 gap-1.5"
+                  role="tablist"
+                  aria-label="營運數據檢視"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={adminKpiTab === 'hq-overview'}
+                    onClick={() => setAdminKpiTab('hq-overview')}
                     className={cn(
-                      'mt-2.5 truncate text-xl font-light tabular-nums sm:text-[2.1rem]',
-                      adminFinance.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                      'min-h-9 w-full rounded-lg px-2 py-2 text-center text-xs font-medium transition-colors sm:px-3 sm:text-sm',
+                      adminKpiTab === 'hq-overview'
+                        ? 'bg-amber-600/20 text-amber-200 ring-1 ring-amber-500/35'
+                        : 'text-zinc-400 hover:bg-zinc-900/80 hover:text-zinc-200',
                     )}
                   >
-                    {moneyTW(adminFinance.netProfit)}
-                  </h2>
+                    總部營運總覽
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={adminKpiTab === 'direct-stall'}
+                    onClick={() => setAdminKpiTab('direct-stall')}
+                    className={cn(
+                      'min-h-9 w-full rounded-lg px-2 py-2 text-center text-xs font-medium transition-colors sm:px-3 sm:text-sm',
+                      adminKpiTab === 'direct-stall'
+                        ? 'bg-amber-600/20 text-amber-200 ring-1 ring-amber-500/35'
+                        : 'text-zinc-400 hover:bg-zinc-900/80 hover:text-zinc-200',
+                    )}
+                  >
+                    直營店營運摘要
+                  </button>
+                </div>
+                <div className="w-full min-w-0 border-t border-zinc-800/80 pt-2.5">
+                  <DashboardInlineSummaryRangePicker
+                    value={adminFinanceSummaryRange}
+                    onChange={setAdminFinanceSummaryRange}
+                    isNarrow={isNarrow}
+                    ariaLabel="營運數據區間"
+                    wideGapClass="gap-1.5"
+                    narrowTriggerClassName={ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS}
+                    narrowMenuClassName="left-0 right-0 w-full"
+                    narrowWrapperClassName="w-full min-w-0"
+                    wideStretch
+                  />
                 </div>
               </div>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
+              {adminKpiTab === 'hq-overview' ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-0 lg:divide-x lg:divide-zinc-800/80">
+                  <div className="min-w-0 lg:px-4 lg:first:pl-0">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <Store size={16} className="shrink-0 text-amber-400" aria-hidden />
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">直營店營收</p>
+                    </div>
+                    <h2 className="mt-2.5 text-xl font-light text-amber-400 tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminFinance.directStoreStallRetailTotal)}
+                    </h2>
+                  </div>
+                  <div className="min-w-0 lg:px-4">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <Package size={16} className="shrink-0 text-amber-500/90" aria-hidden />
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">加盟店批貨收入</p>
+                    </div>
+                    <h2 className="mt-2.5 text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminFinance.franchiseeOrderTotal)}
+                    </h2>
+                  </div>
+                  <div className="min-w-0 lg:px-4">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <Target size={16} className="shrink-0 text-rose-300/90" aria-hidden />
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">總支出</p>
+                    </div>
+                    <h2 className="mt-2.5 text-xl font-light text-[#f5f2ed] tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminFinance.expenseTotal)}
+                    </h2>
+                  </div>
+                  <div className="min-w-0 lg:px-4 lg:last:pr-0">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <TrendingUp size={16} className="shrink-0 text-emerald-400" aria-hidden />
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">淨利</p>
+                    </div>
+                    <h2
+                      className={cn(
+                        'mt-2.5 text-xl font-light tabular-nums sm:text-[2.1rem]',
+                        adminFinance.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300',
+                      )}
+                    >
+                      {moneyTW(adminFinance.netProfit)}
+                    </h2>
+                    {adminFinanceGrossMetrics && (
+                      <>
+                        <p
+                          className={cn(
+                            'mt-1.5 text-[11px] sm:text-sm tabular-nums',
+                            adminFinanceGrossMetrics.overviewGross >= 0 ? 'text-emerald-300/90' : 'text-rose-300/90',
+                          )}
+                        >
+                          毛利 {moneyTW(adminFinanceGrossMetrics.overviewGross)}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-zinc-500 sm:text-sm tabular-nums">
+                          毛利率 {adminFinanceGrossMetrics.overviewGrossRate.toFixed(1)}%
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-0 sm:divide-x sm:divide-zinc-800/80">
+                  <div className="min-w-0 sm:px-4 sm:first:pl-0">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <Store size={16} className="shrink-0 text-amber-400" aria-hidden />
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">直營店營收</p>
+                    </div>
+                    <p className="mt-2.5 text-xl font-light text-amber-300 tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminFinance.directStoreStallRetailTotal)}
+                    </p>
+                    {adminFinanceGrossMetrics && (
+                      <>
+                        <p
+                          className={cn(
+                            'mt-1.5 text-[11px] sm:text-sm tabular-nums',
+                            adminFinanceGrossMetrics.directGross >= 0 ? 'text-emerald-300/90' : 'text-rose-300/90',
+                          )}
+                        >
+                          毛利 {moneyTW(adminFinanceGrossMetrics.directGross)}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-zinc-500 sm:text-sm tabular-nums">
+                          毛利率 {adminFinanceGrossMetrics.directGrossRate.toFixed(1)}%
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div className="min-w-0 sm:px-4 sm:last:pr-0">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <HandCoins size={16} className="shrink-0 text-rose-300/90" aria-hidden />
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">直營店營運支出</p>
+                    </div>
+                    <p className="mt-2.5 text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminFinance.expenseTotal)}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -1305,48 +1421,50 @@ export default function Dashboard({
               </div>
             </div>
             <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
-              <div className="grid grid-cols-3 divide-x divide-zinc-800/80">
-                <div className="min-w-0 px-2 sm:px-4 first:pl-0">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-zinc-800/80">
+                <div className="min-w-0 sm:px-4 sm:first:pl-0">
                   <div className="flex items-center gap-1.5 text-zinc-500">
                     <TrendingUp size={16} className="shrink-0 text-amber-500" aria-hidden />
-                    <p className="truncate text-xs sm:text-[0.95rem]">營收（{nonAdminSummary?.rangeLabel ?? '本月'}）</p>
+                    <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">
+                      營收（{nonAdminSummary?.rangeLabel ?? '本月'}）
+                    </p>
                   </div>
-                  <p className="mt-2.5 truncate text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
+                  <p className="mt-2.5 text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
                     {moneyTW(nonAdminSummary?.revenue ?? 0)}
                   </p>
                 </div>
 
-                <div className="min-w-0 px-2 sm:px-4">
+                <div className="min-w-0 sm:px-4">
                   <div className="flex items-center gap-1.5 text-zinc-500">
                     <FileText size={16} className="shrink-0 text-emerald-400" aria-hidden />
-                    <p className="truncate text-xs sm:text-[0.95rem]">營收毛利</p>
+                    <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">營收毛利</p>
                   </div>
                   <p
                     className={cn(
-                      'mt-2.5 truncate text-xl font-light tabular-nums sm:text-[2.1rem]',
+                      'mt-2.5 text-xl font-light tabular-nums sm:text-[2.1rem]',
                       (nonAdminSummary?.gross ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300',
                     )}
                   >
                     {moneyTW(nonAdminSummary?.gross ?? 0)}
                   </p>
-                  <p className="mt-1.5 truncate text-[11px] text-zinc-500 sm:text-sm">
+                  <p className="mt-1.5 text-[11px] text-zinc-500 sm:text-sm">
                     毛利率 {nonAdminSummary?.grossRate.toFixed(1) ?? '0.0'}%
                   </p>
                 </div>
 
-                <div className="min-w-0 px-2 sm:px-4 last:pr-0">
+                <div className="min-w-0 sm:px-4 sm:last:pr-0">
                   <div className="flex items-center gap-1.5 text-zinc-500">
                     <Target size={16} className="shrink-0 text-rose-300" aria-hidden />
-                    <p className="truncate text-xs sm:text-[0.95rem]">
+                    <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">
                       {franchiseOperatingExpenseModel ? '總支出' : '流水帳支出'}
                     </p>
                   </div>
-                  <p className="mt-2.5 truncate text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
+                  <p className="mt-2.5 text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
                     {moneyTW(franchiseOperatingExpenseModel ? (nonAdminSummary?.expense ?? 0) : (nonAdminSummary?.ledgerExpense ?? 0))}
                   </p>
                   <p
                     className={cn(
-                      'mt-1.5 truncate text-[11px] sm:text-sm',
+                      'mt-1.5 text-[11px] sm:text-sm',
                       (nonAdminSummary?.net ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300',
                     )}
                   >
@@ -1418,58 +1536,9 @@ export default function Dashboard({
         />
       )}
 
-      {isAdmin && adminRangeSummary && (
-        <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-[1.15rem] sm:p-7">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-500/90">
-              <TrendingUp size={22} className="shrink-0" aria-hidden />
-              <h3 className="text-lg font-medium leading-snug text-zinc-100 sm:text-xl">
-                {adminRangeSummary.rangeLabel}直營店營運摘要
-              </h3>
-            </div>
-            <div
-              className={cn(
-                'ml-auto flex shrink-0 items-center',
-                isNarrow ? 'w-24 sm:w-auto sm:max-w-[min(12rem,calc(100vw-12rem))]' : '',
-              )}
-            >
-              <DashboardInlineSummaryRangePicker
-                value={summaryRange}
-                onChange={setSummaryRange}
-                isNarrow={isNarrow}
-                ariaLabel="直營店營運摘要區間"
-                wideGapClass="justify-end gap-1.5"
-              />
-            </div>
-          </div>
-          <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
-            <div className="grid grid-cols-3 divide-x divide-zinc-800/80">
-              <div className="min-w-0 px-2 sm:px-4 first:pl-0">
-                <p className="truncate text-xs text-zinc-500 sm:text-[0.95rem]">直營店營收</p>
-                <p className="mt-2.5 truncate text-xl font-light text-amber-300 tabular-nums sm:text-[2.1rem]">
-                  {moneyTW(adminRangeSummary.directRevenue)}
-                </p>
-              </div>
-              <div className="min-w-0 px-2 sm:px-4">
-                <p className="truncate text-xs text-zinc-500 sm:text-[0.95rem]">加盟主批貨營收</p>
-                <p className="mt-2.5 truncate text-xl font-light text-amber-300 tabular-nums sm:text-[2.1rem]">
-                  {moneyTW(adminRangeSummary.franchiseRevenue)}
-                </p>
-              </div>
-              <div className="min-w-0 px-2 sm:px-4 last:pr-0">
-                <p className="truncate text-xs text-zinc-500 sm:text-[0.95rem]">流水帳支出（營運）</p>
-                <p className="mt-2.5 truncate text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
-                  {moneyTW(adminRangeSummary.totalExpense)}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showStallSalesBoard ? (
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
-        <details className="group" open>
+        <details className="group">
           <summary
             className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-5 text-left [&::-webkit-details-marker]:hidden"
             onClick={(e) => {

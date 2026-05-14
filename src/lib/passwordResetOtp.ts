@@ -3,6 +3,7 @@
  *
  * - 驗證碼有效期限、嘗試次數見常數。
  * - 無郵件後端時：可經 VITE_SHOW_RESET_CODE 或開發模式在 UI 顯示驗證碼；上線請改 VITE_PASSWORD_RESET_EMAIL_URL 由後端寄信。
+ * - POST JSON：`{ email, code, loginId, purpose: 'password-reset', expiresInMinutes }`；可選標頭 `VITE_PASSWORD_RESET_EMAIL_AUTH`（例如 `Bearer …`）。
  */
 import * as credentialStorage from './credentialStorage';
 import { listSystemUsers } from './systemUsersStorage';
@@ -65,17 +66,49 @@ export function shouldRevealResetCodeInUi(): boolean {
   return true;
 }
 
-async function deliverOtpToEmail(email: string, code: string): Promise<void> {
+async function deliverOtpToEmail(email: string, code: string, loginId: string): Promise<void> {
   const url = import.meta.env.VITE_PASSWORD_RESET_EMAIL_URL;
-  if (typeof url === 'string' && url.trim().length > 0) {
+  if (typeof url !== 'string' || !url.trim()) return;
+
+  const auth = import.meta.env.VITE_PASSWORD_RESET_EMAIL_AUTH;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (typeof auth === 'string' && auth.trim()) {
+    headers.Authorization = auth.trim();
+  }
+
+  const ctrl = new AbortController();
+  const t = window.setTimeout(() => ctrl.abort(), 20_000);
+  try {
     const res = await fetch(url.trim(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: normalizeEmail(email), code }),
+      headers,
+      body: JSON.stringify({
+        email: normalizeEmail(email),
+        code,
+        loginId: loginId.trim().toLowerCase(),
+        purpose: 'password-reset',
+        expiresInMinutes: 15,
+      }),
+      signal: ctrl.signal,
     });
+    let errMsg = '驗證信寄送失敗，請稍後再試或聯絡管理員。';
     if (!res.ok) {
-      throw new Error('驗證信寄送失敗，請稍後再試或聯絡管理員。');
+      try {
+        const j = (await res.json()) as { message?: string; error?: string };
+        if (typeof j.message === 'string' && j.message.trim()) errMsg = j.message.trim();
+        else if (typeof j.error === 'string' && j.error.trim()) errMsg = j.error.trim();
+      } catch {
+        if (res.status === 404) errMsg = '寄信 API 回傳 404，請檢查 VITE_PASSWORD_RESET_EMAIL_URL。';
+      }
+      throw new Error(errMsg);
     }
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error('寄送逾時，請檢查網路或稍後再試。');
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(t);
   }
 }
 
@@ -118,7 +151,7 @@ export async function requestPasswordResetByEmail(rawEmail: string): Promise<Req
   savePending(pending);
 
   try {
-    await deliverOtpToEmail(rawEmail.trim(), code);
+    await deliverOtpToEmail(rawEmail.trim(), code, loginId);
   } catch (e) {
     savePending(null);
     return { ok: false, message: e instanceof Error ? e.message : '寄送驗證信失敗。' };

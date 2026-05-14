@@ -304,7 +304,7 @@ export default function Sidebar({
               <span className="font-medium">數據中心</span>
             </button>
           )}
-          {isSuperAdmin && (
+          {userRole === 'admin' && (
             <button
               type="button"
               onClick={() => {

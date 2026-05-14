@@ -5,6 +5,9 @@
   html {
     font-size: 115%;
     height: 100%;
+    /* 與 App 主題一致；避免載入中／#root 尚未撐滿時出現整片預設白底 */
+    background-color: #0d0d0d;
+    color: #f5f2ed;
     /* 減少 iOS 橡皮筋穿透外層 */
     overscroll-behavior-y: none;
   }
@@ -12,12 +15,15 @@
   body {
     margin: 0;
     min-height: 100%;
+    background-color: #0d0d0d;
+    color: #f5f2ed;
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
   }
 
   #root {
     min-height: 100%;
+    min-height: 100dvh;
   }
 }
 

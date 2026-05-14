@@ -8,6 +8,7 @@ import {
   orderMatchesActiveWeekdaysFromYmd,
 } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
+import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { orders as ordersApi } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
@@ -1175,11 +1176,14 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                     <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
                                       <div className="font-medium text-[#f5f2ed]">{line.name}</div>
                                       <div className="text-xs text-zinc-500">
-                                        下單 {origQ} {line.unit}・單價 $ {line.unitPrice}
+                                        下單 {origQ} {line.unit}
+                                        <LiangJinQtyHint liangQty={origQ} pieceUnit={line.unit} className="text-[10px]" />
+                                        ・單價 $ {line.unitPrice}
                                       </div>
                                     </td>
                                     <td className="py-2 px-2 sm:px-4 align-top whitespace-nowrap">
-                                      <div className="flex items-center justify-center gap-1 min-w-[10.5rem] w-full max-w-[14rem] mx-auto">
+                                      <div className="flex flex-col items-center gap-0.5 min-w-[10.5rem] w-full max-w-[14rem] mx-auto">
+                                        <div className="flex items-center justify-center gap-1 w-full">
                                         <button
                                           type="button"
                                           onClick={(e) => {
@@ -1217,6 +1221,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                         >
                                           <Plus size={16} />
                                         </button>
+                                        </div>
+                                        <LiangJinQtyHint
+                                          liangQty={line.qty}
+                                          pieceUnit={line.unit}
+                                          className="text-[10px] text-zinc-500"
+                                        />
                                       </div>
                                     </td>
                                     <td className="py-2.5 sm:py-3 px-3 sm:px-4 text-right tabular-nums text-zinc-200 align-top">
@@ -1275,6 +1285,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                     procurementQtyFromDiff !== null
                                       ? fmtLineQty(procurementQtyFromDiff)
                                       : fmtLineQty(orderQtyRounded);
+                                  const procurementQtyForHint =
+                                    procurementQtyFromDiff !== null
+                                      ? procurementQtyFromDiff
+                                      : orderQtyRounded;
                                   return (
                                     <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 align-top max-md:relative max-md:left-auto max-md:z-0 max-md:shadow-none md:sticky md:left-0 md:z-[2] bg-zinc-900 md:shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)] w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]">
@@ -1283,13 +1297,38 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                         </div>
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/90">
-                                        {procurementQtyCellText}
+                                        <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                          {procurementQtyCellText}
+                                          <LiangJinQtyHint
+                                            liangQty={procurementQtyForHint}
+                                            pieceUnit={line.unit}
+                                            className="text-[10px] sm:text-xs"
+                                          />
+                                        </span>
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-400">
-                                        {carryRemainQty !== null ? fmtLineQty(carryRemainQty) : '—'}
+                                        {carryRemainQty !== null ? (
+                                          <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                            {fmtLineQty(carryRemainQty)}
+                                            <LiangJinQtyHint
+                                              liangQty={carryRemainQty}
+                                              pieceUnit={line.unit}
+                                              className="text-[10px] sm:text-xs"
+                                            />
+                                          </span>
+                                        ) : (
+                                          '—'
+                                        )}
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
-                                        {fmtLineQty(displayedBringOut)}
+                                        <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                          {fmtLineQty(displayedBringOut)}
+                                          <LiangJinQtyHint
+                                            liangQty={displayedBringOut}
+                                            pieceUnit={line.unit}
+                                            className="text-[10px] sm:text-xs"
+                                          />
+                                        </span>
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
                                         {unitRetail.toLocaleString()}

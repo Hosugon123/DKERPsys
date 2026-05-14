@@ -1,6 +1,6 @@
 import { Bell, Settings, Menu, Search, ChevronDown, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { changeOwnPassword } from '../lib/authSession';
+import { accounts } from '../services/apiService';
 import { getSessionActorDisplayName } from '../lib/sessionActorDisplayName';
 import { getUserAvatar, removeUserAvatar, setUserAvatar } from '../lib/userAvatarStorage';
 import type { UserRole } from '../views/Orders';
@@ -71,7 +71,7 @@ export default function Topbar({
     setAccountOpen(false);
   };
 
-  const submitPwd = (e: FormEvent) => {
+  const submitPwd = async (e: FormEvent) => {
     e.preventDefault();
     setPwdError(null);
     if (newPwd !== newPwd2) {
@@ -80,7 +80,7 @@ export default function Topbar({
     }
     setPwdBusy(true);
     try {
-      changeOwnPassword(loginId, curPwd, newPwd);
+      await accounts.changeOwnPassword(loginId, curPwd, newPwd);
       setPwdOpen(false);
       setCurPwd('');
       setNewPwd('');

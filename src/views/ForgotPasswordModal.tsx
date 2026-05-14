@@ -178,8 +178,14 @@ export default function ForgotPasswordModal({ open, onClose }: ForgotPasswordMod
                 <ArrowLeft size={14} /> 更改信箱
               </button>
               <p className="text-sm text-zinc-500">
-                已寄送驗證碼至 <span className="font-medium text-zinc-300">{email.trim()}</span>
-                ，請輸入信中的 {6} 位數驗證碼與新密碼。
+                {showDevHint ? (
+                  <>驗證碼已產生，請於下方輸入示範驗證碼與新密碼（本機未串郵件 API）。</>
+                ) : (
+                  <>
+                    已請後端寄送驗證碼至 <span className="font-medium text-zinc-300">{email.trim()}</span>
+                    （若未收到請查垃圾郵件匣）。請輸入信中的 {6} 位數驗證碼與新密碼。
+                  </>
+                )}
               </p>
               {revealCode && (
                 <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-center">

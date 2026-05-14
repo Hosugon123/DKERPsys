@@ -38,6 +38,7 @@ import {
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
+import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 
 function money(n: number) {
@@ -755,77 +756,102 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                         {item.name}
                                       </td>
                                       <td className="px-1.5 sm:px-2 py-2 p-0">
-                                        <div className="flex items-center justify-center gap-0.5 max-w-[9rem] mx-auto">
-                                          <button
-                                            type="button"
-                                            onClick={() => bumpStallLineValue(item.id, 'out', -1)}
-                                            disabled={stallQtyEffectiveNum(line.out) <= 0}
-                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                            aria-label={`${item.name} 帶出減一`}
-                                          >
-                                            <Minus size={16} />
-                                          </button>
-                                          <input
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={line.out}
-                                            onChange={(e) => setStallLineQtyInput(item.id, 'out', e.target.value)}
-                                            onFocus={(e) => e.target.select()}
-                                            className="w-12 min-w-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1"
-                                            aria-label={`${item.name} 帶出數量，0～${STALL_MAX_Q.toLocaleString()}`}
+                                        <div className="flex flex-col items-center gap-0.5 max-w-[9rem] mx-auto">
+                                          <div className="flex items-center justify-center gap-0.5 w-full">
+                                            <button
+                                              type="button"
+                                              onClick={() => bumpStallLineValue(item.id, 'out', -1)}
+                                              disabled={stallQtyEffectiveNum(line.out) <= 0}
+                                              className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                              aria-label={`${item.name} 帶出減一`}
+                                            >
+                                              <Minus size={16} />
+                                            </button>
+                                            <input
+                                              type="text"
+                                              inputMode="decimal"
+                                              value={line.out}
+                                              onChange={(e) => setStallLineQtyInput(item.id, 'out', e.target.value)}
+                                              onFocus={(e) => e.currentTarget.select()}
+                                              className="w-12 min-w-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1"
+                                              aria-label={`${item.name} 帶出數量，0～${STALL_MAX_Q.toLocaleString()}`}
+                                            />
+                                            <button
+                                              type="button"
+                                              onClick={() => bumpStallLineValue(item.id, 'out', 1)}
+                                              disabled={stallQtyEffectiveNum(line.out) >= STALL_MAX_Q}
+                                              className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                              aria-label={`${item.name} 帶出加一`}
+                                            >
+                                              <Plus size={16} />
+                                            </button>
+                                          </div>
+                                          <LiangJinQtyHint
+                                            liangQty={c.out}
+                                            pieceUnit={item.pieceUnit}
+                                            className="text-[10px] text-zinc-500"
                                           />
-                                          <button
-                                            type="button"
-                                            onClick={() => bumpStallLineValue(item.id, 'out', 1)}
-                                            disabled={stallQtyEffectiveNum(line.out) >= STALL_MAX_Q}
-                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                            aria-label={`${item.name} 帶出加一`}
-                                          >
-                                            <Plus size={16} />
-                                          </button>
                                         </div>
                                       </td>
                                       <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
-                                        {c.remainUnfilled ? '—' : fmtLineQty(c.sold)}
+                                        <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                          {c.remainUnfilled ? '—' : fmtLineQty(c.sold)}
+                                          {!c.remainUnfilled && (
+                                            <LiangJinQtyHint
+                                              liangQty={c.sold}
+                                              pieceUnit={item.pieceUnit}
+                                              className="text-[10px] sm:text-xs"
+                                            />
+                                          )}
+                                        </span>
                                       </td>
                                       <td className="px-1.5 sm:px-2 py-2 p-0">
-                                        <div className="flex items-center justify-center gap-0.5 max-w-[9rem] mx-auto">
-                                          <button
-                                            type="button"
-                                            onClick={() => bumpStallLineValue(item.id, 'remain', -1)}
-                                            disabled={stallQtyEffectiveNum(line.remain) <= 0}
-                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                            aria-label={`${item.name} 剩餘減一`}
-                                          >
-                                            <Minus size={16} />
-                                          </button>
-                                          <input
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={line.remain}
-                                            onChange={(e) =>
-                                              setStallLineQtyInput(item.id, 'remain', e.target.value)
-                                            }
-                                            onFocus={(e) => e.target.select()}
-                                            className={cn(
-                                              'w-12 min-w-0 text-center text-base font-bold tabular-nums bg-zinc-900/80 border rounded py-1',
-                                              c.remainUnfilled
-                                                ? 'border-amber-800/50 border-dashed text-zinc-400'
-                                                : c.remain > 0
-                                                  ? 'border-rose-800/60 text-rose-300'
-                                                  : 'border-zinc-600 text-zinc-300'
-                                            )}
-                                            aria-label={`${item.name} 剩餘數量，0～${STALL_MAX_Q.toLocaleString()}`}
-                                          />
-                                          <button
-                                            type="button"
-                                            onClick={() => bumpStallLineValue(item.id, 'remain', 1)}
-                                            disabled={stallQtyEffectiveNum(line.remain) >= STALL_MAX_Q}
-                                            className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                            aria-label={`${item.name} 剩餘加一`}
-                                          >
-                                            <Plus size={16} />
-                                          </button>
+                                        <div className="flex flex-col items-center gap-0.5 max-w-[9rem] mx-auto">
+                                          <div className="flex items-center justify-center gap-0.5 w-full">
+                                            <button
+                                              type="button"
+                                              onClick={() => bumpStallLineValue(item.id, 'remain', -1)}
+                                              disabled={stallQtyEffectiveNum(line.remain) <= 0}
+                                              className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                              aria-label={`${item.name} 剩餘減一`}
+                                            >
+                                              <Minus size={16} />
+                                            </button>
+                                            <input
+                                              type="text"
+                                              inputMode="decimal"
+                                              value={line.remain}
+                                              onChange={(e) =>
+                                                setStallLineQtyInput(item.id, 'remain', e.target.value)
+                                              }
+                                              onFocus={(e) => e.currentTarget.select()}
+                                              className={cn(
+                                                'w-12 min-w-0 text-center text-base font-bold tabular-nums bg-zinc-900/80 border rounded py-1',
+                                                c.remainUnfilled
+                                                  ? 'border-amber-800/50 border-dashed text-zinc-400'
+                                                  : c.remain > 0
+                                                    ? 'border-rose-800/60 text-rose-300'
+                                                    : 'border-zinc-600 text-zinc-300',
+                                              )}
+                                              aria-label={`${item.name} 剩餘數量，0～${STALL_MAX_Q.toLocaleString()}`}
+                                            />
+                                            <button
+                                              type="button"
+                                              onClick={() => bumpStallLineValue(item.id, 'remain', 1)}
+                                              disabled={stallQtyEffectiveNum(line.remain) >= STALL_MAX_Q}
+                                              className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                              aria-label={`${item.name} 剩餘加一`}
+                                            >
+                                              <Plus size={16} />
+                                            </button>
+                                          </div>
+                                          {!c.remainUnfilled && (
+                                            <LiangJinQtyHint
+                                              liangQty={c.remain}
+                                              pieceUnit={item.pieceUnit}
+                                              className="text-[10px] text-zinc-500"
+                                            />
+                                          )}
                                         </div>
                                       </td>
                                       <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
@@ -894,13 +920,34 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                       {item.name}
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
-                                      {fmtLineQty(c.out)}
+                                      <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                        {fmtLineQty(c.out)}
+                                        <LiangJinQtyHint liangQty={c.out} pieceUnit={item.pieceUnit} className="text-[10px] sm:text-xs" />
+                                      </span>
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
-                                      {c.remainUnfilled ? '—' : fmtLineQty(c.sold)}
+                                      <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                        {c.remainUnfilled ? '—' : fmtLineQty(c.sold)}
+                                        {!c.remainUnfilled && (
+                                          <LiangJinQtyHint
+                                            liangQty={c.sold}
+                                            pieceUnit={item.pieceUnit}
+                                            className="text-[10px] sm:text-xs"
+                                          />
+                                        )}
+                                      </span>
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
-                                      {c.remainUnfilled ? '—' : fmtLineQty(c.remain)}
+                                      <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                        {c.remainUnfilled ? '—' : fmtLineQty(c.remain)}
+                                        {!c.remainUnfilled && (
+                                          <LiangJinQtyHint
+                                            liangQty={c.remain}
+                                            pieceUnit={item.pieceUnit}
+                                            className="text-[10px] sm:text-xs"
+                                          />
+                                        )}
+                                      </span>
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
                                       $ {Math.round(c.estPrice).toLocaleString()}

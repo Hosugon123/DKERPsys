@@ -95,10 +95,10 @@ export default function App() {
   }, [userRole]);
 
   useEffect(() => {
-    if (!isSuperAdmin && currentView === 'permissions') {
+    if (userRole !== 'admin' && currentView === 'permissions') {
       setCurrentView('dashboard');
     }
-  }, [isSuperAdmin, currentView]);
+  }, [userRole, currentView]);
 
   /** 手機側欄開啟時鎖定背景捲動（iOS Safari 用 fixed + 還原 scrollY） */
   useEffect(() => {

@@ -35,6 +35,7 @@ import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { saveSalesRecord } from '../lib/salesRecordStorage';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
+import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import {
   formatSlashDateTimeFromIso,
   formatSlashYmdWithWeekdayFromYmd,
@@ -685,88 +686,111 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   {item.name}
                 </td>
                 <td className="pl-0 pr-1.5 sm:pl-0.5 sm:pr-2.5 py-2 sm:py-2.5 p-0">
-                  <div className="flex items-center justify-end gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
-                    <button
-                      type="button"
-                      onPointerDown={preventAdjacentInputBlurActivate}
-                      onTouchStart={preventAdjacentInputBlurActivate}
-                      onClick={() => bumpLine(item.id, 'out', -1)}
-                      disabled={num(snap.lines[item.id]?.out ?? '') <= 0}
-                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
-                      aria-label={`${item.name} 帶出減一`}
-                    >
-                      <Minus size={14} className="mx-auto" />
-                    </button>
-                    <input
-                      value={snap.lines[item.id]?.out ?? ''}
-                      onChange={(e) => setLine(item.id, 'out', e.target.value)}
-                      className="w-8 sm:w-20 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border border-zinc-700 rounded px-0.5 sm:px-1 text-amber-100 font-mono text-[14px] sm:text-sm leading-none text-center"
-                      inputMode="decimal"
-                      aria-label={`${item.name} 帶出`}
+                  <div className="flex flex-col items-stretch gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
+                    <div className="flex items-center justify-end gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
+                      <button
+                        type="button"
+                        onPointerDown={preventAdjacentInputBlurActivate}
+                        onTouchStart={preventAdjacentInputBlurActivate}
+                        onClick={() => bumpLine(item.id, 'out', -1)}
+                        disabled={num(snap.lines[item.id]?.out ?? '') <= 0}
+                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+                        aria-label={`${item.name} 帶出減一`}
+                      >
+                        <Minus size={14} className="mx-auto" />
+                      </button>
+                      <input
+                        value={snap.lines[item.id]?.out ?? ''}
+                        onChange={(e) => setLine(item.id, 'out', e.target.value)}
+                        className="w-8 sm:w-20 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border border-zinc-700 rounded px-0.5 sm:px-1 text-amber-100 font-mono text-[14px] sm:text-sm leading-none text-center"
+                        inputMode="decimal"
+                        aria-label={`${item.name} 帶出`}
+                      />
+                      <button
+                        type="button"
+                        onPointerDown={preventAdjacentInputBlurActivate}
+                        onTouchStart={preventAdjacentInputBlurActivate}
+                        onClick={() => bumpLine(item.id, 'out', 1)}
+                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
+                        aria-label={`${item.name} 帶出加一`}
+                      >
+                        <Plus size={14} className="mx-auto" />
+                      </button>
+                    </div>
+                    <LiangJinQtyHint
+                      liangQty={c.out}
+                      pieceUnit={item.pieceUnit}
+                      className="text-[10px] text-zinc-500 text-center"
                     />
-                    <button
-                      type="button"
-                      onPointerDown={preventAdjacentInputBlurActivate}
-                      onTouchStart={preventAdjacentInputBlurActivate}
-                      onClick={() => bumpLine(item.id, 'out', 1)}
-                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
-                      aria-label={`${item.name} 帶出加一`}
-                    >
-                      <Plus size={14} className="mx-auto" />
-                    </button>
                   </div>
                 </td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 p-0">
-                  <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap min-w-0">
-                    <button
-                      type="button"
-                      onPointerDown={preventAdjacentInputBlurActivate}
-                      onTouchStart={preventAdjacentInputBlurActivate}
-                      onClick={() => bumpLine(item.id, 'remain', -1)}
-                      disabled={c.remainUnfilled || num(snap.lines[item.id]?.remain ?? '') <= 0}
-                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
-                      aria-label={`${item.name} 剩餘減一`}
-                    >
-                      <Minus size={14} className="mx-auto" />
-                    </button>
-                    <input
-                      value={snap.lines[item.id]?.remain ?? ''}
-                      onChange={(e) => setLine(item.id, 'remain', e.target.value)}
-                      placeholder="必填"
-                      className={cn(
-                        'w-8 sm:w-16 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border rounded px-0.5 sm:px-1 font-mono text-[11px] sm:text-[19px] leading-none text-center placeholder:text-[10px] sm:placeholder:text-[13px]',
-                        c.remainUnfilled
-                          ? 'border-amber-800/50 border-dashed text-zinc-400 placeholder:text-zinc-600'
-                          : c.remain > 0
-                            ? 'border-rose-800/60 text-rose-300'
-                            : 'border-zinc-700 text-zinc-300'
-                      )}
-                      inputMode="decimal"
-                      aria-label={`${item.name} 剩餘貨量`}
-                    />
-                    <button
-                      type="button"
-                      onPointerDown={preventAdjacentInputBlurActivate}
-                      onTouchStart={preventAdjacentInputBlurActivate}
-                      onClick={() => bumpLine(item.id, 'remain', 1)}
-                      className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
-                      aria-label={`${item.name} 剩餘加一`}
-                    >
-                      <Plus size={14} className="mx-auto" />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={preventAdjacentInputBlurActivate}
-                      onTouchStart={preventAdjacentInputBlurActivate}
-                      onClick={() => setLine(item.id, 'remain', '0')}
-                      className="shrink-0 h-8 rounded border border-zinc-600 bg-zinc-800/60 px-1 sm:px-1.5 py-0 sm:py-1 text-[14px] sm:text-xs leading-none text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
-                    >
-                      已售完
-                    </button>
+                  <div className="flex flex-col items-stretch gap-0.5 min-w-0">
+                    <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap min-w-0">
+                      <button
+                        type="button"
+                        onPointerDown={preventAdjacentInputBlurActivate}
+                        onTouchStart={preventAdjacentInputBlurActivate}
+                        onClick={() => bumpLine(item.id, 'remain', -1)}
+                        disabled={c.remainUnfilled || num(snap.lines[item.id]?.remain ?? '') <= 0}
+                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+                        aria-label={`${item.name} 剩餘減一`}
+                      >
+                        <Minus size={14} className="mx-auto" />
+                      </button>
+                      <input
+                        value={snap.lines[item.id]?.remain ?? ''}
+                        onChange={(e) => setLine(item.id, 'remain', e.target.value)}
+                        placeholder="必填"
+                        className={cn(
+                          'w-8 sm:w-16 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border rounded px-0.5 sm:px-1 font-mono text-[11px] sm:text-[19px] leading-none text-center placeholder:text-[10px] sm:placeholder:text-[13px]',
+                          c.remainUnfilled
+                            ? 'border-amber-800/50 border-dashed text-zinc-400 placeholder:text-zinc-600'
+                            : c.remain > 0
+                              ? 'border-rose-800/60 text-rose-300'
+                              : 'border-zinc-700 text-zinc-300',
+                        )}
+                        inputMode="decimal"
+                        aria-label={`${item.name} 剩餘貨量`}
+                      />
+                      <button
+                        type="button"
+                        onPointerDown={preventAdjacentInputBlurActivate}
+                        onTouchStart={preventAdjacentInputBlurActivate}
+                        onClick={() => bumpLine(item.id, 'remain', 1)}
+                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
+                        aria-label={`${item.name} 剩餘加一`}
+                      >
+                        <Plus size={14} className="mx-auto" />
+                      </button>
+                      <button
+                        type="button"
+                        onPointerDown={preventAdjacentInputBlurActivate}
+                        onTouchStart={preventAdjacentInputBlurActivate}
+                        onClick={() => setLine(item.id, 'remain', '0')}
+                        className="shrink-0 h-8 rounded border border-zinc-600 bg-zinc-800/60 px-1 sm:px-1.5 py-0 sm:py-1 text-[14px] sm:text-xs leading-none text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
+                      >
+                        已售完
+                      </button>
+                    </div>
+                    {!c.remainUnfilled && (
+                      <LiangJinQtyHint
+                        liangQty={c.remain}
+                        pieceUnit={item.pieceUnit}
+                        className="text-[10px] text-zinc-500 text-center w-full"
+                      />
+                    )}
                   </div>
                 </td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-300 text-[14px] sm:text-sm">
-                  {c.remainUnfilled ? <span className="text-zinc-600">—</span> : money(c.sold)}
+                  {c.remainUnfilled ? (
+                    <span className="text-zinc-600">—</span>
+                  ) : (
+                    <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                      {money(c.sold)}
+                      <LiangJinQtyHint liangQty={c.sold} pieceUnit={item.pieceUnit} className="text-[10px] sm:text-xs" />
+                    </span>
+                  )}
                 </td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-400 text-[14px] sm:text-sm">
                   {c.remainUnfilled ? <span className="text-zinc-600">—</span> : <>$ {money(c.remValue)}</>}

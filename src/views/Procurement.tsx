@@ -60,6 +60,7 @@ import {
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import { getDataScopeContext } from '../lib/dataScope';
 import ItemCatalogSettings from './ItemCatalogSettings';
+import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 
 function parseQtyInput(raw: string): number {
   const t = String(raw)
@@ -727,13 +728,19 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     <span className="min-w-0 font-medium text-rose-200/90">{item.name}</span>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs sm:text-sm text-zinc-500 tabular-nums">
                       <span>
-                        帶出 <span className="text-zinc-300">{c.out.toLocaleString()}</span> {item.pieceUnit}
+                        帶出 <span className="text-zinc-300">{c.out.toLocaleString()}</span>
+                        <LiangJinQtyHint liangQty={c.out} pieceUnit={item.pieceUnit} className="text-[10px] sm:text-xs" />{' '}
+                        {item.pieceUnit}
                       </span>
                       <span>
-                        剩餘 <span className="text-zinc-300">{c.remain.toLocaleString()}</span> {item.pieceUnit}
+                        剩餘 <span className="text-zinc-300">{c.remain.toLocaleString()}</span>
+                        <LiangJinQtyHint liangQty={c.remain} pieceUnit={item.pieceUnit} className="text-[10px] sm:text-xs" />{' '}
+                        {item.pieceUnit}
                       </span>
                       <span>
-                        售出 <span className="text-amber-300/90 font-medium">{c.sold.toLocaleString()}</span> {item.pieceUnit}
+                        售出 <span className="text-amber-300/90 font-medium">{c.sold.toLocaleString()}</span>
+                        <LiangJinQtyHint liangQty={c.sold} pieceUnit={item.pieceUnit} className="text-[10px] sm:text-xs" />{' '}
+                        {item.pieceUnit}
                       </span>
                       <span className="text-zinc-400">
                         {`售出面額 $ ${Math.round(c.soldRevenue).toLocaleString()}`}
@@ -949,6 +956,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       <ul className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-2.5">
         {visibleItems.map((item) => {
           const q = cart[item.id] || 0;
+          const effectiveOrderQty =
+            item.id in qtyInputDraft ? parseQtyInput(qtyInputDraft[item.id]) : roundProcurementQty(q);
           return (
             <li
               key={item.id}
@@ -1001,19 +1010,32 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <div className="flex items-center justify-between gap-2">
                   <span>昨日剩貨</span>
                   <span className="tabular-nums text-zinc-300">
-                    {(carryoverRemainByItem[item.id] ?? 0).toLocaleString()} {item.pieceUnit}
+                    {(carryoverRemainByItem[item.id] ?? 0).toLocaleString()}
+                    <LiangJinQtyHint
+                      liangQty={carryoverRemainByItem[item.id] ?? 0}
+                      pieceUnit={item.pieceUnit}
+                      className="text-[0.625rem]"
+                    />{' '}
+                    {item.pieceUnit}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span>建議叫貨</span>
                   <span className="tabular-nums text-amber-300">
-                    {q.toLocaleString()} {item.pieceUnit}
+                    {q.toLocaleString()}
+                    <LiangJinQtyHint liangQty={q} pieceUnit={item.pieceUnit} className="text-[0.625rem]" /> {item.pieceUnit}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span>明日預計帶出</span>
                   <span className="tabular-nums text-emerald-300">
-                    {roundProcurementQty((carryoverRemainByItem[item.id] ?? 0) + q).toLocaleString()} {item.pieceUnit}
+                    {roundProcurementQty((carryoverRemainByItem[item.id] ?? 0) + q).toLocaleString()}
+                    <LiangJinQtyHint
+                      liangQty={roundProcurementQty((carryoverRemainByItem[item.id] ?? 0) + q)}
+                      pieceUnit={item.pieceUnit}
+                      className="text-[0.625rem]"
+                    />{' '}
+                    {item.pieceUnit}
                   </span>
                 </div>
               </div>
@@ -1085,6 +1107,11 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   />
                   <span className="text-[0.5625rem] sm:text-[0.625rem] text-zinc-500 text-center leading-none pb-0.5 pointer-events-none truncate max-w-full px-0.5">
                     {item.pieceUnit}
+                    <LiangJinQtyHint
+                      liangQty={effectiveOrderQty}
+                      pieceUnit={item.pieceUnit}
+                      className="text-[0.5rem] sm:text-[0.5625rem] block mt-0.5"
+                    />
                   </span>
                 </div>
                 <button
