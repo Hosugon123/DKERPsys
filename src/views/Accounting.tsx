@@ -161,7 +161,7 @@ const dateInputClass =
 const rangeDateInputClass =
   'h-9 min-w-0 w-[124px] sm:w-[136px] rounded-lg bg-zinc-950/90 border border-amber-900/40 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-500/50 focus:border-amber-500/60 [color-scheme:dark] shrink-0';
 
-export default function Accounting({ userRole: _userRole }: { userRole: UserRole }) {
+export default function Accounting({ userRole }: { userRole: UserRole }) {
   const { entries, add, update, remove } = useAccountingLedger();
 
   const defaultRange = useMemo(() => monthBoundsFromYm(currentYm()), []);
@@ -449,6 +449,12 @@ export default function Accounting({ userRole: _userRole }: { userRole: UserRole
           <Wallet className="text-amber-500 shrink-0" size={28} />
           流水帳
         </h2>
+        {userRole === 'employee' ? (
+          <p className="mt-3 text-sm text-zinc-400 leading-relaxed rounded-xl border border-zinc-700/70 bg-zinc-950/50 px-4 py-3">
+            您目前為店員身分：此處<strong className="text-zinc-200">僅會顯示由您本人登記</strong>
+            的流水帳紀錄；其他同仁建立的項目不會出現於此。未標記登記者之舊資料亦不會在此列出。您仍可在此新增、修改或刪除自己的紀錄。
+          </p>
+        ) : null}
       </div>
 
       <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-5 md:p-6">

@@ -138,9 +138,6 @@ export default function App() {
   }, [isMobileMenuOpen]);
 
   useEffect(() => {
-    if (userRole === 'employee' && currentView === 'accounting') {
-      setCurrentView('orders');
-    }
     if (currentView === 'orderHistory') {
       setCurrentView('orders');
     }

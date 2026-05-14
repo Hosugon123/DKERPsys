@@ -25,6 +25,7 @@ import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry, UpdateStallSnapshotResult } from '../lib/orderHistoryStorage';
 import {
   displayOrderCreatedByLabel,
+  displayOrderLastUpdatedByLabel,
   displayOrderStallCountCompletedByLabel,
   effectiveOrderDateYmd,
 } from '../lib/orderHistoryStorage';
@@ -499,13 +500,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                             ? displayOrderStallCountCompletedByLabel(order)
                             : '—'}
                         </p>
+                        <p className="break-words [overflow-wrap:anywhere] min-[430px]:col-span-2">
+                          最後異動：{displayOrderLastUpdatedByLabel(order)}
+                        </p>
                       </div>
                     </div>
-                    {order.lastUpdatedByName && order.lastUpdatedByName !== order.createdByName && (
-                      <p className="text-[0.6875rem] text-zinc-600 mt-1.5 leading-relaxed">
-                        最後異動：{order.lastUpdatedByName}
-                      </p>
-                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between lg:justify-end gap-1.5 sm:gap-2 flex-shrink-0 self-stretch lg:self-center">

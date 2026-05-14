@@ -287,6 +287,13 @@ export function displayOrderStallCountCompletedByLabel(
   return '—';
 }
 
+/** 最近一次異動本筆訂單之操作者；尚未寫入時為 —（舊資料或僅建單未再異動） */
+export function displayOrderLastUpdatedByLabel(
+  e: Pick<OrderHistoryEntry, 'lastUpdatedByName'>,
+): string {
+  return e.lastUpdatedByName?.trim() || '—';
+}
+
 export function loadOrderHistory(): OrderHistoryEntry[] {
   try {
     const ctx = getDataScopeContext();

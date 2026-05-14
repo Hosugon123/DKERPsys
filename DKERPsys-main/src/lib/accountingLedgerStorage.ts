@@ -2,6 +2,13 @@
  * 非訂單類流水帳（本機 localStorage）
  */
 import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
+import { listSystemUsers } from './systemUsersStorage';
+
+function ledgerActorDisplayName(userId: string | undefined): string | undefined {
+  if (!userId?.trim()) return undefined;
+  const u = listSystemUsers().find((x) => x.id === userId);
+  return u?.name?.trim() || u?.loginId?.trim() || undefined;
+}
 
 const STORAGE_KEY = 'dongshan_accounting_ledger_v1';
 export const ACCOUNTING_LEDGER_UPDATED_EVENT = 'accountingLedgerUpdated';
@@ -68,6 +75,10 @@ export type AccountingLedgerEntry = {
   createdAt: string;
   /** ISO 最後更新（舊資料由 createdAt 補齊） */
   updatedAt: string;
+  /** 登記者 userId（新資料必有；舊資料無則僅管理員／加盟主可見與維護） */
+  createdByUserId?: string;
+  /** 登記者顯示名（冗餘方便列表） */
+  createdByName?: string;
 };
 
 type StoreV1 = {
@@ -396,15 +407,23 @@ export function ingredientSubSpendBreakdownForMonth(ym: string): {
   return { rows, totalIngredientExpense };
 }
 
-/** 所有紀錄（新→舊） */
+function filterLedgerEntriesForRole(rows: AccountingLedgerEntry[]): AccountingLedgerEntry[] {
+  const ctx = getDataScopeContext();
+  if (ctx.role !== 'employee') return rows;
+  const uid = ctx.userId.trim();
+  if (!uid) return [];
+  return rows.filter((e) => e.createdByUserId === uid);
+}
+
+/** 所有紀錄（新→舊）；員工僅能看見自己登記之項目 */
 export function listAccountingLedgerEntries(): AccountingLedgerEntry[] {
   const { isAdmin, scopeId } = getDataScopeContext();
   const s = loadStore();
   if (isAdmin) {
     const all = Object.values(s.byScope).flat();
-    return sortEntries(all);
+    return sortEntries(filterLedgerEntriesForRole(all));
   }
-  return sortEntries(s.byScope[scopeId] ?? []);
+  return sortEntries(filterLedgerEntriesForRole(s.byScope[scopeId] ?? []));
 }
 
 /** 依 YYYY-MM 篩選 */
@@ -424,9 +443,12 @@ export type NewAccountingLedgerInput = {
 
 export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): AccountingLedgerEntry {
   const s = loadStore();
-  const scopeId = getDataScopeContext().scopeId;
+  const ctx = getDataScopeContext();
+  const scopeId = ctx.scopeId;
   const rows = s.byScope[scopeId] ?? [];
   const now = new Date().toISOString();
+  const uid = ctx.userId.trim();
+  const createdByName = uid ? ledgerActorDisplayName(uid) : undefined;
   const entry: AccountingLedgerEntry = {
     id: newId(),
     dateYmd: input.dateYmd,
@@ -437,6 +459,7 @@ export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): Ac
     amount: input.amount,
     createdAt: now,
     updatedAt: now,
+    ...(uid ? { createdByUserId: uid, createdByName } : {}),
   };
   const finalized = coerceEntry(entry);
   rows.push(finalized);
@@ -447,7 +470,8 @@ export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): Ac
 
 export function removeAccountingLedgerEntry(id: string): boolean {
   const s = loadStore();
-  const { isAdmin, scopeId } = getDataScopeContext();
+  const ctx = getDataScopeContext();
+  const { isAdmin, scopeId } = ctx;
   if (isAdmin) {
     let changed = false;
     for (const k of Object.keys(s.byScope)) {
@@ -463,6 +487,12 @@ export function removeAccountingLedgerEntry(id: string): boolean {
     return true;
   }
   const prev = s.byScope[scopeId] ?? [];
+  const hit = prev.find((e) => e.id === id);
+  if (!hit) return false;
+  if (ctx.role === 'employee') {
+    const uid = ctx.userId.trim();
+    if (!uid || !hit.createdByUserId || hit.createdByUserId !== uid) return false;
+  }
   const next = prev.filter((e) => e.id !== id);
   if (next.length === prev.length) return false;
   s.byScope[scopeId] = next;
@@ -481,7 +511,8 @@ export type AccountingLedgerUpdate = {
 
 export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerUpdate): boolean {
   const s = loadStore();
-  const { isAdmin, scopeId } = getDataScopeContext();
+  const ctx = getDataScopeContext();
+  const { isAdmin, scopeId } = ctx;
   const buckets = isAdmin ? Object.keys(s.byScope) : [scopeId];
   let foundBucket = '';
   let i = -1;
@@ -494,6 +525,10 @@ export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerU
   }
   if (!foundBucket || i < 0) return false;
   const prev = s.byScope[foundBucket]![i];
+  if (!isAdmin && ctx.role === 'employee') {
+    const uid = ctx.userId.trim();
+    if (!uid || !prev.createdByUserId || prev.createdByUserId !== uid) return false;
+  }
   const now = new Date().toISOString();
   s.byScope[foundBucket]![i] = coerceEntry({
     ...prev,

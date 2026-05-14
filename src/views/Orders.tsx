@@ -13,6 +13,7 @@ import { orders as ordersApi } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
   displayOrderCreatedByLabel,
+  displayOrderLastUpdatedByLabel,
   displayOrderStallCountCompletedByLabel,
   effectiveOrderDateYmd,
   orderHasStallCountCompleted,
@@ -927,19 +928,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 ? displayOrderStallCountCompletedByLabel(raw)
                                 : '—'}
                             </p>
+                            <p className="break-words [overflow-wrap:anywhere] text-sm min-[430px]:col-span-2">
+                              最後異動：{displayOrderLastUpdatedByLabel(raw)}
+                            </p>
                           </div>
                         </>
                       ) : (
                         <p className="text-xs text-zinc-600">—</p>
                       )}
                     </div>
-                    {raw &&
-                      raw.lastUpdatedByName &&
-                      raw.lastUpdatedByName !== raw.createdByName && (
-                        <p className="text-[0.6875rem] text-zinc-600 mt-1.5 leading-relaxed">
-                          最後異動：{raw.lastUpdatedByName}
-                        </p>
-                      )}
                   </div>
                 </div>
 

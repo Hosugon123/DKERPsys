@@ -52,6 +52,7 @@ const employeeItems = [
   { id: 'orders', label: '訂單管理', icon: ListOrdered },
   { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
+  { id: 'accounting', label: '流水帳', icon: Wallet },
 ] as const;
 
 type NavItem =
@@ -94,10 +95,12 @@ export default function Sidebar({
     setSavedOrder(loadNavOrderForRole(userRole));
   }, [userRole]);
 
-  const menuItems = useMemo(
-    () => applySavedNavOrder(baseMenu, userRole, savedOrder),
-    [baseMenu, userRole, savedOrder]
-  );
+  const menuItems = useMemo(() => {
+    const merged = applySavedNavOrder(baseMenu, userRole, savedOrder);
+    const seen = new Set(merged.map((item) => item.id));
+    const trailing = baseMenu.filter((item) => !seen.has(item.id));
+    return trailing.length > 0 ? [...merged, ...trailing] : merged;
+  }, [baseMenu, userRole, savedOrder]);
 
   const persistNewOrder = useCallback(
     (next: NavItem[]) => {
