@@ -1211,10 +1211,10 @@ export default function Dashboard({
         </div>
       )}
 
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        <h2 className="min-w-0 text-3xl font-bold tracking-tight flex flex-wrap items-center gap-2 gap-y-1">
-          <LayoutDashboard className="text-amber-500 shrink-0" size={28} />
-          <span className="min-w-0 truncate sm:truncate-none">
+      <div className="flex min-w-0 items-center justify-between gap-2 sm:gap-3">
+        <h2 className="min-w-0 flex-1 pr-1 m-0 text-xl font-bold leading-snug tracking-tight sm:text-3xl flex flex-wrap items-center gap-x-2 gap-y-1">
+          <LayoutDashboard className="text-amber-500 shrink-0 block" size={28} aria-hidden />
+          <span className="min-w-0 break-words">
             {viewAsFranchisee
               ? `${viewAsFranchisee.label} 營運概況`
               : realIsAdmin
@@ -1226,13 +1226,17 @@ export default function Dashboard({
           <button
             type="button"
             onClick={() => setFranchisePickerOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 px-3 py-2 bg-zinc-900/80 border border-zinc-700 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:border-amber-600/50 hover:text-amber-200 transition-colors font-medium text-[0.825rem]"
+            className="inline-flex shrink-0 items-center gap-1.5 px-2.5 py-2 sm:px-3 bg-zinc-900/80 border border-zinc-700 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:border-amber-600/50 hover:text-amber-200 transition-colors font-medium text-[0.8rem] sm:text-[0.825rem]"
+            aria-label="各加盟店概況"
             title="點此挑選一家加盟店，以該加盟主視角檢視完整營運概況"
             aria-haspopup="dialog"
             aria-expanded={franchisePickerOpen}
           >
             <Store size={14} className="shrink-0" aria-hidden />
-            各加盟店概況
+            <span className="sm:hidden" aria-hidden>
+              加盟店
+            </span>
+            <span className="hidden sm:inline">各加盟店概況</span>
             {franchiseStoreBreakdown.length > 0 && (
               <span className="text-[10px] font-semibold text-amber-400 tabular-nums">
                 {franchiseStoreBreakdown.length}
