@@ -45,7 +45,8 @@ function frozenFinancialsFromSnapshot(snap: SalesRecordDaySnapshot): StallFrozen
     const out = num(line.out);
     const remain = num(line.remain);
     const sold = Math.max(0, out - remain);
-    retailEstTotal += out * rUnit;
+    /** 與畫面明細一致：各列先四捨五入到整數再加總（避免彙總與手加明細不符） */
+    retailEstTotal += Math.round(out * rUnit);
     retailRemainValue += remain * rUnit;
     retailSoldRevenue += sold * rUnit;
     wholesaleSoldCost += sold * wUnit;
@@ -55,7 +56,7 @@ function frozenFinancialsFromSnapshot(snap: SalesRecordDaySnapshot): StallFrozen
 }
 
 /**
- * 僅依銷售紀錄／盤點快照推算：預估帶出金額、餘貨金額、應有營業額（零售×售出量）。
+ * 僅依銷售紀錄／盤點快照推算：預估帶出金額（各列金額先四捨五入至整數再加總）、餘貨金額、應有營業額（零售×售出量）。
  * 供無對應訂單但仍存有銷售紀錄之日補齊 Dashboard。
  */
 export function computeRetailEconomicsFromMergedSnapshot(

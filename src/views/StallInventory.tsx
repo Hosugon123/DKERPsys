@@ -775,7 +775,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   {estimatedRetailPerPackage(item).toLocaleString()}
                 </td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono text-emerald-300/90 text-[14px] sm:text-sm">
-                  $ {money(c.estPrice)}
+                  $ {Math.round(c.estPrice).toLocaleString()}
                 </td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-zinc-500 whitespace-nowrap text-[14px] sm:text-sm">{item.pieceUnit}</td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-amber-200/80 font-mono text-[14px] sm:text-sm">

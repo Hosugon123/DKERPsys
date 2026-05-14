@@ -104,11 +104,11 @@ export function aggregateStallKpis(
     const { out, remain } = getOutRemain(id);
     const c = computeLine(out, remain, it, { unitBasis: basis });
     if (isConsumableItem(it)) {
-      cons.estTotal += c.estPrice;
+      cons.estTotal += Math.round(c.estPrice);
       cons.remGoodsValue += c.remValue;
       cons.soldVolume += c.sold;
     } else {
-      retail.estTotal += c.estPrice;
+      retail.estTotal += Math.round(c.estPrice);
       retail.remGoodsValue += c.remValue;
       retail.shouldRevenue += c.soldRevenue;
       if (basis === 'retail') {

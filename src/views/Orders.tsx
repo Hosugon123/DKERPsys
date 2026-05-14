@@ -1121,12 +1121,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto overscroll-x-contain touch-pan-x w-full min-w-0 pb-px">
                       <table
                         className={cn(
-                          'w-full table-fixed border-collapse text-left',
+                          'w-full border-collapse text-left',
                           isPickingThis
-                            ? 'min-w-[18rem]'
-                            : showOrderProcurementSubtotalCol
-                              ? 'min-w-[32rem] sm:min-w-[40rem] md:min-w-[46rem]'
-                              : 'min-w-[26rem] sm:min-w-[34rem] md:min-w-[38rem]',
+                            ? 'table-auto min-w-[22rem] sm:min-w-[24rem]'
+                            : cn(
+                                'table-fixed',
+                                showOrderProcurementSubtotalCol
+                                  ? 'min-w-[32rem] sm:min-w-[40rem] md:min-w-[46rem]'
+                                  : 'min-w-[26rem] sm:min-w-[34rem] md:min-w-[38rem]',
+                              ),
                         )}
                       >
                         <thead className="bg-zinc-800/50 text-zinc-400 text-[10px] sm:text-xs uppercase border-b border-zinc-700/50">
@@ -1134,7 +1137,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                             {isPickingThis ? (
                               <>
                                 <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium">品項</th>
-                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center w-[5.25rem] sm:w-[10rem]">
+                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[11rem] w-[1%]">
                                   實出數量
                                 </th>
                                 <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium text-right">小計</th>
@@ -1178,8 +1181,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                         下單 {origQ} {line.unit}・單價 $ {line.unitPrice}
                                       </div>
                                     </td>
-                                    <td className="py-2 px-2 sm:px-4 align-top">
-                                      <div className="flex items-center justify-center gap-0.5 max-w-[9rem] mx-auto">
+                                    <td className="py-2 px-2 sm:px-4 align-top whitespace-nowrap">
+                                      <div className="flex items-center justify-center gap-1 min-w-[10.5rem] w-full max-w-[14rem] mx-auto">
                                         <button
                                           type="button"
                                           onClick={(e) => {
@@ -1187,7 +1190,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                             bumpPickingQty(idx, -1);
                                           }}
                                           disabled={line.qty <= 0}
-                                          className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                          className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                           aria-label="減一"
                                         >
                                           <Minus size={16} />
@@ -1202,7 +1205,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                           }}
                                           onClick={(e) => e.stopPropagation()}
                                           onFocus={(e) => e.target.select()}
-                                          className="w-12 min-w-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1"
+                                          className="min-w-[4.25rem] w-16 max-w-[7rem] shrink-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
                                           aria-label={`${line.name} 實出數量，0～${PICK_MAX_Q.toLocaleString()}`}
                                         />
                                         <button
@@ -1212,7 +1215,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                             bumpPickingQty(idx, 1);
                                           }}
                                           disabled={line.qty >= PICK_MAX_Q}
-                                          className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                          className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                           aria-label="加一"
                                         >
                                           <Plus size={16} />

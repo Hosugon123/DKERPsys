@@ -16,7 +16,7 @@ import type { SupplyRetailView } from './supplyCatalog';
 
 export type DirectStallDayEconomics = {
   ymd: string;
-  /** 預估金額：帶出貨量 × 零售單價加總 */
+  /** 預估金額：各列 (帶出貨量 × 零售單價) 四捨五入至整數後加總 */
   estTotal: number;
   /** 剩餘貨品金額 */
   remainValue: number;
