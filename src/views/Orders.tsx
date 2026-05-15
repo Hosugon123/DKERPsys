@@ -258,6 +258,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [pickingLines, setPickingLines] = useState<OrderHistoryLine[]>([]);
   const [pickingOriginal, setPickingOriginal] = useState<OrderHistoryLine[]>([]);
   const [pickingError, setPickingError] = useState<string | null>(null);
+  /** 總部：僅修正各列批價（不改數量），已出貨或已盤點押記亦可 */
+  const [priceAdjustOrderId, setPriceAdjustOrderId] = useState<string | null>(null);
+  const [priceAdjustLines, setPriceAdjustLines] = useState<OrderHistoryLine[]>([]);
+  const [priceAdjustError, setPriceAdjustError] = useState<string | null>(null);
   const syncOrders = useCallback(() => {
     void (async () => {
       const [mgmt, hist] = await Promise.all([
@@ -523,9 +527,16 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setPickingError(null);
   }, []);
 
+  const exitPriceAdjust = useCallback(() => {
+    setPriceAdjustOrderId(null);
+    setPriceAdjustLines([]);
+    setPriceAdjustError(null);
+  }, []);
+
   const startPickingEdit = (e: MouseEvent<HTMLButtonElement>, orderId: string) => {
     e.stopPropagation();
     setPickingError(null);
+    exitPriceAdjust();
     const raw = rawList.find((r) => r.id === orderId);
     if (!raw || raw.status === '已取消' || !canEditOrderInList(raw, userRole)) return;
     if (orderHasStallCountCompleted(raw)) return;
@@ -559,6 +570,45 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     })();
   };
 
+  const startPriceAdjust = (e: MouseEvent<HTMLButtonElement>, orderId: string) => {
+    e.stopPropagation();
+    if (!isHeadquarters) return;
+    setPriceAdjustError(null);
+    exitPickingEdit();
+    const raw = rawList.find((r) => r.id === orderId);
+    if (!raw || raw.status === '已取消') return;
+    setPriceAdjustOrderId(orderId);
+    setPriceAdjustLines(raw.lines.map((l) => ({ ...l })));
+  };
+
+  const savePriceAdjust = (orderId: string) => {
+    setPriceAdjustError(null);
+    void (async () => {
+      const res = await ordersApi.adminPatchOrderLineUnitPricesById(orderId, priceAdjustLines);
+      if (res.ok === true) {
+        exitPriceAdjust();
+        syncOrders();
+        return;
+      }
+      switch (res.reason) {
+        case 'forbidden':
+          setPriceAdjustError('僅超級管理員可更正批價。');
+          break;
+        case 'empty':
+          setPriceAdjustError('品項不可全數為 0，請取消訂單或保留至少一項。');
+          break;
+        case 'canceled':
+          setPriceAdjustError('此單已取消，無法更正。');
+          break;
+        case 'qty_mismatch':
+          setPriceAdjustError('數量與原訂單不一致；此功能僅能改單價，請重新整理後再試。');
+          break;
+        default:
+          setPriceAdjustError('找不到此訂單。');
+      }
+    })();
+  };
+
   const bumpPickingQty = (index: number, delta: number) => {
     setPickingLines((prev) =>
       prev.map((l, i) => {
@@ -581,6 +631,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       if (await ordersApi.deleteOrderByIdFromAnyStore(id)) {
         if (expandedOrderId === id) setExpandedOrderId(null);
         if (pickingOrderId === id) exitPickingEdit();
+        if (priceAdjustOrderId === id) exitPriceAdjust();
         setDeleteModal(null);
         syncOrders();
       }
@@ -594,19 +645,34 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   }, [expandedOrderId, pickingOrderId, exitPickingEdit]);
 
   useEffect(() => {
+    if (priceAdjustOrderId && expandedOrderId && expandedOrderId !== priceAdjustOrderId) {
+      exitPriceAdjust();
+    }
+  }, [expandedOrderId, priceAdjustOrderId, exitPriceAdjust]);
+
+  useEffect(() => {
+    if (!priceAdjustOrderId) return;
+    const r = rawList.find((o) => o.id === priceAdjustOrderId);
+    if (!r || r.status === '已取消' || !isHeadquarters) exitPriceAdjust();
+  }, [priceAdjustOrderId, rawList, isHeadquarters, exitPriceAdjust]);
+
+  useEffect(() => {
     if (!pickingOrderId) return;
     const r = rawList.find((o) => o.id === pickingOrderId);
     if (!r || !canEditOrderInList(r, userRole) || orderHasStallCountCompleted(r)) exitPickingEdit();
   }, [pickingOrderId, rawList, userRole, exitPickingEdit]);
 
   useEffect(() => {
-    if (!pickingOrderId) return;
+    if (!pickingOrderId && !priceAdjustOrderId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') exitPickingEdit();
+      if (e.key === 'Escape') {
+        exitPickingEdit();
+        exitPriceAdjust();
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [pickingOrderId, exitPickingEdit]);
+  }, [pickingOrderId, priceAdjustOrderId, exitPickingEdit, exitPriceAdjust]);
 
   useEffect(() => {
     if (!shipModal && !revertModal && !cancelModal && !deleteModal) return;
@@ -850,13 +916,22 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           const isExpanded = expandedOrderId === order.id;
           const isPickingThis =
             canEdit && pickingOrderId === order.id && order.status !== '已取消';
+          const isPriceAdjustThis =
+            isHeadquarters &&
+            priceAdjustOrderId === order.id &&
+            (order.status === '待出貨' || order.status === '已完成');
           const pickKept = isPickingThis ? pickingLines.filter((l) => l.qty > 0) : [];
           const pickTotal = isPickingThis
             ? Math.round(pickKept.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100
             : 0;
+          const priceAdjKept = isPriceAdjustThis ? priceAdjustLines.filter((l) => l.qty > 0) : [];
+          const priceAdjustTotal =
+            isPriceAdjustThis
+              ? Math.round(priceAdjKept.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100
+              : 0;
           const pickCount = isPickingThis ? pickKept.reduce((s, l) => s + l.qty, 0) : 0;
           const orderLineCount = order.itemLines.reduce((s, l) => s + l.qty, 0);
-          const pickingLocked = isPickingThis;
+          const orderEditLocked = isPickingThis || isPriceAdjustThis;
           const stallLocked = raw ? orderHasStallCountCompleted(raw) : false;
 
           return (
@@ -1004,9 +1079,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       {(order.status === '待出貨' || order.status === '已完成') && canEdit && (
                         <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:min-w-0 sm:flex-1">
                           {!isPickingThis &&
+                            !isPriceAdjustThis &&
                             (stallLocked ? (
                               <span className="text-xs text-zinc-500 shrink-0 text-left sm:text-right w-full sm:w-auto">
-                                已完成盤點押記，無法調整貨量
+                                已完成盤點押記，無法調整貨量（總部可用「更正批價」修正單價）
                               </span>
                             ) : (
                               <button
@@ -1017,13 +1093,26 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 調整貨量
                               </button>
                             ))}
+                          {isHeadquarters &&
+                            raw &&
+                            !isPickingThis &&
+                            !isPriceAdjustThis &&
+                            (order.status === '待出貨' || order.status === '已完成') && (
+                              <button
+                                type="button"
+                                onClick={(e) => startPriceAdjust(e, order.id)}
+                                className="h-9 min-h-9 px-3 rounded-lg border border-amber-500/50 bg-amber-950/30 text-amber-200 text-sm font-medium hover:bg-amber-950/50 shrink-0"
+                              >
+                                更正批價
+                              </button>
+                            )}
                           {order.status === '待出貨' ? (
                             <>
                               <button
                                 type="button"
                                 onClick={(e) => openShipDialog(e, order.id)}
-                                disabled={pickingLocked}
-                                title={pickingLocked ? '請先儲存或放棄「調整貨量」' : undefined}
+                                disabled={orderEditLocked}
+                                title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
                                 className="h-9 min-h-9 px-3 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 shadow-md shadow-emerald-900/25 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
                               >
                                 標記出貨
@@ -1035,8 +1124,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   if (isHeadquarters) setDeleteModal({ id: order.id });
                                   else setCancelModal({ id: order.id });
                                 }}
-                                disabled={pickingLocked}
-                                title={pickingLocked ? '請先儲存或放棄「調整貨量」' : undefined}
+                                disabled={orderEditLocked}
+                                title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
                                 className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 {isHeadquarters ? '刪除訂單' : '取消訂單'}
@@ -1050,10 +1139,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   e.stopPropagation();
                                   setRevertModal({ id: order.id });
                                 }}
-                                disabled={stallLocked || pickingLocked}
+                                disabled={stallLocked || orderEditLocked}
                                 title={
-                                  pickingLocked
-                                    ? '請先儲存或放棄「調整貨量」'
+                                  orderEditLocked
+                                    ? '請先儲存或放棄「調整貨量／更正批價」'
                                     : stallLocked
                                       ? '此單已完成盤點押記，無法改回待出貨'
                                       : undefined
@@ -1069,8 +1158,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   if (isHeadquarters) setDeleteModal({ id: order.id });
                                   else setCancelModal({ id: order.id });
                                 }}
-                                disabled={pickingLocked}
-                                title={pickingLocked ? '請先儲存或放棄「調整貨量」' : undefined}
+                                disabled={orderEditLocked}
+                                title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
                                 className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 {isHeadquarters ? '刪除訂單' : '取消訂單'}
@@ -1116,18 +1205,55 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       </div>
                     )}
 
+                    {isPriceAdjustThis && (
+                      <div className="mb-2.5 space-y-2">
+                        <p className="text-xs text-amber-500/90 font-medium leading-relaxed">
+                          更正批價：僅修改「批價（每份）」；各列數量不變。適用菜價事後調整；已出貨或已盤點之訂單亦可，更正後儀表板與叫貨合計會依新單價重算。
+                        </p>
+                        {priceAdjustError && (
+                          <p className="text-sm text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
+                            {priceAdjustError}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              savePriceAdjust(order.id);
+                            }}
+                            className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500"
+                          >
+                            儲存批價
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              exitPriceAdjust();
+                            }}
+                            className="py-2 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-sm hover:bg-zinc-800"
+                          >
+                            放棄
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto overscroll-x-contain touch-pan-x w-full min-w-0 pb-px">
                       <table
                         className={cn(
                           'w-full border-collapse text-left',
                           isPickingThis
                             ? 'table-auto min-w-[22rem] sm:min-w-[24rem]'
-                            : cn(
-                                'table-fixed',
-                                showOrderProcurementSubtotalCol
-                                  ? 'min-w-[32rem] sm:min-w-[40rem] md:min-w-[46rem]'
-                                  : 'min-w-[26rem] sm:min-w-[34rem] md:min-w-[38rem]',
-                              ),
+                            : isPriceAdjustThis
+                              ? 'table-auto min-w-[24rem] sm:min-w-[30rem]'
+                              : cn(
+                                  'table-fixed',
+                                  showOrderProcurementSubtotalCol
+                                    ? 'min-w-[32rem] sm:min-w-[40rem] md:min-w-[46rem]'
+                                    : 'min-w-[26rem] sm:min-w-[34rem] md:min-w-[38rem]',
+                                ),
                         )}
                       >
                         <thead className="bg-zinc-800/50 text-zinc-400 text-[10px] sm:text-xs uppercase border-b border-zinc-700/50">
@@ -1137,6 +1263,17 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium">品項</th>
                                 <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[11rem] w-[1%]">
                                   實出數量
+                                </th>
+                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium text-right">小計</th>
+                              </>
+                            ) : isPriceAdjustThis ? (
+                              <>
+                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium">品項</th>
+                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap">
+                                  數量
+                                </th>
+                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[7.5rem]">
+                                  批價（每份）
                                 </th>
                                 <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium text-right">小計</th>
                               </>
@@ -1235,6 +1372,62 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   </tr>
                                 );
                               })
+                            : isPriceAdjustThis
+                              ? priceAdjustLines.map((line, idx) => {
+                                  const q = roundProcurementQty(Number(line.qty) || 0);
+                                  const sub = Math.round(line.unitPrice * q * 100) / 100;
+                                  return (
+                                    <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/20">
+                                      <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
+                                        <div className="font-medium text-[#f5f2ed]">{line.name}</div>
+                                        <div className="text-xs text-zinc-500">{line.unit}</div>
+                                      </td>
+                                      <td className="py-2.5 sm:py-3 px-2 sm:px-4 text-center tabular-nums text-zinc-300">
+                                        <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
+                                          {fmtLineQty(q)}
+                                          <LiangJinQtyHint
+                                            liangQty={q}
+                                            pieceUnit={line.unit}
+                                            className="text-[10px] sm:text-xs"
+                                          />
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 sm:py-3 px-2 sm:px-4 align-top">
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min={0}
+                                          inputMode="decimal"
+                                          value={line.unitPrice}
+                                          onClick={(e) => e.stopPropagation()}
+                                          onFocus={(e) => e.target.select()}
+                                          onChange={(e) => {
+                                            const n = parseFloat(e.target.value);
+                                            setPriceAdjustLines((prev) =>
+                                              prev.map((l, i) =>
+                                                i === idx
+                                                  ? {
+                                                      ...l,
+                                                      unitPrice: Number.isFinite(n)
+                                                        ? Math.round(
+                                                            Math.max(0, Math.min(9_999_999, n)) * 100
+                                                          ) / 100
+                                                        : 0,
+                                                    }
+                                                  : l
+                                              )
+                                            );
+                                          }}
+                                          className="w-full min-w-[5rem] max-w-[9rem] text-center text-sm font-medium tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
+                                          aria-label={`${line.name} 批價（每份）`}
+                                        />
+                                      </td>
+                                      <td className="py-2.5 sm:py-3 px-3 sm:px-4 text-right tabular-nums text-zinc-200">
+                                        $ {sub.toLocaleString('zh-TW')}
+                                      </td>
+                                    </tr>
+                                  );
+                                })
                             : (() => {
                                 const renderDetailLineRow = (line: OrderHistoryLine, idx: number) => {
                                   const rowSnap = stallSnap?.lines[line.productId];
@@ -1411,6 +1604,18 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 </td>
                                 <td className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
                                   $ {pickTotal.toLocaleString()}
+                                </td>
+                              </>
+                            ) : isPriceAdjustThis ? (
+                              <>
+                                <td
+                                  colSpan={3}
+                                  className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-xs sm:text-sm font-medium text-zinc-400"
+                                >
+                                  批價更正後合計
+                                </td>
+                                <td className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
+                                  $ {priceAdjustTotal.toLocaleString()}
                                 </td>
                               </>
                             ) : (

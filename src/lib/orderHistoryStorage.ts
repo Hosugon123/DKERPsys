@@ -261,7 +261,7 @@ export function displayOrderCreatedByLabel(
   return e.createdByName?.trim() || resolveUserDisplayNameById(e.actorUserId) || '—';
 }
 
-/** 已有攤上盤點完成押記（與銷售紀錄綁定），不可改回待出貨或調整叫貨／揀貨品項 */
+/** 已有攤上盤點完成押記（與銷售紀錄綁定），不可改回待出貨或調整叫貨／揀貨品項；總部仍可以「更正批價」僅改單價（見 adminPatchOrderLineUnitPricesById）。 */
 export function orderHasStallCountCompleted(o: { stallCountCompletedAt?: string }): boolean {
   return Boolean(o.stallCountCompletedAt?.trim());
 }
@@ -611,6 +611,132 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
 export type UpdateEditableOrderLinesResult =
   | { ok: true }
   | { ok: false; reason: 'not_found' | 'canceled' | 'empty' | 'stall_count_locked' };
+
+/** 管理員修正訂單「批價／每份單價」專用（與攤上盤點押記無關，不變更數量）。 */
+export type AdminPatchOrderUnitPricesResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'forbidden' | 'not_found' | 'canceled' | 'empty' | 'qty_mismatch';
+    };
+
+function lineQtyByProductId(lines: OrderHistoryLine[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const l of lines) {
+    const q = roundProcurementQty(Number(l.qty) || 0);
+    if (q <= 0) continue;
+    m.set(l.productId, roundProcurementQty((m.get(l.productId) ?? 0) + q));
+  }
+  return m;
+}
+
+function lineQtyMapsEqual(a: Map<string, number>, b: Map<string, number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    if (b.get(k) !== v) return false;
+  }
+  return true;
+}
+
+function clampOrderUnitPrice(n: number): number {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return roundMoney(Math.max(0, Math.min(9_999_999, x)));
+}
+
+/**
+ * 僅限超級管理員：在不改變各品項「數量」的前提下，修正 `lines[].unitPrice` 並重算總額。
+ * 允許「待出貨」「已完成」；**略過**攤上盤點押記（僅改單價，不影響盤點當下帶出量）。
+ */
+export function adminPatchOrderLineUnitPricesById(
+  id: string,
+  nextLines: OrderHistoryLine[]
+): AdminPatchOrderUnitPricesResult {
+  if (!getDataScopeContext().isAdmin) return { ok: false, reason: 'forbidden' };
+
+  const nextAgg = aggregateOrderLinesForSave(nextLines);
+  if (nextAgg.lines.length === 0) return { ok: false, reason: 'empty' };
+
+  const pricedLines = nextAgg.lines.map((l) => ({
+    ...l,
+    unitPrice: clampOrderUnitPrice(l.unitPrice),
+  }));
+  const pricedAgg = aggregateOrderLinesForSave(pricedLines);
+  const nextQtyMap = lineQtyByProductId(pricedAgg.lines);
+
+  const tryPatch = (
+    row: {
+      lines: OrderHistoryLine[];
+      status: FranchiseOrderStatus;
+      actorRole?: OrderActorRole;
+    },
+    apply: (totals: ReturnType<typeof aggregateOrderLinesForSave>) => void
+  ): AdminPatchOrderUnitPricesResult => {
+    if (row.status === '已取消') return { ok: false, reason: 'canceled' };
+    const prevQtyMap = lineQtyByProductId(aggregateOrderLinesForSave(row.lines).lines);
+    if (!lineQtyMapsEqual(prevQtyMap, nextQtyMap)) return { ok: false, reason: 'qty_mismatch' };
+
+    const finalLines = pricedAgg.lines.map((nl) => {
+      const prevSame = row.lines.find((pl) => pl.productId === nl.productId);
+      return {
+        ...nl,
+        name: prevSame?.name ?? nl.name,
+        unit: prevSame?.unit ?? nl.unit,
+      };
+    });
+    const totals = aggregateOrderLinesForSave(finalLines);
+    apply(totals);
+    return { ok: true };
+  };
+
+  const mgmt = loadFranchiseManagementOrders();
+  const mi = mgmt.findIndex((o) => o.id === id);
+  if (mi >= 0) {
+    const now = new Date().toISOString();
+    const who = persistableActorDisplayName();
+    const m = [...mgmt];
+    const res = tryPatch(m[mi], (tot) => {
+      m[mi] = {
+        ...m[mi],
+        lines: tot.lines,
+        itemCount: tot.itemCount,
+        totalAmount: tot.totalAmount,
+        payableAmount: tot.totalAmount,
+        selfSuppliedCostAmount: 0,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      };
+      saveFranchiseManagementOrders(m);
+    });
+    return res;
+  }
+
+  const hist = loadOrderHistory();
+  const hi = hist.findIndex((o) => o.id === id);
+  if (hi >= 0) {
+    const now = new Date().toISOString();
+    const who = persistableActorDisplayName();
+    const h = [...hist];
+    const res = tryPatch(h[hi], (tot) => {
+      const payableAmount = tot.totalAmount;
+      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(tot.lines, h[hi].actorRole);
+      h[hi] = {
+        ...h[hi],
+        lines: tot.lines,
+        itemCount: tot.itemCount,
+        totalAmount: tot.totalAmount,
+        payableAmount,
+        selfSuppliedCostAmount,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      };
+      saveOrderHistory(h);
+    });
+    return res;
+  }
+
+  return { ok: false, reason: 'not_found' };
+}
 
 /**
  * 依單號更新可編輯訂單之品項（允許「待出貨」與「已完成」，禁止「已取消」）。

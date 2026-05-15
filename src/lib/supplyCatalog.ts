@@ -31,12 +31,12 @@ export type SupplyItem = {
 
 export const CATEGORY_CHIPS: { id: 'all' | ItemCategory; label: string }[] = [
   { id: 'all', label: '全部' },
+  /** 攤上盤點不計入「應有營業額」等販售帳面；仍會列盤、叫貨可扣庫 */
+  { id: 'consumable', label: '消耗品' },
+  { id: 'veg', label: '菜' },
   { id: 'duck', label: '鴨貨' },
   { id: 'pork', label: '豬、雞' },
   { id: 'tofu', label: '加工品' },
-  { id: 'veg', label: '菜' },
-  /** 攤上盤點不計入「應有營業額」等販售帳面；仍會列盤、叫貨可扣庫 */
-  { id: 'consumable', label: '消耗品' },
 ];
 
 const rows: { name: string; category: ItemCategory; price: number; status?: '庫存緊張'; tag?: string }[] = [
@@ -247,7 +247,7 @@ export function pricePerPackage(item: SupplyItem) {
 }
 
 /**
- * 以批貨單價推估之終端售價（叫貨頁「零售預估」用）。
+ * 以批貨單價推估之終端售價（叫貨頁「零售」標示用）。
  * 實際門市訂價以現場為準，此倍率可再改或改成品項級設定。
  */
 export const PROCUREMENT_RETAIL_ESTIMATE_MULTIPLIER = 1.45;

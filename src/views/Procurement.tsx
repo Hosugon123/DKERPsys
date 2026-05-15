@@ -856,7 +856,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                               showProcurementCost ? 'text-emerald-400/90' : 'text-emerald-400'
                             )}
                           >
-                            零售預估 ${' '}
+                            零售 ${' '}
                             {(Math.round(favoriteRetailTotal * 100) / 100).toLocaleString('zh-TW', {
                               maximumFractionDigits: 2,
                               minimumFractionDigits: 0,
@@ -995,13 +995,13 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
                     </span>
                     <span className="text-emerald-400/95 font-semibold tabular-nums text-[0.75rem] sm:text-[0.8125rem]">
-                      零售預估 ${estimatedRetailPerPackage(item).toLocaleString()}
+                      零售 ${estimatedRetailPerPackage(item).toLocaleString()}
                       <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
                     </span>
                   </>
                 ) : (
                   <span className="text-emerald-400 font-semibold tabular-nums text-[0.8125rem] sm:text-sm text-right max-w-full">
-                    零售預估 ${estimatedRetailPerPackage(item).toLocaleString()}
+                    零售 ${estimatedRetailPerPackage(item).toLocaleString()}
                     <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
                   </span>
                 )}
@@ -1165,14 +1165,14 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       <span className="text-zinc-600 shrink-0" aria-hidden>
                         ·
                       </span>
-                      <span className="text-zinc-500 shrink-0">零售估</span>
+                      <span className="text-zinc-500 shrink-0">零售</span>
                       <span className="font-semibold text-emerald-400">
                         $ {totalRetailEstimate.toLocaleString()}
                       </span>
                     </div>
                   ) : (
                     <div className="text-[11px] leading-snug tabular-nums flex flex-wrap items-baseline gap-x-1 gap-y-0">
-                      <span className="text-zinc-500 shrink-0">零售預估</span>
+                      <span className="text-zinc-500 shrink-0">零售</span>
                       <span className="font-semibold text-emerald-400">
                         $ {totalRetailEstimate.toLocaleString()}
                       </span>
@@ -1229,7 +1229,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                           )}
                         </div>
                         <div className="min-w-0 sm:pl-2 sm:border-l sm:border-zinc-800/70">
-                          <p className="text-xs text-zinc-500">零售預估（售完參考）</p>
+                          <p className="text-xs text-zinc-500">零售（售完參考）</p>
                           <p className="text-lg sm:text-xl font-semibold text-emerald-400 tabular-nums">
                             $ {totalRetailEstimate.toLocaleString()}
                           </p>
@@ -1237,7 +1237,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       </div>
                     ) : (
                       <div>
-                        <p className="text-xs text-zinc-500">零售預估合計（售完參考）</p>
+                        <p className="text-xs text-zinc-500">零售合計（售完參考）</p>
                         <p className="text-xl font-semibold text-emerald-400 tabular-nums">
                           $ {totalRetailEstimate.toLocaleString()}
                         </p>
@@ -1312,14 +1312,14 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                           </span>
                         </>
                       )}
-                      ・ 零售預估{' '}
+                      ・ 零售{' '}
                       <span className="text-emerald-400 font-semibold tabular-nums">
                         $ {totalRetailEstimate.toLocaleString()}
                       </span>
                     </>
                   ) : (
                     <>
-                      零售預估合計（參考）{' '}
+                      零售合計（參考）{' '}
                       <span className="text-emerald-400 font-semibold tabular-nums">
                         $ {totalRetailEstimate.toLocaleString()}
                       </span>

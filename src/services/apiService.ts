@@ -116,6 +116,12 @@ export const orders = {
   ): Promise<orderHistory.UpdateEditableOrderLinesResult> {
     return withRemoteStorageWrite(() => orderHistory.updateEditableOrderLinesById(id, nextLines));
   },
+  async adminPatchOrderLineUnitPricesById(
+    id: string,
+    nextLines: orderHistory.OrderHistoryLine[],
+  ): Promise<orderHistory.AdminPatchOrderUnitPricesResult> {
+    return withRemoteStorageWrite(() => orderHistory.adminPatchOrderLineUnitPricesById(id, nextLines));
+  },
   async appendProcurementOrderEntry(params: {
     lines: orderHistory.OrderHistoryLine[];
     totalAmount: number;
@@ -159,6 +165,7 @@ export type {
   UpdateLinesResult,
   UpdateEditableOrderLinesResult,
   UpdateStallSnapshotResult,
+  AdminPatchOrderUnitPricesResult,
 } from '../lib/orderHistoryStorage';
 
 // ——— 產品（品項庫 + 成本結構表）———
