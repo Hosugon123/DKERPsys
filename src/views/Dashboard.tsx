@@ -38,7 +38,7 @@ import {
   listAccountingLedgerEntriesForScopeId,
 } from '../lib/accountingLedgerStorage';
 import { usesFranchiseeOperatingExpenseModel } from '../lib/operatingExpenseModel';
-import { getSupplyItem, isFranchiseeSelfSuppliedItem } from '../lib/supplyCatalog';
+import { getSupplyItem, isConsumableItem, isFranchiseeSelfSuppliedItem } from '../lib/supplyCatalog';
 import { getStallDisplaySoldAtRetail } from '../lib/orderStallDisplayRevenue';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
@@ -1028,6 +1028,8 @@ export default function Dashboard({
     const byName = new Map<string, { name: string; sales: number; revenue: number }>();
     for (const o of nonAdminProductChartOrders) {
       for (const line of o.lines) {
+        const lit = getSupplyItem(line.productId);
+        if (isConsumableItem(lit)) continue;
         const prev = byName.get(line.name) ?? { name: line.name, sales: 0, revenue: 0 };
         prev.sales += line.qty;
         prev.revenue += line.qty * line.unitPrice;
@@ -1113,6 +1115,7 @@ export default function Dashboard({
       (o) => orderIsFranchiseBusinessScoped(o),
       (_o, line) => {
         const item = getSupplyItem(line.productId);
+        if (isConsumableItem(item)) return false;
         return !isFranchiseeSelfSuppliedItem(item);
       },
     );

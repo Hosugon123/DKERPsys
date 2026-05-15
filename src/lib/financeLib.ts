@@ -7,6 +7,7 @@ import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
   effectiveOrderDateYmd,
+  orderConsumableLinesAmountTotal,
   orderIsFranchiseBusinessScoped,
   orderIsHeadquartersDirectScoped,
   type OrderHistoryEntry,
@@ -132,11 +133,11 @@ export type AdminDashboardFinance = {
   ym: string;
   /** 本月盤點歸屬之直營／總部單：零售參考 × 售出量（與銷售紀錄「盤點金額」一致） */
   directStoreStallRetailTotal: number;
-  /** 本月已完成之加盟主叫貨合計 */
+  /** 本月已完成之加盟叫貨中，計入總部營收之金額（已排除「消耗品」代訂列；訂單 totalAmount 仍含該列） */
   franchiseeOrderTotal: number;
   /** 本月流水帳「收入」合計（營收總計以外另列） */
   ledgerIncomeTotal: number;
-  /** 營收總計 = 直營店盤點營收 + 加盟主批貨 */
+  /** 營收總計 = 直營店盤點營收 + 加盟批貨（營運食材，不含消耗品代訂） */
   revenueTotal: number;
   /** 本月直營進貨成本（改以流水帳支出認列；不再由叫貨/帶出推估） */
   procurementCostTotal: number;
@@ -246,7 +247,7 @@ export function computeStallGapSummary(
 
 /**
  * 超級管理員儀表板：依日期區間（含端點）。
- * 營收：直營＝盤點歸屬日落於區間；加盟＝建單日落於區間且已完成叫貨。
+ * 營收：直營＝盤點歸屬日落於區間；加盟＝建單日落於區間且已完成叫貨（不含「消耗品」代訂列：不視為總部營收）。
  * 支出：同期流水帳支出（不含叫貨／批貨進貨成本）。
  */
 export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd: string): AdminDashboardFinance {
@@ -268,7 +269,9 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
       if (ymd0 < a || ymd0 > b) continue;
       const selfSupplied =
         o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
-      franchiseeOrderTotal += Math.max(0, o.totalAmount - selfSupplied);
+      const batchNet = Math.max(0, o.totalAmount - selfSupplied);
+      const consumableAmt = orderConsumableLinesAmountTotal(o.lines);
+      franchiseeOrderTotal += Math.max(0, batchNet - Math.min(batchNet, consumableAmt));
     }
     if (orderIsHeadquartersDirectScoped(o) && o.stallCountCompletedAt) {
       const stallYmd = stallCountAttributeYmd(o);

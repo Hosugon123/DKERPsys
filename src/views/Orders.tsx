@@ -34,6 +34,8 @@ import {
   isConsumableItem,
   pricePerPackage,
   userRoleToSupplyRetailView,
+  type SupplyItem,
+  type SupplyRetailView,
 } from '../lib/supplyCatalog';
 import { computeLine, num, roundProcurementQty } from '../lib/stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog } from '../lib/salesRecordStorage';
@@ -181,6 +183,126 @@ function fmtLineQty(n: number) {
   if (!Number.isFinite(n)) return '—';
   if (Number.isInteger(n)) return String(n);
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 4 });
+}
+
+type MergedStallSnapForOrderDetail = ReturnType<typeof mergeSalesRecordWithCatalog>;
+type CarrySnapForOrderDetail = ReturnType<typeof loadRemainSnapshotForOrderManagementDisplay> | null;
+
+/** 訂單明細表列：批價、叫貨小計、帶出量若全以零售售完之預估金額。 */
+function computeOrderDetailLineMetrics(
+  line: OrderHistoryLine,
+  stallSnap: MergedStallSnapForOrderDetail | null,
+  carrySnapForDisplay: CarrySnapForOrderDetail,
+  supplyRetailView: SupplyRetailView,
+) {
+  const rowSnap = stallSnap?.lines[line.productId];
+  const hasRowSnap = Boolean(stallSnap && rowSnap);
+  const frozenR = Number(stallSnap?.frozenRetailUnitPriceByItem?.[line.productId]);
+  const item = getSupplyItem(line.productId, supplyRetailView);
+  const legacyPid = String(line.productId).startsWith('legacy-');
+  const carryRemainQty =
+    carrySnapForDisplay && !legacyPid
+      ? Math.max(
+          0,
+          roundProcurementQty(num(carrySnapForDisplay.lines[line.productId]?.remain)),
+        )
+      : null;
+  const orderQtyRounded = roundProcurementQty(Number(line.qty) || 0);
+  let c = item
+    ? computeLine(rowSnap?.out ?? '', rowSnap?.remain ?? '', item, {
+        unitBasis: 'retail',
+      })
+    : null;
+  if (c && Number.isFinite(frozenR)) {
+    c = {
+      ...c,
+      estPrice: c.out * frozenR,
+      remValue: c.remain * frozenR,
+      soldRevenue: c.sold * frozenR,
+    };
+  }
+  const plannedBringOutQty =
+    carryRemainQty !== null
+      ? roundProcurementQty(carryRemainQty + orderQtyRounded)
+      : roundProcurementQty(orderQtyRounded);
+  const displayedBringOut = hasRowSnap && c ? c.out : plannedBringOutQty;
+  const unitRetail = Number.isFinite(frozenR)
+    ? frozenR
+    : item
+      ? estimatedRetailPerPackage(item)
+      : line.unitPrice;
+  const batchUnitPrice = Number(line.unitPrice) || 0;
+  const orderSub = Math.round(batchUnitPrice * line.qty * 100) / 100;
+  const procurementQtyFromDiff =
+    carryRemainQty !== null
+      ? roundProcurementQty(Math.max(0, displayedBringOut - carryRemainQty))
+      : null;
+  const procurementQtyCellText =
+    procurementQtyFromDiff !== null ? fmtLineQty(procurementQtyFromDiff) : fmtLineQty(orderQtyRounded);
+  const procurementQtyForHint =
+    procurementQtyFromDiff !== null ? procurementQtyFromDiff : orderQtyRounded;
+  const retailEstSub = Math.round(displayedBringOut * unitRetail * 100) / 100;
+  return {
+    carryRemainQty,
+    orderQtyRounded,
+    displayedBringOut,
+    procurementQtyCellText,
+    procurementQtyForHint,
+    orderSub,
+    retailEstSub,
+    batchUnitPrice,
+  };
+}
+
+function buildOrderExpandedDetailLines(
+  order: OrderRow,
+  raw: RawOrder | undefined,
+  catalogItems: SupplyItem[],
+  supplyRetailView: SupplyRetailView,
+): OrderHistoryLine[] {
+  if (!raw) {
+    return order.itemLines.map((it, i) => ({
+      productId: `legacy-${i}`,
+      name: it.name,
+      unitPrice: it.qty > 0 ? it.price / it.qty : 0,
+      qty: it.qty,
+      unit: it.unit,
+    }));
+  }
+  const qtyByProductId: Record<string, number> = {};
+  for (const l of raw.lines) {
+    const q = roundProcurementQty(Number(l.qty) || 0);
+    qtyByProductId[l.productId] = roundProcurementQty((qtyByProductId[l.productId] ?? 0) + q);
+  }
+  const detailLines: OrderHistoryLine[] = [];
+  const seen = new Set<string>();
+  for (const catalogEntry of catalogItems) {
+    const pid = catalogEntry.id;
+    const item = getSupplyItem(pid, supplyRetailView);
+    if (!item) continue;
+    const orderQtyRounded = qtyByProductId[pid] ?? 0;
+    if (isConsumableItem(item) && orderQtyRounded <= 0) continue;
+    const existingLine = raw.lines.find((l) => l.productId === pid);
+    const line: OrderHistoryLine = existingLine
+      ? { ...existingLine, qty: orderQtyRounded }
+      : {
+          productId: pid,
+          name: item.name,
+          unitPrice: pricePerPackage(item),
+          qty: orderQtyRounded,
+          unit: item.pieceUnit,
+        };
+    detailLines.push(line);
+    seen.add(pid);
+  }
+  for (const l of raw.lines) {
+    if (seen.has(l.productId)) continue;
+    const q = roundProcurementQty(Number(l.qty) || 0);
+    if (q <= 0) continue;
+    detailLines.push(l);
+    seen.add(l.productId);
+  }
+  return detailLines;
 }
 
 function mergeRawOrdersForDisplay(
@@ -920,6 +1042,26 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
             isHeadquarters &&
             priceAdjustOrderId === order.id &&
             (order.status === '待出貨' || order.status === '已完成');
+          const expandedDetailLinesForTable =
+            isExpanded && !isPickingThis && !isPriceAdjustThis
+              ? buildOrderExpandedDetailLines(order, raw, catalogItemsForOrderDetail, supplyRetailView)
+              : null;
+          const orderRetailEstFooterTotal =
+            showOrderProcurementSubtotalCol && expandedDetailLinesForTable
+              ? Math.round(
+                  expandedDetailLinesForTable.reduce(
+                    (s, line) =>
+                      s +
+                      computeOrderDetailLineMetrics(
+                        line,
+                        stallSnap,
+                        carrySnapForDisplay,
+                        supplyRetailView,
+                      ).retailEstSub,
+                    0,
+                  ) * 100,
+                ) / 100
+              : null;
           const pickKept = isPickingThis ? pickingLines.filter((l) => l.qty > 0) : [];
           const pickTotal = isPickingThis
             ? Math.round(pickKept.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100
@@ -1251,7 +1393,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               : cn(
                                   'table-fixed',
                                   showOrderProcurementSubtotalCol
-                                    ? 'min-w-[32rem] sm:min-w-[40rem] md:min-w-[46rem]'
+                                    ? 'min-w-[38rem] sm:min-w-[46rem] md:min-w-[54rem]'
                                     : 'min-w-[26rem] sm:min-w-[34rem] md:min-w-[38rem]',
                                 ),
                         )}
@@ -1292,12 +1434,17 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   帶出數量
                                 </th>
                                 <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
-                                  單價
+                                  批價
                                 </th>
                                 {showOrderProcurementSubtotalCol && (
-                                  <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
-                                    叫貨金額小計
-                                  </th>
+                                  <>
+                                    <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                      零售預估
+                                    </th>
+                                    <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                      叫貨金額小計
+                                    </th>
+                                  </>
                                 )}
                               </>
                             )}
@@ -1428,60 +1575,14 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                     </tr>
                                   );
                                 })
-                            : (() => {
-                                const renderDetailLineRow = (line: OrderHistoryLine, idx: number) => {
-                                  const rowSnap = stallSnap?.lines[line.productId];
-                                  const hasRowSnap = Boolean(stallSnap && rowSnap);
-                                  const frozenR = Number(stallSnap?.frozenRetailUnitPriceByItem?.[line.productId]);
-                                  const item = getSupplyItem(line.productId, supplyRetailView);
-                                  const legacyPid = String(line.productId).startsWith('legacy-');
-                                  const carryRemainQty =
-                                    carrySnapForDisplay && !legacyPid
-                                      ? Math.max(
-                                          0,
-                                          roundProcurementQty(
-                                            num(carrySnapForDisplay.lines[line.productId]?.remain)
-                                          )
-                                        )
-                                      : null;
-                                  const orderQtyRounded = roundProcurementQty(Number(line.qty) || 0);
-                                  let c = item
-                                    ? computeLine(rowSnap?.out ?? '', rowSnap?.remain ?? '', item, {
-                                        unitBasis: 'retail',
-                                      })
-                                    : null;
-                                  if (c && Number.isFinite(frozenR)) {
-                                    c = {
-                                      ...c,
-                                      estPrice: c.out * frozenR,
-                                      remValue: c.remain * frozenR,
-                                      soldRevenue: c.sold * frozenR,
-                                    };
-                                  }
-                                  const plannedBringOutQty =
-                                    carryRemainQty !== null
-                                      ? roundProcurementQty(carryRemainQty + orderQtyRounded)
-                                      : roundProcurementQty(orderQtyRounded);
-                                  const displayedBringOut =
-                                    hasRowSnap && c ? c.out : plannedBringOutQty;
-                                  const unitRetail = Number.isFinite(frozenR)
-                                    ? frozenR
-                                    : item
-                                      ? estimatedRetailPerPackage(item)
-                                      : line.unitPrice;
-                                  const orderSub = Math.round(line.unitPrice * line.qty * 100) / 100;
-                                  const procurementQtyFromDiff =
-                                    carryRemainQty !== null
-                                      ? roundProcurementQty(Math.max(0, displayedBringOut - carryRemainQty))
-                                      : null;
-                                  const procurementQtyCellText =
-                                    procurementQtyFromDiff !== null
-                                      ? fmtLineQty(procurementQtyFromDiff)
-                                      : fmtLineQty(orderQtyRounded);
-                                  const procurementQtyForHint =
-                                    procurementQtyFromDiff !== null
-                                      ? procurementQtyFromDiff
-                                      : orderQtyRounded;
+                            : expandedDetailLinesForTable
+                              ? expandedDetailLinesForTable.map((line, idx) => {
+                                  const d = computeOrderDetailLineMetrics(
+                                    line,
+                                    stallSnap,
+                                    carrySnapForDisplay,
+                                    supplyRetailView,
+                                  );
                                   return (
                                     <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 align-top max-md:relative max-md:left-auto max-md:z-0 max-md:shadow-none md:sticky md:left-0 md:z-[2] bg-zinc-900 md:shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)] w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]">
@@ -1491,20 +1592,20 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/90">
                                         <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
-                                          {procurementQtyCellText}
+                                          {d.procurementQtyCellText}
                                           <LiangJinQtyHint
-                                            liangQty={procurementQtyForHint}
+                                            liangQty={d.procurementQtyForHint}
                                             pieceUnit={line.unit}
                                             className="text-[10px] sm:text-xs"
                                           />
                                         </span>
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-400">
-                                        {carryRemainQty !== null ? (
+                                        {d.carryRemainQty !== null ? (
                                           <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
-                                            {fmtLineQty(carryRemainQty)}
+                                            {fmtLineQty(d.carryRemainQty)}
                                             <LiangJinQtyHint
-                                              liangQty={carryRemainQty}
+                                              liangQty={d.carryRemainQty}
                                               pieceUnit={line.unit}
                                               className="text-[10px] sm:text-xs"
                                             />
@@ -1515,82 +1616,31 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-zinc-200">
                                         <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
-                                          {fmtLineQty(displayedBringOut)}
+                                          {fmtLineQty(d.displayedBringOut)}
                                           <LiangJinQtyHint
-                                            liangQty={displayedBringOut}
+                                            liangQty={d.displayedBringOut}
                                             pieceUnit={line.unit}
                                             className="text-[10px] sm:text-xs"
                                           />
                                         </span>
                                       </td>
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
-                                        {unitRetail.toLocaleString()}
+                                        {d.batchUnitPrice.toLocaleString('zh-TW')}
                                       </td>
                                       {showOrderProcurementSubtotalCol && (
-                                        <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-amber-400/95 whitespace-nowrap">
-                                          $ {orderSub.toLocaleString('zh-TW')}
-                                        </td>
+                                        <>
+                                          <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-emerald-400/95 whitespace-nowrap">
+                                            $ {d.retailEstSub.toLocaleString('zh-TW')}
+                                          </td>
+                                          <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-amber-400/95 whitespace-nowrap">
+                                            $ {d.orderSub.toLocaleString('zh-TW')}
+                                          </td>
+                                        </>
                                       )}
                                     </tr>
                                   );
-                                };
-
-                                if (!raw) {
-                                  return order.itemLines
-                                    .map((it, i) => ({
-                                      productId: `legacy-${i}`,
-                                      name: it.name,
-                                      unitPrice: it.qty > 0 ? it.price / it.qty : 0,
-                                      qty: it.qty,
-                                      unit: it.unit,
-                                    }))
-                                    .map((line, idx) => renderDetailLineRow(line, idx));
-                                }
-
-                                const qtyByProductId: Record<string, number> = {};
-                                for (const l of raw.lines) {
-                                  const q = roundProcurementQty(Number(l.qty) || 0);
-                                  qtyByProductId[l.productId] = roundProcurementQty(
-                                    (qtyByProductId[l.productId] ?? 0) + q
-                                  );
-                                }
-
-                                const detailLines: OrderHistoryLine[] = [];
-                                const seen = new Set<string>();
-
-                                for (const catalogEntry of catalogItemsForOrderDetail) {
-                                  const pid = catalogEntry.id;
-                                  const item = getSupplyItem(pid, supplyRetailView);
-                                  if (!item) continue;
-
-                                  const orderQtyRounded = qtyByProductId[pid] ?? 0;
-                                  if (isConsumableItem(item) && orderQtyRounded <= 0) continue;
-
-                                  const existingLine = raw.lines.find((l) => l.productId === pid);
-                                  const line: OrderHistoryLine = existingLine
-                                    ? { ...existingLine, qty: orderQtyRounded }
-                                    : {
-                                        productId: pid,
-                                        name: item.name,
-                                        unitPrice: pricePerPackage(item),
-                                        qty: orderQtyRounded,
-                                        unit: item.pieceUnit,
-                                      };
-
-                                  detailLines.push(line);
-                                  seen.add(pid);
-                                }
-
-                                for (const l of raw.lines) {
-                                  if (seen.has(l.productId)) continue;
-                                  const q = roundProcurementQty(Number(l.qty) || 0);
-                                  if (q <= 0) continue;
-                                  detailLines.push(l);
-                                  seen.add(l.productId);
-                                }
-
-                                return detailLines.map((line, idx) => renderDetailLineRow(line, idx));
-                              })()}
+                                })
+                              : null}
                         </tbody>
                         <tfoot className="bg-zinc-800/20 border-t border-zinc-700/50">
                           <tr>
@@ -1626,8 +1676,13 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 >
                                   叫貨合計（下單）
                                 </td>
+                                {showOrderProcurementSubtotalCol && (
+                                  <td className="py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-base sm:text-lg font-bold text-emerald-400/95 tabular-nums whitespace-nowrap">
+                                    $ {(orderRetailEstFooterTotal ?? 0).toLocaleString('zh-TW')}
+                                  </td>
+                                )}
                                 <td className="py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
-                                  $ {order.amount.toLocaleString()}
+                                  $ {order.amount.toLocaleString('zh-TW')}
                                 </td>
                               </>
                             )}

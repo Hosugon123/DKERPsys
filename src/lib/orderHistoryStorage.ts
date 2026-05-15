@@ -5,7 +5,7 @@ import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
 import { listSystemUsers } from './systemUsersStorage';
 import { getStoreCode3, normalizeStoreCode3Digits } from './storeCodeStorage';
 import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessionActorDisplayName';
-import { getSupplyItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
+import { getSupplyItem, isConsumableItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
 import { initialFranchiseeStoreLabelForOrder } from './orderStoreLabel';
 
 /** 寫入訂單／押記時可存檔的顯示名（登入者姓名 → 帳號 → 依 userId 查目錄） */
@@ -24,6 +24,20 @@ export type OrderHistoryLine = {
   qty: number;
   unit: string;
 };
+
+/** 訂單明細中「消耗品」分類之列小計加總（代訂固定成本，不計入總部營收／加盟排行）。 */
+export function orderConsumableLinesAmountTotal(lines: OrderHistoryLine[]): number {
+  let s = 0;
+  for (const l of lines) {
+    const it = getSupplyItem(l.productId);
+    if (!isConsumableItem(it)) continue;
+    const q = roundProcurementQty(Number(l.qty) || 0);
+    if (q <= 0) continue;
+    const u = Number(l.unitPrice) || 0;
+    s += u * q;
+  }
+  return Math.round(s * 100) / 100;
+}
 
 export type FranchiseOrderStatus = '待出貨' | '已完成' | '已取消';
 

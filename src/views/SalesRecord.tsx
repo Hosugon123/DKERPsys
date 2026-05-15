@@ -871,9 +871,17 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                         {unitRetail.toLocaleString()}
                                       </td>
                                       <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
-                                        {c.remainUnfilled || c.out <= 0
-                                          ? '—'
-                                          : `${c.leftRatePct.toFixed(2)}%`}
+                                        {c.remainUnfilled || c.out <= 0 ? (
+                                          '—'
+                                        ) : (
+                                          <span
+                                            className={cn(
+                                              c.leftRatePct > 40 && 'text-red-400 font-semibold',
+                                            )}
+                                          >
+                                            {`${c.leftRatePct.toFixed(2)}%`}
+                                          </span>
+                                        )}
                                       </td>
                                     </tr>
                                   );
@@ -966,9 +974,15 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                       {unitRetail.toLocaleString()}
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
-                                      {c.remainUnfilled || c.out <= 0
-                                        ? '—'
-                                        : `${c.leftRatePct.toFixed(2)}%`}
+                                      {c.remainUnfilled || c.out <= 0 ? (
+                                        '—'
+                                      ) : (
+                                        <span
+                                          className={cn(c.leftRatePct > 40 && 'text-red-400 font-semibold')}
+                                        >
+                                          {`${c.leftRatePct.toFixed(2)}%`}
+                                        </span>
+                                      )}
                                     </td>
                                   </tr>
                                 ))}

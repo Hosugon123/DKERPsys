@@ -803,7 +803,18 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                 </td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-zinc-500 whitespace-nowrap text-[14px] sm:text-sm">{item.pieceUnit}</td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-amber-200/80 font-mono text-[14px] sm:text-sm">
-                  {c.remainUnfilled || c.out <= 0 ? '—' : `${c.leftRatePct.toFixed(2)}%`}
+                  {c.remainUnfilled || c.out <= 0 ? (
+                    '—'
+                  ) : (
+                    <span
+                      className={cn(
+                        'tabular-nums',
+                        c.leftRatePct > 40 && 'text-red-400 font-semibold',
+                      )}
+                    >
+                      {`${c.leftRatePct.toFixed(2)}%`}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
