@@ -251,7 +251,19 @@ function computeOrderDetailLineMetrics(
     orderSub,
     retailEstSub,
     batchUnitPrice,
+    unitRetail,
   };
+}
+
+/** 調整貨量時列小計用：員工顯示預估零售單價，其餘身分用訂單批價。 */
+function pickingLineUnitForDisplay(
+  line: OrderHistoryLine,
+  userRole: UserRole,
+  supplyRetailView: SupplyRetailView,
+): number {
+  if (userRole !== 'employee') return Number(line.unitPrice) || 0;
+  const it = getSupplyItem(line.productId, supplyRetailView);
+  return it ? estimatedRetailPerPackage(it) : 0;
 }
 
 function buildOrderExpandedDetailLines(
@@ -351,6 +363,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const isHeadquarters = userRole === 'admin';
   /** 訂單明細表「叫貨金額小計」僅加盟主與管理員可見，員工不顯示 */
   const showOrderProcurementSubtotalCol = userRole === 'admin' || userRole === 'franchisee';
+  /** 直營員工不顯示批價／成本，單價欄改為預估售價 */
+  const hideOrderBatchPriceFromEmployee = userRole === 'employee';
 
   const [mgmtOrders, setMgmtOrders] = useState<FranchiseManagementOrder[]>([]);
   const [historyOrders, setHistoryOrders] = useState<OrderHistoryEntry[]>([]);
@@ -823,11 +837,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
             <ListOrdered className="text-amber-500 shrink-0" size={28} />
             訂單管理
           </h2>
-          {userRole === 'employee' && (
-            <p className="mt-1 text-sm text-zinc-500">
-              可檢視總部直營之單與本店帳送出之單；總部單僅能檢視，無法變更出貨或實出。
-            </p>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -1062,9 +1071,30 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   ) * 100,
                 ) / 100
               : null;
+          const orderDetailRetailEstFooterEmployee =
+            hideOrderBatchPriceFromEmployee && expandedDetailLinesForTable
+              ? Math.round(
+                  expandedDetailLinesForTable.reduce(
+                    (s, line) =>
+                      s +
+                      computeOrderDetailLineMetrics(
+                        line,
+                        stallSnap,
+                        carrySnapForDisplay,
+                        supplyRetailView,
+                      ).retailEstSub,
+                    0,
+                  ) * 100,
+                ) / 100
+              : null;
           const pickKept = isPickingThis ? pickingLines.filter((l) => l.qty > 0) : [];
           const pickTotal = isPickingThis
-            ? Math.round(pickKept.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100
+            ? Math.round(
+                pickKept.reduce(
+                  (s, l) => s + pickingLineUnitForDisplay(l, userRole, supplyRetailView) * l.qty,
+                  0,
+                ) * 100,
+              ) / 100
             : 0;
           const priceAdjKept = isPriceAdjustThis ? priceAdjustLines.filter((l) => l.qty > 0) : [];
           const priceAdjustTotal =
@@ -1160,7 +1190,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
                 <div className="flex w-full min-w-0 shrink-0 flex-col lg:w-auto lg:flex-none lg:flex-row items-stretch lg:items-end justify-end gap-2 border-t lg:border-t-0 border-zinc-800 pt-3 lg:pt-0">
                   <div className="rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-2.5 w-full min-w-0 lg:min-w-[21rem] lg:max-w-[26rem] lg:shrink-0">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.6875rem] sm:text-xs min-w-0">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[0.825rem] sm:text-[0.9rem] min-w-0">
                       <span className="text-zinc-500 leading-snug">叫貨金額</span>
                       <span className="text-zinc-200 text-right tabular-nums break-all self-center">
                         $ {Math.round(order.franchisee === HQ_STORE_LABEL ? 0 : order.netPayableAmount).toLocaleString()}
@@ -1181,8 +1211,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       </span>
                     </div>
                     <div className="mt-2 pt-2 border-t border-zinc-800/80 flex items-end justify-between gap-3">
-                      <span className="text-[0.6875rem] sm:text-xs text-zinc-400 leading-snug">實際金額</span>
-                      <span className="text-xl sm:text-2xl font-light text-amber-500 tabular-nums break-all text-right">
+                      <span className="text-[0.825rem] sm:text-[0.9rem] text-zinc-400 leading-snug">實際金額</span>
+                      <span className="text-[1.5rem] sm:text-[1.8rem] font-light text-amber-500 tabular-nums break-all text-right">
                         {order.actualIncomeAmount == null ? '—' : `$ ${Math.round(order.actualIncomeAmount).toLocaleString()}`}
                       </span>
                     </div>
@@ -1207,30 +1237,23 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                   <div className="min-w-0 w-full max-w-full">
                     <div className="mb-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                       <div className="min-w-0 space-y-1.5 flex-1">
-                        <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-widest shrink-0">
+                        <h4 className="text-[1.330875rem] font-medium text-zinc-400 uppercase tracking-widest shrink-0">
                           訂單品項明細
                         </h4>
-                        {raw && !stallSnap && (
-                          <p className="text-[0.6875rem] sm:text-xs text-zinc-500 leading-relaxed max-w-[52rem]">
-                            <span className="block">
-                              尚未完成攤上盤點押記時：下列「叫貨數量」「昨剩餘帶出」「帶出數量」係依叫貨時扣庫／訂單日試算（與批貨頁「昨日剩貨＋叫貨」同源）。
-                            </span>
-                          </p>
-                        )}
                       </div>
                       {(order.status === '待出貨' || order.status === '已完成') && canEdit && (
                         <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:min-w-0 sm:flex-1">
                           {!isPickingThis &&
                             !isPriceAdjustThis &&
                             (stallLocked ? (
-                              <span className="text-xs text-zinc-500 shrink-0 text-left sm:text-right w-full sm:w-auto">
+                              <span className="text-[1.14075rem] text-zinc-500 shrink-0 text-left sm:text-right w-full sm:w-auto">
                                 已完成盤點押記，無法調整貨量（總部可用「更正批價」修正單價）
                               </span>
                             ) : (
                               <button
                                 type="button"
                                 onClick={(e) => startPickingEdit(e, order.id)}
-                                className="h-9 min-h-9 px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-sm font-medium hover:bg-amber-500 shrink-0"
+                                className="h-9 min-h-9 px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-[1.330875rem] font-medium hover:bg-amber-500 shrink-0"
                               >
                                 調整貨量
                               </button>
@@ -1243,7 +1266,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               <button
                                 type="button"
                                 onClick={(e) => startPriceAdjust(e, order.id)}
-                                className="h-9 min-h-9 px-3 rounded-lg border border-amber-500/50 bg-amber-950/30 text-amber-200 text-sm font-medium hover:bg-amber-950/50 shrink-0"
+                                className="h-9 min-h-9 px-3 rounded-lg border border-amber-500/50 bg-amber-950/30 text-amber-200 text-[1.330875rem] font-medium hover:bg-amber-950/50 shrink-0"
                               >
                                 更正批價
                               </button>
@@ -1255,7 +1278,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 onClick={(e) => openShipDialog(e, order.id)}
                                 disabled={orderEditLocked}
                                 title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
-                                className="h-9 min-h-9 px-3 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 shadow-md shadow-emerald-900/25 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+                                className="h-9 min-h-9 px-3 rounded-lg bg-emerald-600 text-white text-[1.330875rem] font-semibold hover:bg-emerald-500 shadow-md shadow-emerald-900/25 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
                               >
                                 標記出貨
                               </button>
@@ -1268,7 +1291,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 }}
                                 disabled={orderEditLocked}
                                 title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
-                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-[1.330875rem] font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 {isHeadquarters ? '刪除訂單' : '取消訂單'}
                               </button>
@@ -1289,7 +1312,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                       ? '此單已完成盤點押記，無法改回待出貨'
                                       : undefined
                                 }
-                                className="h-9 min-h-9 px-3 rounded-lg border border-zinc-600 bg-zinc-800/50 text-zinc-200 text-sm font-medium hover:bg-zinc-800 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800/50"
+                                className="h-9 min-h-9 px-3 rounded-lg border border-zinc-600 bg-zinc-800/50 text-zinc-200 text-[1.330875rem] font-medium hover:bg-zinc-800 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800/50"
                               >
                                 改回待出貨
                               </button>
@@ -1302,7 +1325,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 }}
                                 disabled={orderEditLocked}
                                 title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
-                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-sm font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-[1.330875rem] font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 {isHeadquarters ? '刪除訂單' : '取消訂單'}
                               </button>
@@ -1314,11 +1337,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
                     {isPickingThis && (
                       <div className="mb-2.5 space-y-2">
-                        <p className="text-xs text-amber-500/90 font-medium">
+                        <p className="text-[1.14075rem] text-amber-500/90 font-medium">
                           揀貨模式：＋/－ 或輸入數字；每列 0～{PICK_MAX_Q.toLocaleString()}，可高於下單量。
                         </p>
                         {pickingError && (
-                          <p className="text-sm text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
+                          <p className="text-[1.330875rem] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
                             {pickingError}
                           </p>
                         )}
@@ -1329,7 +1352,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               e.stopPropagation();
                               savePickingEdit(order.id);
                             }}
-                            className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500"
+                            className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-[1.330875rem] font-semibold hover:bg-amber-500"
                           >
                             儲存貨量
                           </button>
@@ -1339,7 +1362,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               e.stopPropagation();
                               exitPickingEdit();
                             }}
-                            className="py-2 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-sm hover:bg-zinc-800"
+                            className="py-2 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-[1.330875rem] hover:bg-zinc-800"
                           >
                             放棄
                           </button>
@@ -1349,11 +1372,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
                     {isPriceAdjustThis && (
                       <div className="mb-2.5 space-y-2">
-                        <p className="text-xs text-amber-500/90 font-medium leading-relaxed">
+                        <p className="text-[1.14075rem] text-amber-500/90 font-medium leading-relaxed">
                           更正批價：僅修改「批價（每份）」；各列數量不變。適用菜價事後調整；已出貨或已盤點之訂單亦可，更正後儀表板與叫貨合計會依新單價重算。
                         </p>
                         {priceAdjustError && (
-                          <p className="text-sm text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
+                          <p className="text-[1.330875rem] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
                             {priceAdjustError}
                           </p>
                         )}
@@ -1364,7 +1387,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               e.stopPropagation();
                               savePriceAdjust(order.id);
                             }}
-                            className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500"
+                            className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-[1.330875rem] font-semibold hover:bg-amber-500"
                           >
                             儲存批價
                           </button>
@@ -1374,7 +1397,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               e.stopPropagation();
                               exitPriceAdjust();
                             }}
-                            className="py-2 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-sm hover:bg-zinc-800"
+                            className="py-2 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-[1.330875rem] hover:bg-zinc-800"
                           >
                             放棄
                           </button>
@@ -1382,7 +1405,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       </div>
                     )}
 
-                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto overscroll-x-contain touch-pan-x w-full min-w-0 pb-px">
+                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto overscroll-x-contain touch-[pan-x_pan-y] w-full min-w-0 pb-px">
                       <table
                         className={cn(
                           'w-full border-collapse text-left',
@@ -1398,7 +1421,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 ),
                         )}
                       >
-                        <thead className="bg-zinc-800/50 text-zinc-400 text-[10px] sm:text-xs uppercase border-b border-zinc-700/50">
+                        <thead className="bg-zinc-800/50 text-zinc-400 text-[15.21px] sm:text-[1.14075rem] uppercase border-b border-zinc-700/50">
                           <tr>
                             {isPickingThis ? (
                               <>
@@ -1433,8 +1456,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
                                   帶出數量
                                 </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
-                                  批價
+                                <th
+                                  className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap"
+                                  title={
+                                    hideOrderBatchPriceFromEmployee
+                                      ? '帶出量（昨剩餘＋叫貨）若全以零售售完之預估金額'
+                                      : undefined
+                                  }
+                                >
+                                  {hideOrderBatchPriceFromEmployee ? '零售預估' : '批價'}
                                 </th>
                                 {showOrderProcurementSubtotalCol && (
                                   <>
@@ -1450,19 +1480,28 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                             )}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-zinc-800/50 text-[11px] sm:text-sm">
+                        <tbody className="divide-y divide-zinc-800/50 text-[16.731px] sm:text-[1.330875rem]">
                           {isPickingThis
                             ? pickingLines.map((line, idx) => {
                                 const origQ = pickingOriginal[idx]?.qty ?? line.qty;
-                                const sub = line.unitPrice * line.qty;
+                                const unitForRow = pickingLineUnitForDisplay(line, userRole, supplyRetailView);
+                                const sub = Math.round(unitForRow * line.qty * 100) / 100;
                                 return (
                                   <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/20">
                                     <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
                                       <div className="font-medium text-[#f5f2ed]">{line.name}</div>
-                                      <div className="text-xs text-zinc-500">
+                                      <div className="text-[1.14075rem] text-zinc-500">
                                         下單 {origQ} {line.unit}
-                                        <LiangJinQtyHint liangQty={origQ} pieceUnit={line.unit} className="text-[10px]" />
-                                        ・單價 $ {line.unitPrice}
+                                        <LiangJinQtyHint liangQty={origQ} pieceUnit={line.unit} className="text-[15.21px]" />
+                                        {hideOrderBatchPriceFromEmployee ? (
+                                          <>
+                                            ・預估零售單價 ${unitForRow.toLocaleString('zh-TW')}／{line.unit}
+                                          </>
+                                        ) : (
+                                          <>
+                                            ・單價 $ {line.unitPrice}
+                                          </>
+                                        )}
                                       </div>
                                     </td>
                                     <td className="py-2 px-2 sm:px-4 align-top whitespace-nowrap">
@@ -1478,7 +1517,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                           className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                           aria-label="減一"
                                         >
-                                          <Minus size={16} />
+                                          <Minus size={24} />
                                         </button>
                                         <input
                                           type="text"
@@ -1490,7 +1529,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                           }}
                                           onClick={(e) => e.stopPropagation()}
                                           onFocus={(e) => e.target.select()}
-                                          className="min-w-[4.25rem] w-16 max-w-[7rem] shrink-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
+                                          className="min-w-[4.25rem] w-16 max-w-[7rem] shrink-0 text-center text-[1.521rem] font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
                                           aria-label={`${line.name} 實出數量，0～${PICK_MAX_Q.toLocaleString()}`}
                                         />
                                         <button
@@ -1503,17 +1542,24 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                           className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                           aria-label="加一"
                                         >
-                                          <Plus size={16} />
+                                          <Plus size={24} />
                                         </button>
                                         </div>
                                         <LiangJinQtyHint
                                           liangQty={line.qty}
                                           pieceUnit={line.unit}
-                                          className="text-[10px] text-zinc-500"
+                                          className="text-[15.21px] text-zinc-500"
                                         />
                                       </div>
                                     </td>
-                                    <td className="py-2.5 sm:py-3 px-3 sm:px-4 text-right tabular-nums text-zinc-200 align-top">
+                                    <td
+                                      className={cn(
+                                        'py-2.5 sm:py-3 px-3 sm:px-4 text-right tabular-nums align-top',
+                                        hideOrderBatchPriceFromEmployee
+                                          ? 'text-emerald-400/95'
+                                          : 'text-zinc-200',
+                                      )}
+                                    >
                                       $ {Math.round(sub * 100) / 100}
                                     </td>
                                   </tr>
@@ -1527,7 +1573,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                     <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/20">
                                       <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
                                         <div className="font-medium text-[#f5f2ed]">{line.name}</div>
-                                        <div className="text-xs text-zinc-500">{line.unit}</div>
+                                        <div className="text-[1.14075rem] text-zinc-500">{line.unit}</div>
                                       </td>
                                       <td className="py-2.5 sm:py-3 px-2 sm:px-4 text-center tabular-nums text-zinc-300">
                                         <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
@@ -1535,7 +1581,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                           <LiangJinQtyHint
                                             liangQty={q}
                                             pieceUnit={line.unit}
-                                            className="text-[10px] sm:text-xs"
+                                            className="text-[15.21px] sm:text-[1.14075rem]"
                                           />
                                         </span>
                                       </td>
@@ -1565,7 +1611,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                               )
                                             );
                                           }}
-                                          className="w-full min-w-[5rem] max-w-[9rem] text-center text-sm font-medium tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
+                                          className="w-full min-w-[5rem] max-w-[9rem] text-center text-[1.330875rem] font-medium tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
                                           aria-label={`${line.name} 批價（每份）`}
                                         />
                                       </td>
@@ -1586,7 +1632,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                   return (
                                     <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 align-top max-md:relative max-md:left-auto max-md:z-0 max-md:shadow-none md:sticky md:left-0 md:z-[2] bg-zinc-900 md:shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)] w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]">
-                                        <div className="font-medium text-[#f5f2ed] text-[11px] sm:text-sm leading-tight max-md:break-words sm:break-keep">
+                                        <div className="font-medium text-[#f5f2ed] text-[16.731px] sm:text-[1.330875rem] leading-tight max-md:break-words sm:break-keep">
                                           {line.name}
                                         </div>
                                       </td>
@@ -1596,7 +1642,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                           <LiangJinQtyHint
                                             liangQty={d.procurementQtyForHint}
                                             pieceUnit={line.unit}
-                                            className="text-[10px] sm:text-xs"
+                                            className="text-[15.21px] sm:text-[1.14075rem]"
                                           />
                                         </span>
                                       </td>
@@ -1607,7 +1653,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                             <LiangJinQtyHint
                                               liangQty={d.carryRemainQty}
                                               pieceUnit={line.unit}
-                                              className="text-[10px] sm:text-xs"
+                                              className="text-[15.21px] sm:text-[1.14075rem]"
                                             />
                                           </span>
                                         ) : (
@@ -1620,12 +1666,23 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                           <LiangJinQtyHint
                                             liangQty={d.displayedBringOut}
                                             pieceUnit={line.unit}
-                                            className="text-[10px] sm:text-xs"
+                                            className="text-[15.21px] sm:text-[1.14075rem]"
                                           />
                                         </span>
                                       </td>
-                                      <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-center tabular-nums text-amber-200/85 whitespace-nowrap">
-                                        {d.batchUnitPrice.toLocaleString('zh-TW')}
+                                      <td
+                                        className={cn(
+                                          'py-2 sm:py-2.5 px-1.5 sm:px-2 tabular-nums whitespace-nowrap',
+                                          hideOrderBatchPriceFromEmployee
+                                            ? 'text-right text-emerald-400/95'
+                                            : 'text-center text-amber-200/85',
+                                        )}
+                                      >
+                                        {hideOrderBatchPriceFromEmployee ? (
+                                          <>$ {d.retailEstSub.toLocaleString('zh-TW')}</>
+                                        ) : (
+                                          d.batchUnitPrice.toLocaleString('zh-TW')
+                                        )}
                                       </td>
                                       {showOrderProcurementSubtotalCol && (
                                         <>
@@ -1648,11 +1705,18 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               <>
                                 <td
                                   colSpan={2}
-                                  className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-xs sm:text-sm font-medium text-zinc-400"
+                                  className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-[1.14075rem] sm:text-[1.330875rem] font-medium text-zinc-400"
                                 >
-                                  實出合計
+                                  {hideOrderBatchPriceFromEmployee ? '零售預估合計' : '實出合計'}
                                 </td>
-                                <td className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
+                                <td
+                                  className={cn(
+                                    'py-2.5 sm:py-4 px-3 sm:px-4 text-right text-[1.521rem] sm:text-[1.711125rem] font-bold tabular-nums whitespace-nowrap',
+                                    hideOrderBatchPriceFromEmployee
+                                      ? 'text-emerald-400/95'
+                                      : 'text-amber-500',
+                                  )}
+                                >
                                   $ {pickTotal.toLocaleString()}
                                 </td>
                               </>
@@ -1660,11 +1724,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               <>
                                 <td
                                   colSpan={3}
-                                  className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-xs sm:text-sm font-medium text-zinc-400"
+                                  className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-[1.14075rem] sm:text-[1.330875rem] font-medium text-zinc-400"
                                 >
                                   批價更正後合計
                                 </td>
-                                <td className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
+                                <td className="py-2.5 sm:py-4 px-3 sm:px-4 text-right text-[1.521rem] sm:text-[1.711125rem] font-bold text-amber-500 tabular-nums whitespace-nowrap">
                                   $ {priceAdjustTotal.toLocaleString()}
                                 </td>
                               </>
@@ -1672,17 +1736,30 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                               <>
                                 <td
                                   colSpan={showOrderProcurementSubtotalCol ? 5 : 4}
-                                  className="py-2.5 sm:py-4 px-2 sm:px-3 text-right text-xs sm:text-sm font-medium text-zinc-400"
+                                  className="py-2.5 sm:py-4 px-2 sm:px-3 text-right text-[1.14075rem] sm:text-[1.330875rem] font-medium text-zinc-400"
                                 >
-                                  叫貨合計（下單）
+                                  {hideOrderBatchPriceFromEmployee
+                                    ? '零售預估合計'
+                                    : '叫貨合計（下單）'}
                                 </td>
                                 {showOrderProcurementSubtotalCol && (
-                                  <td className="py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-base sm:text-lg font-bold text-emerald-400/95 tabular-nums whitespace-nowrap">
+                                  <td className="py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-[1.521rem] sm:text-[1.711125rem] font-bold text-emerald-400/95 tabular-nums whitespace-nowrap">
                                     $ {(orderRetailEstFooterTotal ?? 0).toLocaleString('zh-TW')}
                                   </td>
                                 )}
-                                <td className="py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-base sm:text-lg font-bold text-amber-500 tabular-nums whitespace-nowrap">
-                                  $ {order.amount.toLocaleString('zh-TW')}
+                                <td
+                                  className={cn(
+                                    'py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-[1.521rem] sm:text-[1.711125rem] font-bold tabular-nums whitespace-nowrap',
+                                    hideOrderBatchPriceFromEmployee
+                                      ? 'text-emerald-400/95'
+                                      : 'text-amber-500',
+                                  )}
+                                >
+                                  ${' '}
+                                  {(hideOrderBatchPriceFromEmployee
+                                    ? orderDetailRetailEstFooterEmployee ?? 0
+                                    : order.amount
+                                  ).toLocaleString('zh-TW')}
                                 </td>
                               </>
                             )}

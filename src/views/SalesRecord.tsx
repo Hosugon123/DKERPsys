@@ -697,14 +697,14 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         </div>
                       )}
                       <div className="rounded-2xl border border-zinc-800 overflow-hidden">
-                        <div className="px-3 py-2 bg-zinc-900/80 border-b border-zinc-800 text-xs text-zinc-500">
+                        <div className="px-3 py-2 bg-zinc-900/80 border-b border-zinc-800 text-[0.975rem] text-zinc-500">
                           盤點明細
                         </div>
                         <div className="overflow-x-auto">
                           {isStallEditThis && stallEditDraft ? (
-                            <table className="w-full text-[11px] sm:text-sm min-w-[56rem]">
+                            <table className="w-full text-[14.3px] sm:text-[1.1375rem] min-w-[56rem]">
                               <thead>
-                                <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[10px] sm:text-xs uppercase">
+                                <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[13px] sm:text-[0.975rem] uppercase">
                                   <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                     品項
                                   </th>
@@ -765,7 +765,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                               className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                               aria-label={`${item.name} 帶出減一`}
                                             >
-                                              <Minus size={16} />
+                                              <Minus size={21} />
                                             </button>
                                             <input
                                               type="text"
@@ -773,7 +773,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                               value={line.out}
                                               onChange={(e) => setStallLineQtyInput(item.id, 'out', e.target.value)}
                                               onFocus={(e) => e.currentTarget.select()}
-                                              className="w-12 min-w-0 text-center text-base font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1"
+                                              className="w-12 min-w-0 text-center text-[1.3rem] font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1"
                                               aria-label={`${item.name} 帶出數量，0～${STALL_MAX_Q.toLocaleString()}`}
                                             />
                                             <button
@@ -783,13 +783,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                               className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                               aria-label={`${item.name} 帶出加一`}
                                             >
-                                              <Plus size={16} />
+                                              <Plus size={21} />
                                             </button>
                                           </div>
                                           <LiangJinQtyHint
                                             liangQty={c.out}
                                             pieceUnit={item.pieceUnit}
-                                            className="text-[10px] text-zinc-500"
+                                            className="text-[13px] text-zinc-500"
                                           />
                                         </div>
                                       </td>
@@ -800,7 +800,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                             <LiangJinQtyHint
                                               liangQty={c.sold}
                                               pieceUnit={item.pieceUnit}
-                                              className="text-[10px] sm:text-xs"
+                                              className="text-[13px] sm:text-[0.975rem]"
                                             />
                                           )}
                                         </span>
@@ -815,7 +815,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                               className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                               aria-label={`${item.name} 剩餘減一`}
                                             >
-                                              <Minus size={16} />
+                                              <Minus size={21} />
                                             </button>
                                             <input
                                               type="text"
@@ -826,7 +826,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                               }
                                               onFocus={(e) => e.currentTarget.select()}
                                               className={cn(
-                                                'w-12 min-w-0 text-center text-base font-bold tabular-nums bg-zinc-900/80 border rounded py-1',
+                                                'w-12 min-w-0 text-center text-[1.3rem] font-bold tabular-nums bg-zinc-900/80 border rounded py-1',
                                                 c.remainUnfilled
                                                   ? 'border-amber-800/50 border-dashed text-zinc-400'
                                                   : c.remain > 0
@@ -842,14 +842,14 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                               className="p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                               aria-label={`${item.name} 剩餘加一`}
                                             >
-                                              <Plus size={16} />
+                                              <Plus size={21} />
                                             </button>
                                           </div>
                                           {!c.remainUnfilled && (
                                             <LiangJinQtyHint
                                               liangQty={c.remain}
                                               pieceUnit={item.pieceUnit}
-                                              className="text-[10px] text-zinc-500"
+                                              className="text-[13px] text-zinc-500"
                                             />
                                           )}
                                         </div>
@@ -889,9 +889,9 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                               </tbody>
                             </table>
                           ) : (
-                            <table className="w-full text-[11px] sm:text-sm min-w-[56rem]">
+                            <table className="w-full text-[14.3px] sm:text-[1.1375rem] min-w-[56rem]">
                               <thead>
-                                <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[10px] sm:text-xs uppercase">
+                                <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[13px] sm:text-[0.975rem] uppercase">
                                   <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                     品項
                                   </th>
@@ -930,7 +930,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
                                       <span className="inline-flex flex-wrap items-center justify-center gap-x-0.5">
                                         {fmtLineQty(c.out)}
-                                        <LiangJinQtyHint liangQty={c.out} pieceUnit={item.pieceUnit} className="text-[10px] sm:text-xs" />
+                                        <LiangJinQtyHint liangQty={c.out} pieceUnit={item.pieceUnit} className="text-[13px] sm:text-[0.975rem]" />
                                       </span>
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-zinc-300">
@@ -940,7 +940,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           <LiangJinQtyHint
                                             liangQty={c.sold}
                                             pieceUnit={item.pieceUnit}
-                                            className="text-[10px] sm:text-xs"
+                                            className="text-[13px] sm:text-[0.975rem]"
                                           />
                                         )}
                                       </span>
@@ -952,7 +952,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                           <LiangJinQtyHint
                                             liangQty={c.remain}
                                             pieceUnit={item.pieceUnit}
-                                            className="text-[10px] sm:text-xs"
+                                            className="text-[13px] sm:text-[0.975rem]"
                                           />
                                         )}
                                       </span>
@@ -990,7 +990,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                             </table>
                           )}
                           {!isStallEditThis && tableRows.length === 0 && (
-                            <p className="p-4 text-sm text-zinc-500">無明細。</p>
+                            <p className="p-4 text-[1.1375rem] text-zinc-500">無明細。</p>
                           )}
                         </div>
                       </div>

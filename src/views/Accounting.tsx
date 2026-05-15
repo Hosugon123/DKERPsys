@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Wallet, CalendarDays, Pencil, Trash2, X, Search } from 'lucide-react';
-import type { UserRole } from './Orders';
 import { useAccountingLedger } from '../hooks/useAccountingLedger';
 import {
   ACCOUNTING_CATEGORIES,
@@ -157,11 +156,11 @@ const EMPTY_SUB = '';
 const dateInputClass =
   'w-full rounded-xl bg-zinc-950/80 border border-zinc-700/80 pl-10 pr-3 py-2.5 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]';
 
-/** 支出明細列內之日期範圍（精簡高度） */
+/** 支出明細列內之日期範圍：手機全寬避免裁切；桌面維持精簡高度 */
 const rangeDateInputClass =
-  'h-9 min-w-0 w-[124px] sm:w-[136px] rounded-lg bg-zinc-950/90 border border-amber-900/40 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-500/50 focus:border-amber-500/60 [color-scheme:dark] shrink-0';
+  'h-10 md:h-9 w-full min-w-0 rounded-lg bg-zinc-950/90 border border-zinc-600/70 px-2.5 py-1.5 text-sm md:text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/35 focus:border-amber-500/50 [color-scheme:dark]';
 
-export default function Accounting({ userRole }: { userRole: UserRole }) {
+export default function Accounting() {
   const { entries, add, update, remove } = useAccountingLedger();
 
   const defaultRange = useMemo(() => monthBoundsFromYm(currentYm()), []);
@@ -449,12 +448,6 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
           <Wallet className="text-amber-500 shrink-0" size={28} />
           流水帳
         </h2>
-        {userRole === 'employee' ? (
-          <p className="mt-3 text-sm text-zinc-400 leading-relaxed rounded-xl border border-zinc-700/70 bg-zinc-950/50 px-4 py-3">
-            您目前為店員身分：此處<strong className="text-zinc-200">僅會顯示由您本人登記</strong>
-            的流水帳紀錄；其他同仁建立的項目不會出現於此。未標記登記者之舊資料亦不會在此列出。您仍可在此新增、修改或刪除自己的紀錄。
-          </p>
-        ) : null}
       </div>
 
       <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-5 md:p-6">
@@ -675,11 +668,19 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
             </div>
 
             <div
-              className="order-1 md:order-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 rounded-lg border border-amber-900/35 bg-zinc-950/60 px-2 py-1.5 shrink-0"
+              className={cn(
+                'order-1 md:order-2 w-full md:w-auto md:max-w-full shrink-0 rounded-xl border border-amber-900/35 bg-zinc-950/60',
+                'p-3 md:p-2 md:py-1.5 flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:gap-x-2 md:gap-y-2',
+              )}
               role="group"
               aria-label="日期範圍篩選"
             >
-              <div className="flex flex-wrap items-center gap-1 mr-0.5 pr-1 border-r border-zinc-800/90">
+              <div
+                className={cn(
+                  'grid grid-cols-3 gap-2 w-full md:w-auto md:flex md:flex-nowrap md:items-stretch',
+                  'md:mr-0 md:pr-2 md:border-r md:border-zinc-800/90',
+                )}
+              >
                 {(
                   [
                     { id: 'today' as const, label: '今天', onClick: applyQuickToday },
@@ -693,53 +694,71 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
                     onClick={onClick}
                     aria-pressed={quickPreset === id}
                     className={cn(
-                      'px-2 py-1 text-xs rounded-md font-medium transition-colors border',
+                      'min-h-10 px-2 py-2 md:py-1 text-xs rounded-lg font-medium transition-colors border',
                       quickPreset === id
                         ? 'bg-amber-600 text-white border-amber-500 shadow-sm shadow-amber-900/30'
-                        : 'bg-zinc-950/50 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600'
+                        : 'bg-zinc-950/50 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600',
                     )}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-              <CalendarDays size={14} className="text-amber-600/75 shrink-0" aria-hidden />
-              <span className="text-[0.6875rem] text-zinc-500 whitespace-nowrap">從</span>
-              <input
-                type="date"
-                value={rangeStart}
-                onChange={(ev) => {
-                  setRangeStart(ev.target.value);
-                  setQuickPreset(null);
-                }}
-                className={rangeDateInputClass}
-                aria-label="起始日期"
-              />
-              <span className="text-[0.6875rem] text-zinc-500 whitespace-nowrap">至</span>
-              <input
-                type="date"
-                value={rangeEnd}
-                onChange={(ev) => {
-                  setRangeEnd(ev.target.value);
-                  setQuickPreset(null);
-                }}
-                className={rangeDateInputClass}
-                aria-label="結束日期"
-              />
-              <button
-                type="button"
-                onClick={clearDateFilter}
-                className="h-9 px-2 rounded-lg text-[0.6875rem] font-medium border border-zinc-600/70 text-zinc-400 hover:bg-zinc-800/90 hover:text-zinc-200 hover:border-amber-800/45 transition-colors whitespace-nowrap"
-              >
-                清除篩選
-              </button>
-              <button
-                type="button"
-                onClick={showAllDateRange}
-                className="h-9 px-2 rounded-lg text-[0.6875rem] font-medium border border-amber-800/45 text-amber-200/85 bg-amber-950/25 hover:bg-amber-950/40 transition-colors whitespace-nowrap"
-              >
-                顯示全部
-              </button>
+
+              <div className="flex flex-col gap-2 w-full min-w-0 md:flex-1 md:flex-row md:flex-wrap md:items-center md:gap-x-1.5 md:gap-y-1 md:w-auto">
+                <div className="flex items-center gap-2 text-xs text-zinc-500 md:hidden">
+                  <CalendarDays size={16} className="text-amber-600/80 shrink-0" aria-hidden />
+                  <span>自訂日期範圍</span>
+                </div>
+                <div className="flex flex-col gap-2 w-full min-w-0 sm:grid sm:grid-cols-2 sm:gap-2 md:flex md:flex-row md:flex-nowrap md:items-center md:gap-1.5 md:w-auto">
+                  <label className="flex flex-col gap-1 min-w-0 md:flex-row md:items-center md:gap-1.5 md:w-auto md:min-w-[10rem]">
+                    <span className="text-[0.6875rem] text-zinc-500 shrink-0 md:flex md:items-center md:gap-1">
+                      <CalendarDays size={14} className="hidden md:inline text-amber-600/75 shrink-0" aria-hidden />
+                      <span className="md:whitespace-nowrap">從</span>
+                    </span>
+                    <input
+                      type="date"
+                      value={rangeStart}
+                      onChange={(ev) => {
+                        setRangeStart(ev.target.value);
+                        setQuickPreset(null);
+                      }}
+                      className={rangeDateInputClass}
+                      aria-label="起始日期"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 min-w-0 md:flex-row md:items-center md:gap-1.5 md:w-auto md:min-w-[10rem]">
+                    <span className="text-[0.6875rem] text-zinc-500 whitespace-nowrap shrink-0">至</span>
+                    <input
+                      type="date"
+                      value={rangeEnd}
+                      onChange={(ev) => {
+                        setRangeEnd(ev.target.value);
+                        setQuickPreset(null);
+                      }}
+                      className={rangeDateInputClass}
+                      aria-label="結束日期"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 w-full md:w-auto md:flex md:flex-nowrap md:gap-1.5">
+                <button
+                  type="button"
+                  onClick={clearDateFilter}
+                  className="min-h-10 md:h-9 px-3 rounded-lg text-xs font-medium border border-zinc-600/70 text-zinc-300 bg-zinc-950/40 hover:bg-zinc-800/90 hover:text-zinc-100 hover:border-zinc-500/60 transition-colors"
+                >
+                  清除篩選
+                </button>
+                <button
+                  type="button"
+                  onClick={showAllDateRange}
+                  className="min-h-10 md:h-9 px-3 rounded-lg text-xs font-medium border border-amber-600/50 text-amber-100 bg-amber-950/30 hover:bg-amber-950/45 hover:border-amber-500/55 transition-colors"
+                >
+                  顯示全部
+                </button>
+              </div>
             </div>
           </div>
 
