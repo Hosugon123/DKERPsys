@@ -18,6 +18,11 @@ export type ItemOverride = {
   category?: ItemCategory;
   /** 加盟主自備：下單時不計入應付貨款，但仍可列入盤點營業額。 */
   franchiseeSelfSuppliedForPayable?: boolean | null;
+  /**
+   * 直營店內部批貨成本（每 `pieceUnit`）；與加盟叫貨批價 `pricePerPiece` 分開登記，供毛利試算與總部／直營員工下單單價。
+   * `null` 表示清除覆寫（未設時下單仍用加盟批價）。
+   */
+  hqCostPerPiece?: number | null;
 };
 
 type StoreV2 = {
@@ -139,6 +144,8 @@ export function setSupplyItemOverride(id: string, patch: ItemOverride) {
     if (v === undefined) return;
     if (key === 'retailPerPiece' && v === null) {
       delete prev.retailPerPiece;
+    } else if (key === 'hqCostPerPiece' && v === null) {
+      delete prev.hqCostPerPiece;
     } else {
       (prev as Record<string, unknown>)[key as string] = v;
     }
@@ -203,7 +210,7 @@ export function addCustomItem(
 
 export function updateCustomItem(
   id: string,
-  next: Partial<SupplyItem> & { retailPerPiece?: number | null }
+  next: Partial<SupplyItem> & { retailPerPiece?: number | null; hqCostPerPiece?: number | null }
 ) {
   const s = loadStore();
   const i = s.customItems.findIndex((x) => x.id === id);
@@ -223,6 +230,9 @@ export function updateCustomItem(
     };
     if (Object.prototype.hasOwnProperty.call(next, 'retailPerPiece') && next.retailPerPiece == null) {
       delete merged.retailPerPiece;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'hqCostPerPiece') && next.hqCostPerPiece == null) {
+      delete merged.hqCostPerPiece;
     }
     return merged;
   });

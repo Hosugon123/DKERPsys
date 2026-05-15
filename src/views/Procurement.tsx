@@ -33,6 +33,8 @@ import {
 import {
   pricePerPackage,
   estimatedRetailPerPackage,
+  hqCostPerPackage,
+  procurementCheckoutUnitPrice,
   CATEGORY_CHIPS,
   getSupplyItem,
   isFranchiseeSelfSuppliedItem,
@@ -288,7 +290,10 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const totalPrice = Object.entries(cart).reduce((total, [id, n]) => {
     const item = getSupplyItem(id, supplyRetailView);
     const q = Number(n);
-    return total + (item && q > 0 ? pricePerPackage(item) * q : 0);
+    return (
+      total +
+      (item && q > 0 ? procurementCheckoutUnitPrice(item, userRole) * q : 0)
+    );
   }, 0);
   const totalPayablePrice = totalPrice;
   const totalSelfSuppliedCost = Object.entries(cart).reduce((total, [id, n]) => {
@@ -366,13 +371,13 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         return {
           productId: id,
           name: item.name,
-          unitPrice: pricePerPackage(item),
+          unitPrice: procurementCheckoutUnitPrice(item, userRole),
           qty: q,
           unit: item.pieceUnit,
         };
       })
       .filter(Boolean) as OrderHistoryLine[];
-  }, [cart, supplyRetailView]);
+  }, [cart, supplyRetailView, userRole]);
 
   const openSubmitConfirm = () => {
     if (buildLinesFromCart().length === 0) return;
@@ -815,7 +820,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       const q = Number(qty) || 0;
                       if (!item || q <= 0) return sum;
                       if (userRole === 'franchisee' && isFranchiseeSelfSuppliedItem(item)) return sum;
-                      return sum + pricePerPackage(item) * q;
+                      return sum + procurementCheckoutUnitPrice(item, userRole) * q;
                     },
                     0
                   );
@@ -958,6 +963,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
           const q = cart[item.id] || 0;
           const effectiveOrderQty =
             item.id in qtyInputDraft ? parseQtyInput(qtyInputDraft[item.id]) : roundProcurementQty(q);
+          const hqPkg = hqCostPerPackage(item);
+          const directStoreBatchPrice = procurementCheckoutUnitPrice(item, userRole);
           return (
             <li
               key={item.id}
@@ -988,7 +995,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 </div>
               </div>
               <div className="mt-1.5 flex flex-col items-end gap-0.5 text-xs leading-snug">
-                {showProcurementCost ? (
+                {isFranchisee ? (
                   <>
                     <span className="text-amber-400 font-semibold tabular-nums text-[0.8125rem] sm:text-sm">
                       批貨 ${pricePerPackage(item).toLocaleString()}
@@ -1000,10 +1007,21 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     </span>
                   </>
                 ) : (
-                  <span className="text-emerald-400 font-semibold tabular-nums text-[0.8125rem] sm:text-sm text-right max-w-full">
-                    零售 ${estimatedRetailPerPackage(item).toLocaleString()}
-                    <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
-                  </span>
+                  <>
+                    <span
+                      className={cn(
+                        'font-semibold tabular-nums text-[0.8125rem] sm:text-sm text-right max-w-full',
+                        hqPkg != null ? 'text-sky-300/95' : 'text-amber-400/95',
+                      )}
+                    >
+                      批價 ${directStoreBatchPrice.toLocaleString()}
+                      <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
+                    </span>
+                    <span className="text-emerald-400 font-semibold tabular-nums text-[0.8125rem] sm:text-sm text-right max-w-full">
+                      零售 ${estimatedRetailPerPackage(item).toLocaleString()}
+                      <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
+                    </span>
+                  </>
                 )}
               </div>
               <div className="mt-1.5 rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-2 py-1.5 text-[0.6875rem] sm:text-[0.72rem] text-zinc-400 space-y-0.5">

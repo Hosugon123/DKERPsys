@@ -27,6 +27,10 @@ export type SupplyItem = {
   category: ItemCategory;
   /** 加盟主自備：不計入加盟主叫貨貨款，但盤點可列營業額。 */
   franchiseeSelfSuppliedForPayable?: boolean;
+  /**
+   * 直營店內部批貨成本（每 `pieceUnit`）；未設定時總部／直營下單仍用 {@link pricePerPackage}（加盟批價）。
+   */
+  hqCostPerPiece?: number;
 };
 
 export const CATEGORY_CHIPS: { id: 'all' | ItemCategory; label: string }[] = [
@@ -126,7 +130,7 @@ function mergeWithOverrides(base: SupplyItem, o?: ItemOverride | null): SupplyIt
     if (o.tag == null || o.tag === '') tag = undefined;
     else tag = o.tag;
   }
-  return {
+  const mergedBase = {
     ...base,
     name: typeof o.name === 'string' && o.name.trim() ? o.name.trim() : base.name,
     pricePerPiece:
@@ -148,6 +152,24 @@ function mergeWithOverrides(base: SupplyItem, o?: ItemOverride | null): SupplyIt
         ? !!o.franchiseeSelfSuppliedForPayable
         : base.franchiseeSelfSuppliedForPayable,
   };
+  if (!Object.prototype.hasOwnProperty.call(o, 'hqCostPerPiece')) {
+    return mergedBase;
+  }
+  if (o.hqCostPerPiece == null) {
+    const { hqCostPerPiece: _, ...rest } = mergedBase;
+    return rest;
+  }
+  if (
+    typeof o.hqCostPerPiece === 'number' &&
+    Number.isFinite(o.hqCostPerPiece) &&
+    o.hqCostPerPiece >= 0
+  ) {
+    return {
+      ...mergedBase,
+      hqCostPerPiece: Math.min(1_000_000, Math.round(o.hqCostPerPiece * 100) / 100),
+    };
+  }
+  return mergedBase;
 }
 
 export function getBaseSupplyItem(id: string): SupplyItem | undefined {
@@ -244,6 +266,32 @@ export function getAllSupplyItems(view: SupplyRetailView = activeSupplyRetailVie
 /** 每條品項的單價（1 份） */
 export function pricePerPackage(item: SupplyItem) {
   return item.pricePerPiece * item.piecesPerPackage;
+}
+
+/**
+ * 直營店內部批貨成本（與計價包裝一致）；未另設時回傳 undefined（下單仍用加盟批價）。
+ */
+export function hqCostPerPackage(item: SupplyItem): number | undefined {
+  if (
+    item.hqCostPerPiece == null ||
+    !Number.isFinite(item.hqCostPerPiece) ||
+    item.hqCostPerPiece < 0
+  ) {
+    return undefined;
+  }
+  return Math.round(item.hqCostPerPiece * item.piecesPerPackage * 100) / 100;
+}
+
+/**
+ * 叫貨送出時寫入訂單之單價：加盟主永遠用加盟批價；總部／直營員工若已填直營成本則用直營成本。
+ */
+export function procurementCheckoutUnitPrice(
+  item: SupplyItem,
+  userRole: 'admin' | 'franchisee' | 'employee',
+): number {
+  if (userRole === 'franchisee') return pricePerPackage(item);
+  const h = hqCostPerPackage(item);
+  return h != null ? h : pricePerPackage(item);
 }
 
 /**

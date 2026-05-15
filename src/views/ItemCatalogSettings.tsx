@@ -18,6 +18,7 @@ async function commitBaseFromForm(
   p: {
     name: string;
     price: string;
+    hqCost: string;
     unit: string;
     tag: string;
     category: ItemCategory;
@@ -52,6 +53,18 @@ async function commitBaseFromForm(
   if (Boolean(st.overrides[id]?.franchiseeSelfSuppliedForPayable) !== p.franchiseeSelfSuppliedForPayable) {
     patch.franchiseeSelfSuppliedForPayable = p.franchiseeSelfSuppliedForPayable;
   }
+  const prevHq = st.overrides[id]?.hqCostPerPiece;
+  const hqTrim = p.hqCost.trim();
+  const hqParsed =
+    hqTrim === '' ? NaN : Number.parseFloat(hqTrim.replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(hqParsed) || hqTrim === '') {
+    if (prevHq != null) patch.hqCostPerPiece = null;
+  } else {
+    const hqN = Math.min(1_000_000, Math.round(Math.max(0, hqParsed) * 100) / 100);
+    if (prevHq == null || Math.abs(hqN - prevHq) > 0.0001) {
+      patch.hqCostPerPiece = hqN;
+    }
+  }
   if (Math.abs(retailN - defaultR) < 0.0001) {
     if (hadRetail) patch.retailPerPiece = null;
   } else {
@@ -64,6 +77,7 @@ async function commitBaseFromForm(
 type CatalogRowForm = {
   name: string;
   price: string;
+  hqCost: string;
   unit: string;
   tag: string;
   category: ItemCategory;
@@ -100,6 +114,14 @@ async function persistCatalogRowFromSnapshot(
     };
     if (Math.abs(retailN - defaultR) < 0.0001) patch.retailPerPiece = null;
     else patch.retailPerPiece = retailN;
+    const hqTrim = f.hqCost.trim();
+    const hqParsed =
+      hqTrim === '' ? NaN : Number.parseFloat(hqTrim.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(hqParsed) || hqTrim === '') {
+      /* 新品預設無直營成本 */
+    } else {
+      patch.hqCostPerPiece = Math.min(1_000_000, Math.round(Math.max(0, hqParsed) * 100) / 100);
+    }
     await products.catalog.updateCustomItem(newId, patch);
     return;
   }
@@ -111,7 +133,10 @@ async function persistCatalogRowFromSnapshot(
     const retailN = Number.isFinite(retailParsed)
       ? Math.min(1_000_000, Math.round(retailParsed * 100) / 100)
       : defaultR;
-    const patch: Partial<SupplyItem> & { retailPerPiece?: number | null } = {
+    const patch: Partial<SupplyItem> & {
+      retailPerPiece?: number | null;
+      hqCostPerPiece?: number | null;
+    } = {
       name: f.name.trim() || '未命名',
       pricePerPiece: priceN,
       pieceUnit: f.unit.trim() || '份',
@@ -123,6 +148,17 @@ async function persistCatalogRowFromSnapshot(
       if (item.retailPerPiece != null) patch.retailPerPiece = null;
     } else {
       patch.retailPerPiece = retailN;
+    }
+    const hqTrim = f.hqCost.trim();
+    const hqParsed =
+      hqTrim === '' ? NaN : Number.parseFloat(hqTrim.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(hqParsed) || hqTrim === '') {
+      if (item.hqCostPerPiece != null) patch.hqCostPerPiece = null;
+    } else {
+      const hqN = Math.min(1_000_000, Math.round(Math.max(0, hqParsed) * 100) / 100);
+      if (item.hqCostPerPiece == null || Math.abs(hqN - item.hqCostPerPiece) > 0.0001) {
+        patch.hqCostPerPiece = hqN;
+      }
     }
     await products.catalog.updateCustomItem(item.id, patch);
   } else {
@@ -314,7 +350,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
             <p className="text-zinc-500 mt-1 text-sm sm:text-base max-w-xl">
               {retailOnly
                 ? '各店售價可能不同，僅本機可調。未自訂時以批價 × 1.45 作為參考。'
-                : '僅存本機瀏覽器。'}
+                : '僅存本機瀏覽器。加盟批價為對外／加盟叫貨價；「直營成本」另計，供總部下單與毛利參考（未填則直營下單仍用加盟批價）。'}
             </p>
           </div>
         </div>
@@ -428,12 +464,13 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
             </tbody>
           </table>
         ) : (
-          <table className="w-full min-w-[1120px] text-left text-sm">
+          <table className="w-full min-w-[1280px] text-left text-sm">
             <thead>
               <tr className="text-zinc-500 text-xs border-b border-zinc-800">
                 <th className="py-3 px-2 font-medium w-24">編號</th>
                 <th className="py-3 px-2 font-medium min-w-[7rem]">品名</th>
-                <th className="py-3 px-2 font-medium w-20 text-right">單價</th>
+                <th className="py-3 px-2 font-medium w-[5.5rem] text-right">加盟批價</th>
+                <th className="py-3 px-2 font-medium w-[6rem] text-right">直營成本</th>
                 <th className="py-3 px-2 font-medium w-24 text-right">零售／份</th>
                 <th className="py-3 px-2 font-medium w-20">單位</th>
                 <th className="py-3 px-2 font-medium w-32">分類</th>
@@ -564,7 +601,7 @@ function ItemRow({
   snapshotGettersRef?: MutableRefObject<Map<string, () => CatalogRowForm>>;
   markRowDirty?: (id: string) => void;
   onPatchBase: (f: CatalogRowForm) => void;
-  onUpdateCustom: (next: Partial<SupplyItem> & { retailPerPiece?: number | null }) => void;
+  onUpdateCustom: (next: Partial<SupplyItem> & { retailPerPiece?: number | null; hqCostPerPiece?: number | null }) => void;
   onDeleteClick: () => void;
   onOtherAction: () => void;
 }) {
@@ -572,6 +609,9 @@ function ItemRow({
   const draftRow = isDraftCatalogRowId(item.id);
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(String(item.pricePerPiece));
+  const [hqCost, setHqCost] = useState(
+    item.hqCostPerPiece != null ? String(item.hqCostPerPiece) : '',
+  );
   const [retail, setRetail] = useState(() =>
     String(
       (item.retailPerPiece != null
@@ -601,13 +641,25 @@ function ItemRow({
     setTag(item.tag ?? '');
     setCategory(item.category);
     setFranchiseeSelfSuppliedForPayable(!!item.franchiseeSelfSuppliedForPayable);
-  }, [item.id, item.name, item.pricePerPiece, item.pieceUnit, item.tag, item.category, item.retailPerPiece, item.franchiseeSelfSuppliedForPayable]);
+    setHqCost(item.hqCostPerPiece != null ? String(item.hqCostPerPiece) : '');
+  }, [
+    item.id,
+    item.name,
+    item.pricePerPiece,
+    item.pieceUnit,
+    item.tag,
+    item.category,
+    item.retailPerPiece,
+    item.franchiseeSelfSuppliedForPayable,
+    item.hqCostPerPiece,
+  ]);
 
   useEffect(() => {
     if (!deferSave || !snapshotGettersRef) return;
     snapshotGettersRef.current.set(item.id, () => ({
       name,
       price,
+      hqCost,
       unit,
       tag,
       category,
@@ -623,6 +675,7 @@ function ItemRow({
     item.id,
     name,
     price,
+    hqCost,
     unit,
     tag,
     category,
@@ -641,7 +694,10 @@ function ItemRow({
       ? Math.min(1_000_000, Math.round(retailParsed * 100) / 100)
       : defaultR;
     if (isCustom) {
-      const patch: Partial<SupplyItem> & { retailPerPiece?: number | null } = {
+      const patch: Partial<SupplyItem> & {
+        retailPerPiece?: number | null;
+        hqCostPerPiece?: number | null;
+      } = {
         name: name.trim() || '未命名',
         pricePerPiece: priceN,
         pieceUnit: unit.trim() || '份',
@@ -654,9 +710,20 @@ function ItemRow({
       } else {
         patch.retailPerPiece = retailN;
       }
+      const hqTrim = hqCost.trim();
+      const hqParsed =
+        hqTrim === '' ? NaN : Number.parseFloat(hqTrim.replace(/[^\d.]/g, ''));
+      if (!Number.isFinite(hqParsed) || hqTrim === '') {
+        if (item.hqCostPerPiece != null) patch.hqCostPerPiece = null;
+      } else {
+        const hqN = Math.min(1_000_000, Math.round(Math.max(0, hqParsed) * 100) / 100);
+        if (item.hqCostPerPiece == null || Math.abs(hqN - item.hqCostPerPiece) > 0.0001) {
+          patch.hqCostPerPiece = hqN;
+        }
+      }
       onUpdateCustom(patch);
     } else {
-      onPatchBase({ name, price, unit, tag, category, franchiseeSelfSuppliedForPayable, retail });
+      onPatchBase({ name, price, hqCost, unit, tag, category, franchiseeSelfSuppliedForPayable, retail });
     }
   };
 
@@ -705,9 +772,21 @@ function ItemRow({
           inputMode="decimal"
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-2 text-right font-mono text-amber-200 text-sm"
         />
-        {b && !isCustom && (
-          <p className="text-[0.625rem] text-zinc-600 mt-0.5">內建 ${b.pricePerPiece}</p>
-        )}
+      </td>
+      <td className="py-2.5 px-2 align-top text-right">
+        <input
+          value={hqCost}
+          onChange={(e) => {
+            setHqCost(e.target.value.replace(/[^\d.]/g, ''));
+            if (deferSave) touchDirty();
+          }}
+          onBlur={blurCommit}
+          onFocus={onOtherAction}
+          inputMode="decimal"
+          placeholder="選填"
+          title="直營店內部批貨成本；空白則直營下單仍用加盟批價"
+          className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-2 text-right font-mono text-sky-200/90 text-sm placeholder:text-zinc-600"
+        />
       </td>
       <td className="py-2.5 px-2 align-top text-right">
         <input
@@ -721,11 +800,6 @@ function ItemRow({
           inputMode="decimal"
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-2 text-right font-mono text-emerald-300/95 text-sm"
         />
-        {b && !isCustom && (
-          <p className="text-[0.625rem] text-zinc-600 mt-0.5">
-            內建推估 {defaultRetailPerPieceFromWholesale(b).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}
-          </p>
-        )}
       </td>
       <td className="py-2.5 px-2 align-top">
         <input
@@ -753,6 +827,7 @@ function ItemRow({
               onPatchBase({
                 name,
                 price,
+                hqCost,
                 unit,
                 tag,
                 category: c,
@@ -784,6 +859,7 @@ function ItemRow({
               onPatchBase({
                 name,
                 price,
+                hqCost,
                 unit,
                 tag,
                 category,
