@@ -38,7 +38,13 @@ import {
   listAccountingLedgerEntriesForScopeId,
 } from '../lib/accountingLedgerStorage';
 import { usesFranchiseeOperatingExpenseModel } from '../lib/operatingExpenseModel';
-import { getSupplyItem, isConsumableItem, isFranchiseeSelfSuppliedItem, type SupplyRetailView } from '../lib/supplyCatalog';
+import {
+  getAllSupplyItems,
+  getSupplyItem,
+  isConsumableItem,
+  isFranchiseeSelfSuppliedItem,
+  type SupplyRetailView,
+} from '../lib/supplyCatalog';
 import { getStallDisplaySoldAtRetail } from '../lib/orderStallDisplayRevenue';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
@@ -1083,7 +1089,16 @@ export default function Dashboard({
       const min = Math.min(...series);
       rows.push({ id, name, avg, max, min });
     }
-    rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    const catalogOrderIndex = new Map<string, number>();
+    getAllSupplyItems(retailView)
+      .filter((item) => !isConsumableItem(item))
+      .forEach((item, index) => catalogOrderIndex.set(item.id, index));
+    rows.sort((a, b) => {
+      const ia = catalogOrderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const ib = catalogOrderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      if (ia !== ib) return ia - ib;
+      return a.name.localeCompare(b.name, 'zh-Hant');
+    });
     return { dayCount: n, rows };
   }, [
     stallSalesEconomicsByYmd,
