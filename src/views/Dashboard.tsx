@@ -92,10 +92,19 @@ const SUMMARY_RANGE_OPTIONS: ReadonlyArray<{ key: SummaryRangeKey; label: string
   { key: 'month', label: '本月' },
   { key: 'year', label: '本年' },
 ];
+/** 銷售數據區：週次對照與同名星期統計之區間預設 */
+const STALL_SALES_BOARD_RANGE_OPTIONS: ReadonlyArray<{ key: SummaryRangeKey; label: string }> = [
+  { key: 'month', label: '本月' },
+  { key: 'year', label: '本年' },
+  { key: 'days7', label: '7天' },
+  { key: 'days30', label: '30天' },
+];
 /** 總部「直營盤點落差」專用；與下方營運摘要的 summaryRange 分開，避免必須捲動才能換區間 */
 type DirectStallGapRangeMode =
   | { kind: 'preset'; key: SummaryRangeKey }
   | { kind: 'custom'; startYmd: string; endYmd: string };
+/** 銷售數據區間：none＝不篩日期（全部已建檔營業日） */
+type StallSalesBoardRangeMode = { kind: 'none' } | DirectStallGapRangeMode;
 type ExpenseShareRow = { id: number; name: string; amount: number; pct: number };
 const RANK_DEFAULT_LIMIT = 10;
 
@@ -182,6 +191,15 @@ function weekdayChainPeriodLabel(k: number, dayShort: string): string {
   if (k === 1) return `上週・${dayShort}`;
   if (k === 2) return `上上週・${dayShort}`;
   return `${k} 週前・${dayShort}`;
+}
+
+function weeksBackFromCurrentWeekMonday(ymd: string): number {
+  const todayStr = toYmd(new Date());
+  const mondayThisWeek = startOfWeekMondayYmd(todayStr);
+  const mondayTarget = startOfWeekMondayYmd(ymd);
+  const diffMs =
+    parseYmdToDate(mondayThisWeek).getTime() - parseYmdToDate(mondayTarget).getTime();
+  return Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
 }
 
 function ymdSlash(ymd: string): string {
@@ -283,6 +301,28 @@ function directStallGapRangeLabel(mode: DirectStallGapRangeMode): string {
   if (mode.kind === 'preset') return summaryRangeLabel(mode.key);
   const { startYmd, endYmd } = resolveDirectStallGapYmdRange(mode);
   return `${startYmd}～${endYmd}`;
+}
+
+function stallSalesBoardRangeLabel(mode: StallSalesBoardRangeMode): string {
+  if (mode.kind === 'none') return '全部';
+  return directStallGapRangeLabel(mode);
+}
+
+function resolveStallSalesBoardYmdRange(
+  mode: StallSalesBoardRangeMode,
+  economicsByYmd: Map<string, DirectStallDayEconomics>,
+): { startYmd: string; endYmd: string } {
+  const todayStr = toYmd(new Date());
+  if (mode.kind !== 'none') return resolveDirectStallGapYmdRange(mode);
+  let min = '';
+  let max = '';
+  for (const ymd of economicsByYmd.keys()) {
+    if (ymd > todayStr) continue;
+    if (!min || ymd < min) min = ymd;
+    if (!max || ymd > max) max = ymd;
+  }
+  if (!max) return { startYmd: todayStr, endYmd: todayStr };
+  return { startYmd: min, endYmd: max };
 }
 
 const SUMMARY_RANGE_SELECT_CLASS =
@@ -463,13 +503,19 @@ function DashboardInlineSummaryRangePicker({
 }
 
 function StallGapQuickPresetRow(props: {
-  range: DirectStallGapRangeMode;
+  range: DirectStallGapRangeMode | { kind: 'none' };
   onPreset: (key: SummaryRangeKey) => void;
   onPickCustom: () => void;
   isNarrow: boolean;
+  options?: ReadonlyArray<{ key: SummaryRangeKey; label: string }>;
+  quickLabel?: string;
+  allowDeselect?: boolean;
+  onDeselect?: () => void;
 }) {
-  const { range, onPreset, onPickCustom, isNarrow } = props;
-  const selectVal = range.kind === 'preset' ? range.key : 'custom';
+  const { range, onPreset, onPickCustom, isNarrow, quickLabel = '快速選擇', allowDeselect, onDeselect } =
+    props;
+  const options = props.options ?? SUMMARY_RANGE_OPTIONS;
+  const selectVal = range.kind === 'none' ? '' : range.kind === 'preset' ? range.key : 'custom';
 
   if (isNarrow) {
     return (
@@ -478,12 +524,17 @@ function StallGapQuickPresetRow(props: {
         value={selectVal}
         onChange={(e) => {
           const v = e.target.value;
+          if (v === '') {
+            if (allowDeselect) onDeselect?.();
+            return;
+          }
           if (v === 'custom') onPickCustom();
           else onPreset(v as SummaryRangeKey);
         }}
         className={SUMMARY_RANGE_SELECT_CLASS}
       >
-        {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+        {allowDeselect ? <option value="">全部</option> : null}
+        {options.map(({ key, label }) => (
           <option key={key} value={key}>
             {label}
           </option>
@@ -494,17 +545,34 @@ function StallGapQuickPresetRow(props: {
   }
   return (
     <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
-      <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">快速選擇</span>
-      {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+      {quickLabel ? (
+        <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">{quickLabel}</span>
+      ) : null}
+      {options.map(({ key, label }) => (
         <button
           key={key}
           type="button"
-          onClick={() => onPreset(key)}
+          aria-pressed={range.kind === 'preset' && range.key === key}
+          onClick={() => {
+            if (allowDeselect && range.kind === 'preset' && range.key === key) onDeselect?.();
+            else onPreset(key);
+          }}
           className={summaryRangeToggleClass(range.kind === 'preset' && range.key === key)}
         >
           {label}
         </button>
       ))}
+      <button
+        type="button"
+        aria-pressed={range.kind === 'custom'}
+        onClick={() => {
+          if (allowDeselect && range.kind === 'custom') onDeselect?.();
+          else onPickCustom();
+        }}
+        className={summaryRangeToggleClass(range.kind === 'custom')}
+      >
+        自訂
+      </button>
     </div>
   );
 }
@@ -514,18 +582,22 @@ function WeekdayChainPicker({
   onChange,
   isNarrow,
 }: {
-  focusIdx: number;
-  onChange: (idx: number) => void;
+  focusIdx: number | null;
+  onChange: (idx: number | null) => void;
   isNarrow: boolean;
 }) {
   if (isNarrow) {
     return (
       <select
         aria-label="對照星期"
-        value={focusIdx}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={focusIdx === null ? '' : String(focusIdx)}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(v === '' ? null : Number(v));
+        }}
         className={SUMMARY_RANGE_SELECT_CLASS}
       >
+        <option value="">全部（逐日）</option>
         {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
           <option key={label} value={idx}>
             {label}
@@ -540,7 +612,8 @@ function WeekdayChainPicker({
         <button
           key={label}
           type="button"
-          onClick={() => onChange(idx)}
+          aria-pressed={focusIdx === idx}
+          onClick={() => onChange(focusIdx === idx ? null : idx)}
           className={cn(
             'px-2.5 py-1 rounded-md text-xs border transition-colors min-h-[32px]',
             focusIdx === idx
@@ -781,9 +854,15 @@ export default function Dashboard({
     kind: 'preset',
     key: 'month',
   });
-  const [selectedWeekStartYmd] = useState(() => startOfWeekMondayYmd(toYmd(new Date())));
+  /** 銷售數據區：週次對照與同名星期統計之區間（與 KPI、盤點落差分開） */
+  const [stallSalesBoardRange, setStallSalesBoardRange] = useState<StallSalesBoardRangeMode>({
+    kind: 'none',
+  });
   /** 對照「本週／上週／上上週…」之同名星期：0＝週一 … 6＝週日 */
-  const [weekdayChainFocusIdx, setWeekdayChainFocusIdx] = useState(0);
+  /** null＝不篩星期，表格為區間內逐日；0–6＝週一…週日同名星期對照 */
+  const [weekdayChainFocusIdx, setWeekdayChainFocusIdx] = useState<number | null>(null);
+  /** 銷售數據表列點選之聚焦日（null 時取區間內最近一筆同名星期） */
+  const [stallBoardFocusYmd, setStallBoardFocusYmd] = useState<string | null>(null);
   /** 同名星期「業績打底」編輯草稿（localStorage 鍵為 weekdayChainFocusIdx） */
   const [weekdayBaselineDraft, setWeekdayBaselineDraft] = useState('');
 
@@ -803,9 +882,17 @@ export default function Dashboard({
   }, [franchisePickerOpen]);
 
   useEffect(() => {
+    if (weekdayChainFocusIdx === null) {
+      setWeekdayBaselineDraft('');
+      return;
+    }
     const v = getWeekdayBaselineTarget(weekdayChainFocusIdx);
     setWeekdayBaselineDraft(v !== undefined ? String(v) : '');
   }, [weekdayChainFocusIdx]);
+
+  useEffect(() => {
+    setStallBoardFocusYmd(null);
+  }, [weekdayChainFocusIdx, stallSalesBoardRange]);
 
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
@@ -966,35 +1053,89 @@ export default function Dashboard({
     eco: DirectStallDayEconomics | null;
   };
 
-  const calendarWeekFocusYmd = useMemo(
-    () => addDaysYmd(selectedWeekStartYmd, weekdayChainFocusIdx),
-    [selectedWeekStartYmd, weekdayChainFocusIdx],
+  const stallSalesBoardResolvedYmd = useMemo(
+    () => resolveStallSalesBoardYmdRange(stallSalesBoardRange, stallSalesEconomicsByYmd),
+    [stallSalesBoardRange, stallSalesEconomicsByYmd],
   );
+
+  const stallWeekdayChainRows = useMemo((): StallWeekdayChainRow[] => {
+    const d = weekdayChainFocusIdx;
+    const todayStr = toYmd(new Date());
+    const ymdsInScope: string[] = [];
+
+    if (stallSalesBoardRange.kind === 'none') {
+      for (const ymd of stallSalesEconomicsByYmd.keys()) {
+        if (ymd > todayStr) continue;
+        if (d !== null && mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+        ymdsInScope.push(ymd);
+      }
+      ymdsInScope.sort((a, b) => b.localeCompare(a));
+    } else {
+      const { startYmd, endYmd } = stallSalesBoardResolvedYmd;
+      const end = endYmd > todayStr ? todayStr : endYmd;
+      if (startYmd <= end) {
+        for (let cur = startYmd; cur <= end; cur = addDaysYmd(cur, 1)) {
+          const wd = mondayFirstWeekdayIndexFromYmd(cur);
+          if (d !== null && wd !== d) continue;
+          ymdsInScope.push(cur);
+        }
+        ymdsInScope.sort((a, b) => b.localeCompare(a));
+      }
+    }
+
+    const rows: StallWeekdayChainRow[] = ymdsInScope.map((ymd) => {
+      const wd = mondayFirstWeekdayIndexFromYmd(ymd);
+      const dayShort = WEEKDAY_TOGGLE_LABELS[d ?? wd];
+      const weeksBack = weeksBackFromCurrentWeekMonday(ymd);
+      return {
+        periodLabel:
+          d !== null ? weekdayChainPeriodLabel(weeksBack, dayShort) : dayShort,
+        ymd,
+        weeksBack,
+        eco: stallSalesEconomicsByYmd.get(ymd) ?? null,
+      };
+    });
+    if (d !== null) return rows.slice(0, WEEKDAY_CHAIN_ROW_COUNT);
+    return rows;
+  }, [
+    stallSalesEconomicsByYmd,
+    stallSalesBoardRange,
+    stallSalesBoardResolvedYmd,
+    weekdayChainFocusIdx,
+  ]);
+
+  const calendarWeekFocusYmd = useMemo(() => {
+    if (stallBoardFocusYmd && stallWeekdayChainRows.some((r) => r.ymd === stallBoardFocusYmd)) {
+      return stallBoardFocusYmd;
+    }
+    const todayStr = toYmd(new Date());
+    const { endYmd } = stallSalesBoardResolvedYmd;
+    const rangeEnd = endYmd > todayStr ? todayStr : endYmd;
+    const fallback =
+      weekdayChainFocusIdx !== null
+        ? addDaysYmd(startOfWeekMondayYmd(todayStr), weekdayChainFocusIdx)
+        : rangeEnd;
+    return stallWeekdayChainRows[0]?.ymd ?? fallback;
+  }, [
+    stallBoardFocusYmd,
+    stallWeekdayChainRows,
+    weekdayChainFocusIdx,
+    stallSalesBoardResolvedYmd,
+  ]);
 
   const focusDayEconomics = useMemo(() => {
     return stallSalesEconomicsByYmd.get(calendarWeekFocusYmd) ?? null;
   }, [stallSalesEconomicsByYmd, calendarWeekFocusYmd]);
 
-  const stallWeekdayChainRows = useMemo((): StallWeekdayChainRow[] => {
-    const d = weekdayChainFocusIdx;
-    const dayShort = WEEKDAY_TOGGLE_LABELS[d];
-    return Array.from({ length: WEEKDAY_CHAIN_ROW_COUNT }, (_, k) => {
-      const ymd = addDaysYmd(selectedWeekStartYmd, d - 7 * k);
-      return {
-        periodLabel: weekdayChainPeriodLabel(k, dayShort),
-        ymd,
-        weeksBack: k,
-        eco: stallSalesEconomicsByYmd.get(ymd) ?? null,
-      };
-    });
-  }, [stallSalesEconomicsByYmd, selectedWeekStartYmd, weekdayChainFocusIdx]);
-
   const sameWeekdayActualStats = useMemo(() => {
     const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
+    const { startYmd, endYmd } = stallSalesBoardResolvedYmd;
+    const filterByRange = stallSalesBoardRange.kind !== 'none';
     const entries: { ymd: string; actual: number }[] = [];
     for (const [ymd, row] of stallSalesEconomicsByYmd.entries()) {
-      if (mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+      if (d !== null && mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+      if (filterByRange && (ymd < startYmd || ymd > endYmd)) continue;
       if (ymd > todayStr) continue;
       if (row.actual === null) continue;
       entries.push({ ymd, actual: row.actual });
@@ -1013,12 +1154,19 @@ export default function Dashboard({
     const max = entries.reduce((b, c) => (c.actual > b.actual ? c : b), entries[0]!);
     const min = entries.reduce((b, c) => (c.actual < b.actual ? c : b), entries[0]!);
     return { dayCount: entries.length, sum, avg, max, min };
-  }, [stallSalesEconomicsByYmd, weekdayChainFocusIdx]);
+  }, [
+    stallSalesEconomicsByYmd,
+    weekdayChainFocusIdx,
+    stallSalesBoardRange,
+    stallSalesBoardResolvedYmd,
+  ]);
 
   /** 與「同名星期・歷史實收統計」相同之曆日集合：各品項當日售出量加總後，再算平均／最高／最低 */
   const sameWeekdayProductSoldStats = useMemo(() => {
     const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
+    const { startYmd, endYmd } = stallSalesBoardResolvedYmd;
+    const filterByRange = stallSalesBoardRange.kind !== 'none';
     const retailView: SupplyRetailView = franchiseStallSalesBoardOwnerUserId
       ? FRANCHISE_STALL_VIEW
       : HQ_STALL_VIEW;
@@ -1026,7 +1174,8 @@ export default function Dashboard({
 
     const qualifyingYmds: string[] = [];
     for (const [ymd, row] of stallSalesEconomicsByYmd.entries()) {
-      if (mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+      if (d !== null && mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+      if (filterByRange && (ymd < startYmd || ymd > endYmd)) continue;
       if (ymd > todayStr) continue;
       if (row.actual === null) continue;
       qualifyingYmds.push(ymd);
@@ -1103,6 +1252,8 @@ export default function Dashboard({
   }, [
     stallSalesEconomicsByYmd,
     weekdayChainFocusIdx,
+    stallSalesBoardRange,
+    stallSalesBoardResolvedYmd,
     effectiveOrders,
     franchiseStallSalesBoardOwnerUserId,
     orderTick,
@@ -1114,6 +1265,7 @@ export default function Dashboard({
     (!franchiseOperatingExpenseModel && !viewAsFranchisee) || showFranchiseStallSalesBoard;
 
   const saveWeekdayBaseline = useCallback(() => {
+    if (weekdayChainFocusIdx === null) return;
     const n = Number(String(weekdayBaselineDraft).replace(/,/g, '').trim());
     if (!Number.isFinite(n) || n < 0) return;
     setWeekdayBaselineTarget(weekdayChainFocusIdx, n);
@@ -1708,15 +1860,98 @@ export default function Dashboard({
             />
           </summary>
           <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
-            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-              <WeekdayChainPicker
-                focusIdx={weekdayChainFocusIdx}
-                onChange={setWeekdayChainFocusIdx}
+            <div className="rounded-xl border border-zinc-600/80 bg-zinc-900/70 p-3 sm:p-4 space-y-3 ring-1 ring-amber-600/10">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <span className="text-sm font-medium text-zinc-100">資料區間</span>
+                  <span className="text-xs text-amber-200/80 tabular-nums">
+                    {stallSalesBoardRange.kind === 'none'
+                      ? '全部已建檔營業日'
+                      : `${ymdSlash(stallSalesBoardResolvedYmd.startYmd)}～${ymdSlash(stallSalesBoardResolvedYmd.endYmd)}`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-500 leading-snug">
+                  {stallSalesBoardRange.kind === 'none'
+                    ? '未選取：含所有已建檔營業日（可搭配下方對照星期）'
+                    : `已選 ${stallSalesBoardRangeLabel(stallSalesBoardRange)}：再點一次可取消`}
+                </p>
+              <StallGapQuickPresetRow
+                range={stallSalesBoardRange}
+                options={STALL_SALES_BOARD_RANGE_OPTIONS}
+                quickLabel=""
+                allowDeselect
+                onDeselect={() => setStallSalesBoardRange({ kind: 'none' })}
+                onPreset={(key) => setStallSalesBoardRange({ kind: 'preset', key })}
+                onPickCustom={() =>
+                  setStallSalesBoardRange({
+                    kind: 'custom',
+                    startYmd: stallSalesBoardResolvedYmd.startYmd,
+                    endYmd: stallSalesBoardResolvedYmd.endYmd,
+                  })
+                }
                 isNarrow={isNarrow}
               />
-              <p className="text-[11px] text-zinc-500 leading-relaxed max-w-xl lg:text-right lg:self-end">
-                選取日期：<span className="tabular-nums text-zinc-300">{ymdSlash(calendarWeekFocusYmd)}</span>
-              </p>
+              {stallSalesBoardRange.kind !== 'none' ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+                <span className="text-xs text-zinc-400 shrink-0">自訂起訖</span>
+                <input
+                  type="date"
+                  aria-label="區間起始日"
+                  className="rounded-md border border-zinc-600 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200 tabular-nums min-h-[36px]"
+                  value={stallSalesBoardResolvedYmd.startYmd}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setStallSalesBoardRange({
+                      kind: 'custom',
+                      startYmd: v,
+                      endYmd: stallSalesBoardResolvedYmd.endYmd,
+                    });
+                  }}
+                />
+                <span className="text-zinc-600 text-xs">～</span>
+                <input
+                  type="date"
+                  aria-label="區間結束日"
+                  className="rounded-md border border-zinc-600 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200 tabular-nums min-h-[36px]"
+                  value={stallSalesBoardResolvedYmd.endYmd}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setStallSalesBoardRange({
+                      kind: 'custom',
+                      startYmd: stallSalesBoardResolvedYmd.startYmd,
+                      endYmd: v,
+                    });
+                  }}
+                />
+              </div>
+              ) : null}
+              </div>
+
+              <div className="border-t border-zinc-700/80 pt-3 flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-2 min-w-0 flex-1">
+                  <span className="text-sm font-medium text-zinc-100 shrink-0">對照星期</span>
+                  <p className="text-[11px] text-zinc-500 leading-snug">
+                    {weekdayChainFocusIdx === null
+                      ? stallSalesBoardRange.kind === 'none'
+                        ? '未選取：表格為全部已建檔營業日（逐日）'
+                        : '未選取：下方表格為區間內逐日列表'
+                      : `已選 ${WEEKDAY_TOGGLE_LABELS[weekdayChainFocusIdx]}：再點一次可取消`}
+                  </p>
+                  <WeekdayChainPicker
+                    focusIdx={weekdayChainFocusIdx}
+                    onChange={setWeekdayChainFocusIdx}
+                    isNarrow={isNarrow}
+                  />
+                </div>
+                <p className="text-xs sm:text-sm text-zinc-500 shrink-0 lg:text-right">
+                  選取日期：
+                  <span className="tabular-nums text-amber-200/90 font-medium">
+                    {ymdSlash(calendarWeekFocusYmd)}
+                  </span>
+                </p>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -1761,7 +1996,9 @@ export default function Dashboard({
                   <table className="w-full min-w-[920px] text-left text-sm">
                     <thead className="bg-zinc-900/90 border-b border-zinc-800 text-zinc-500 text-xs">
                       <tr>
-                        <th className="px-3 py-2 font-medium">週期</th>
+                        <th className="px-3 py-2 font-medium">
+                          {weekdayChainFocusIdx === null ? '星期' : '週期'}
+                        </th>
                         <th className="px-3 py-2 font-medium">日期</th>
                         <th className="px-3 py-2 font-medium text-right">應收</th>
                         <th className="px-3 py-2 font-medium text-right">實收</th>
@@ -1776,8 +2013,17 @@ export default function Dashboard({
                         return (
                           <tr
                             key={row.ymd + String(row.weeksBack)}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setStallBoardFocusYmd(row.ymd)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setStallBoardFocusYmd(row.ymd);
+                              }
+                            }}
                             className={cn(
-                              'text-zinc-300 hover:bg-white/[0.02]',
+                              'text-zinc-300 hover:bg-white/[0.02] cursor-pointer',
                               isFocus && 'bg-amber-950/30',
                             )}
                           >
@@ -1814,12 +2060,23 @@ export default function Dashboard({
                 </div>
 
                 <p className="text-[11px] text-zinc-500">
-                  歷史同名星期（已登錄實收）：{sameWeekdayActualStats.dayCount} 日
+                  {weekdayChainFocusIdx === null
+                    ? stallSalesBoardRange.kind === 'none'
+                      ? '全部已建檔營業日（已登錄實收）'
+                      : `區間內逐日（已登錄實收，${stallSalesBoardRangeLabel(stallSalesBoardRange)}）`
+                    : stallSalesBoardRange.kind === 'none'
+                      ? `全部同名 ${WEEKDAY_TOGGLE_LABELS[weekdayChainFocusIdx]}（已登錄實收）`
+                      : `區間內同名星期（已登錄實收，${stallSalesBoardRangeLabel(stallSalesBoardRange)}）`}
+                  ：{sameWeekdayActualStats.dayCount} 日
                 </p>
               </div>
 
               <div className="xl:col-span-4 rounded-xl border border-sky-900/35 bg-sky-950/15 p-4 sm:p-5 space-y-3 text-base">
-                <p className="text-base sm:text-lg font-medium text-sky-200/90">同名星期・歷史實收統計</p>
+                <p className="text-base sm:text-lg font-medium text-sky-200/90">
+                  {weekdayChainFocusIdx === null
+                    ? '區間・歷史實收統計'
+                    : '同名星期・歷史實收統計'}
+                </p>
                 <div className="space-y-2.5 text-base sm:text-[1.0625rem]">
                   <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
                     <span className="text-zinc-500">總營收（實收合計）</span>
@@ -1853,7 +2110,11 @@ export default function Dashboard({
                   </div>
                   {sameWeekdayActualStats.dayCount > 0 && (
                     <div className="space-y-2.5 pt-1 border-b border-zinc-800/70 pb-2">
-                      <p className="text-base font-medium text-sky-200/85">各品項售出量（同名星期）</p>
+                      <p className="text-base font-medium text-sky-200/85">
+                        {weekdayChainFocusIdx === null
+                          ? '各品項售出量（區間逐日）'
+                          : '各品項售出量（同名星期）'}
+                      </p>
                       {sameWeekdayProductSoldStats.rows.length > 0 ? (
                         <div className="overflow-x-auto rounded-lg border border-zinc-800/80 max-h-52 sm:max-h-64 overflow-y-auto -mx-0.5 px-0.5">
                           <table className="w-full min-w-[280px] text-left text-sm sm:text-base">
@@ -1888,6 +2149,7 @@ export default function Dashboard({
                       )}
                     </div>
                   )}
+                  {weekdayChainFocusIdx !== null ? (
                   <div className="pt-1 space-y-2">
                     <div className="flex justify-between gap-2 items-baseline">
                       <span className="text-zinc-500 shrink-0">業績打底</span>
@@ -1916,6 +2178,7 @@ export default function Dashboard({
                       </button>
                     </div>
                   </div>
+                  ) : null}
                 </div>
               </div>
             </div>
