@@ -638,14 +638,36 @@ function moneySignedInt(n: number) {
   return `${n < 0 ? '−' : '+'}$${abs}`;
 }
 
-function DirectStallGapReasonCell({ ymd, syncKey }: { ymd: string; syncKey: number }) {
+function DirectStallGapReasonCell({
+  ymd,
+  syncKey,
+  preferredNote,
+}: {
+  ymd: string;
+  syncKey: number;
+  /** 同列經濟指標已依直營／加盟 scope 彙總之備註；避免讀到另一端的全域銷售紀錄 */
+  preferredNote?: string;
+}) {
   const snap = useMemo(() => getSalesRecord(ymd), [ymd, syncKey]);
-  const stored = snap?.revenueGapReason ?? '';
-  const [val, setVal] = useState(stored);
+  const snapReason = snap?.revenueGapReason?.trim() ?? '';
+  const seedReason =
+    snapReason ||
+    (preferredNote
+      ?.split(' · ')
+      .map((p) => p.trim())
+      .find((p) => p && !p.startsWith('落差登錄')) ??
+      '');
+  const [val, setVal] = useState(seedReason);
   useEffect(() => {
-    setVal(stored);
-  }, [stored]);
-  const amountLine = snap?.revenueGapAmount?.trim();
+    setVal(seedReason);
+  }, [seedReason]);
+  const amountLine =
+    snap?.revenueGapAmount?.trim() ||
+    preferredNote
+      ?.split(' · ')
+      .map((p) => p.trim())
+      .find((p) => p.startsWith('落差登錄'))
+      ?.replace(/^落差登錄\s*/, '');
   return (
     <div className="flex min-w-[10rem] max-w-[18rem] flex-col gap-1">
       <input
@@ -655,7 +677,7 @@ function DirectStallGapReasonCell({ ymd, syncKey }: { ymd: string; syncKey: numb
         value={val}
         onChange={(e) => setVal(e.target.value)}
         onBlur={() => {
-          if (val.trim() === stored.trim()) return;
+          if (val.trim() === seedReason.trim()) return;
           patchSalesRecordRevenueGapReason(ymd, val);
         }}
       />
@@ -1385,8 +1407,18 @@ export default function Dashboard({
   const nonAdminStallGap = useMemo(() => {
     if (isAdmin) return null;
     const { startYmd, endYmd } = resolveDirectStallGapYmdRange(nonAdminStallGapRange);
-    return computeStallGapSummary(effectiveOrders, { type: 'ymd', startYmd, endYmd });
-  }, [effectiveOrders, isAdmin, nonAdminStallGapRange, orderTick]);
+    const ordersForGap = franchiseStallSalesBoardOwnerUserId
+      ? effectiveOrders.filter((o) => orderMatchesFranchiseeBusinessDash(o, franchiseStallSalesBoardOwnerUserId))
+      : effectiveOrders.filter((o) => orderIsHeadquartersDirectScoped(o));
+    const retailView = franchiseStallSalesBoardOwnerUserId ? FRANCHISE_STALL_VIEW : HQ_STALL_VIEW;
+    return computeStallGapSummary(ordersForGap, { type: 'ymd', startYmd, endYmd }, retailView);
+  }, [
+    effectiveOrders,
+    franchiseStallSalesBoardOwnerUserId,
+    isAdmin,
+    nonAdminStallGapRange,
+    orderTick,
+  ]);
 
   const nonAdminStallGapResolvedYmd = useMemo(
     () => resolveDirectStallGapYmdRange(nonAdminStallGapRange),
@@ -2050,7 +2082,11 @@ export default function Dashboard({
                               {eco?.gap == null ? '—' : moneySignedInt(eco.gap)}
                             </td>
                             <td className="px-3 py-2 align-middle">
-                              <DirectStallGapReasonCell ymd={row.ymd} syncKey={orderTick} />
+                              <DirectStallGapReasonCell
+                                ymd={row.ymd}
+                                syncKey={orderTick}
+                                preferredNote={eco?.note}
+                              />
                             </td>
                           </tr>
                         );

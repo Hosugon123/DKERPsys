@@ -10,7 +10,12 @@ import {
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
 } from './orderHistoryStorage';
-import { getSalesRecord, listSalesRecordMeta } from './salesRecordStorage';
+import {
+  getSalesRecord,
+  listSalesRecordMeta,
+  mergeSalesRecordWithCatalog,
+  type SalesRecordDaySnapshot,
+} from './salesRecordStorage';
 import { num } from './stallMath';
 import type { SupplyRetailView } from './supplyCatalog';
 
@@ -38,13 +43,58 @@ type AccBucket = {
   actualParts: number;
 };
 
-function gapNoteFromSalesRecord(ymd: string): string {
-  const snap = getSalesRecord(ymd);
-  if (!snap) return '';
+function gapNoteFromSnapshot(snap: SalesRecordDaySnapshot): string {
   const bits: string[] = [];
   if (snap.revenueGapReason?.trim()) bits.push(snap.revenueGapReason.trim());
   if (snap.revenueGapAmount?.trim()) bits.push(`落差登錄 ${snap.revenueGapAmount.trim()}`);
   return bits.join(' · ');
+}
+
+function gapNoteFromSalesRecord(ymd: string): string {
+  const snap = getSalesRecord(ymd);
+  if (!snap) return '';
+  return gapNoteFromSnapshot(snap);
+}
+
+/** 該日有盤點完成且符合 scope 之訂單所歸屬的曆日集合 */
+function stallCountYmdsForPredicate(
+  orders: OrderHistoryEntry[],
+  matchesScope: (o: OrderHistoryEntry) => boolean,
+): Set<string> {
+  const set = new Set<string>();
+  for (const o of orders) {
+    if (!matchesScope(o) || !o.stallCountCompletedAt) continue;
+    const ymd = stallCountAttributeYmd(o);
+    if (ymd) set.add(ymd);
+  }
+  return set;
+}
+
+function resolveGapSnapshotFromOrder(o: OrderHistoryEntry): SalesRecordDaySnapshot | null {
+  if (o.stallCountSnapshot) return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
+  const basis = o.stallCountBasisYmd?.trim();
+  if (!basis) return null;
+  const day = getSalesRecord(basis);
+  return day ? mergeSalesRecordWithCatalog(day) : null;
+}
+
+/** 備註／落差登錄：優先取自同 scope 訂單快照，避免直營與加盟混用同一 ymd 之全域銷售紀錄 */
+function gapNoteForScopedYmd(
+  orders: OrderHistoryEntry[],
+  ymd: string,
+  matchesScope: (o: OrderHistoryEntry) => boolean,
+): string {
+  const bits: string[] = [];
+  for (const o of orders) {
+    if (!matchesScope(o) || !o.stallCountCompletedAt) continue;
+    if (stallCountAttributeYmd(o) !== ymd) continue;
+    const snap = resolveGapSnapshotFromOrder(o);
+    if (!snap) continue;
+    const part = gapNoteFromSnapshot(snap);
+    if (part) bits.push(part);
+  }
+  if (bits.length > 0) return [...new Set(bits)].join(' · ');
+  return gapNoteFromSalesRecord(ymd);
 }
 
 function orderMatchesFranchiseeBusiness(
@@ -58,7 +108,11 @@ function orderMatchesFranchiseeBusiness(
   return row.actorRole === 'franchisee' && row.actorUserId === uid;
 }
 
-function finalizeEconomicsRow(ymd: string, b: AccBucket): DirectStallDayEconomics {
+function finalizeEconomicsRow(
+  ymd: string,
+  b: AccBucket,
+  note = '',
+): DirectStallDayEconomics {
   const actual = b.actualParts > 0 ? b.actualSum : null;
   const gap = actual !== null ? actual - b.expectedRetail : null;
   return {
@@ -68,7 +122,7 @@ function finalizeEconomicsRow(ymd: string, b: AccBucket): DirectStallDayEconomic
     expectedRetail: b.expectedRetail,
     actual,
     gap,
-    note: gapNoteFromSalesRecord(ymd),
+    note,
   };
 }
 
@@ -108,13 +162,15 @@ export function buildDirectStallEconomicsByYmd(
     acc.set(ymd, prev);
   }
 
+  const matchesDirect = orderIsHeadquartersDirectScoped;
   const map = new Map<string, DirectStallDayEconomics>();
   for (const [ymd, bucket] of acc) {
-    map.set(ymd, finalizeEconomicsRow(ymd, bucket));
+    map.set(ymd, finalizeEconomicsRow(ymd, bucket, gapNoteForScopedYmd(orders, ymd, matchesDirect)));
   }
 
+  const directStallYmds = stallCountYmdsForPredicate(orders, matchesDirect);
   for (const { ymd } of listSalesRecordMeta()) {
-    if (map.has(ymd)) continue;
+    if (map.has(ymd) || !directStallYmds.has(ymd)) continue;
     const snap = getSalesRecord(ymd);
     if (!snap) continue;
     const econ = computeRetailEconomicsFromMergedSnapshot(snap, retailView);
@@ -123,13 +179,17 @@ export function buildDirectStallEconomicsByYmd(
     const hasActual = String(snap.actualRevenue ?? '').trim() !== '' && Number.isFinite(rawActual);
     map.set(
       ymd,
-      finalizeEconomicsRow(ymd, {
-        estTotal: econ.estTotal,
-        remainValue: econ.remainValue,
-        expectedRetail: econ.expectedRetail,
-        actualSum: hasActual ? rawActual : 0,
-        actualParts: hasActual ? 1 : 0,
-      }),
+      finalizeEconomicsRow(
+        ymd,
+        {
+          estTotal: econ.estTotal,
+          remainValue: econ.remainValue,
+          expectedRetail: econ.expectedRetail,
+          actualSum: hasActual ? rawActual : 0,
+          actualParts: hasActual ? 1 : 0,
+        },
+        gapNoteForScopedYmd(orders, ymd, matchesDirect),
+      ),
     );
   }
 
@@ -174,13 +234,15 @@ export function buildFranchiseStallEconomicsByYmd(
     acc.set(ymd, prev);
   }
 
+  const matchesFranchise = (o: OrderHistoryEntry) => orderMatchesFranchiseeBusiness(o, franchiseeUserId);
   const map = new Map<string, DirectStallDayEconomics>();
   for (const [ymd, bucket] of acc) {
-    map.set(ymd, finalizeEconomicsRow(ymd, bucket));
+    map.set(ymd, finalizeEconomicsRow(ymd, bucket, gapNoteForScopedYmd(orders, ymd, matchesFranchise)));
   }
 
+  const franchiseStallYmds = stallCountYmdsForPredicate(orders, matchesFranchise);
   for (const { ymd } of listSalesRecordMeta()) {
-    if (map.has(ymd)) continue;
+    if (map.has(ymd) || !franchiseStallYmds.has(ymd)) continue;
     const snap = getSalesRecord(ymd);
     if (!snap) continue;
     const econ = computeRetailEconomicsFromMergedSnapshot(snap, retailView);
@@ -189,13 +251,17 @@ export function buildFranchiseStallEconomicsByYmd(
     const hasActual = String(snap.actualRevenue ?? '').trim() !== '' && Number.isFinite(rawActual);
     map.set(
       ymd,
-      finalizeEconomicsRow(ymd, {
-        estTotal: econ.estTotal,
-        remainValue: econ.remainValue,
-        expectedRetail: econ.expectedRetail,
-        actualSum: hasActual ? rawActual : 0,
-        actualParts: hasActual ? 1 : 0,
-      }),
+      finalizeEconomicsRow(
+        ymd,
+        {
+          estTotal: econ.estTotal,
+          remainValue: econ.remainValue,
+          expectedRetail: econ.expectedRetail,
+          actualSum: hasActual ? rawActual : 0,
+          actualParts: hasActual ? 1 : 0,
+        },
+        gapNoteForScopedYmd(orders, ymd, matchesFranchise),
+      ),
     );
   }
 

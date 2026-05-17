@@ -173,6 +173,7 @@ function resolveStallSnapshotForGap(o: OrderHistoryEntry) {
 export function computeStallGapSummary(
   orders: OrderHistoryEntry[],
   range: { type: 'ym'; ymKey: string } | { type: 'ymd'; startYmd: string; endYmd: string },
+  retailView: SupplyRetailView = HQ_STALL_RETAIL_VIEW,
 ): StallGapSummary {
   const ymKey = range.type === 'ym' ? range.ymKey.slice(0, 7) : null;
   const startYmd = range.type === 'ymd' ? range.startYmd : '';
@@ -195,7 +196,7 @@ export function computeStallGapSummary(
     const snap = resolveStallSnapshotForGap(o);
     if (!snap) continue;
 
-    const retailSold = getStallDisplaySoldAtRetail(o, HQ_STALL_RETAIL_VIEW);
+    const retailSold = getStallDisplaySoldAtRetail(o, retailView);
     const actualRev = num(snap.actualRevenue);
     const bookShortfall =
       retailSold != null ? Math.max(0, retailSold - actualRev) : 0;
