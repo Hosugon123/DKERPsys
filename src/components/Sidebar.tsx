@@ -35,7 +35,7 @@ const adminItems = [
   { id: 'procurement', label: '批貨與下單', icon: ShoppingBasket },
   { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
-  { id: 'accounting', label: '流水帳', icon: Wallet },
+  { id: 'accounting', label: '收入與支出', icon: Wallet },
 ] as const;
 
 const franchiseeItems = [
@@ -43,7 +43,7 @@ const franchiseeItems = [
   { id: 'procurement', label: '批貨與下單', icon: ShoppingCart },
   { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
-  { id: 'accounting', label: '流水帳', icon: Wallet },
+  { id: 'accounting', label: '收入與支出', icon: Wallet },
   { id: 'orders', label: '訂單管理', icon: ListOrdered },
 ] as const;
 
@@ -51,7 +51,7 @@ const employeeItems = [
   { id: 'orders', label: '訂單管理', icon: ListOrdered },
   { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
   { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
-  { id: 'accounting', label: '流水帳', icon: Wallet },
+  { id: 'accounting', label: '收入與支出', icon: Wallet },
 ] as const;
 
 type NavItem =

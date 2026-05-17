@@ -1061,6 +1061,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
               <div className="mt-2.5 flex items-stretch rounded-lg border border-zinc-700/80 bg-zinc-950/60 overflow-hidden min-h-[2.75rem] sm:min-h-12">
                 <button
                   type="button"
+                  tabIndex={-1}
                   aria-label={`${item.name} 減一`}
                   onClick={() => bumpQty(item.id, -1)}
                   className="w-9 min-w-9 sm:w-10 min-h-[2.75rem] sm:min-h-12 flex items-center justify-center text-zinc-400 active:bg-zinc-800/90 sm:active:bg-zinc-800/80"
@@ -1134,6 +1135,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 </div>
                 <button
                   type="button"
+                  tabIndex={-1}
                   aria-label={`${item.name} 加一`}
                   onClick={() => bumpQty(item.id, 1)}
                   className="w-9 min-w-9 sm:w-10 min-h-[2.75rem] sm:min-h-12 flex items-center justify-center text-amber-500 active:bg-amber-600/20"

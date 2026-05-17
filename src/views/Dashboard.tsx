@@ -38,7 +38,7 @@ import {
   listAccountingLedgerEntriesForScopeId,
 } from '../lib/accountingLedgerStorage';
 import { usesFranchiseeOperatingExpenseModel } from '../lib/operatingExpenseModel';
-import { getSupplyItem, isConsumableItem, isFranchiseeSelfSuppliedItem } from '../lib/supplyCatalog';
+import { getSupplyItem, isConsumableItem, isFranchiseeSelfSuppliedItem, type SupplyRetailView } from '../lib/supplyCatalog';
 import { getStallDisplaySoldAtRetail } from '../lib/orderStallDisplayRevenue';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
@@ -47,6 +47,7 @@ import {
   effectiveOrderDateYmd,
   orderIsFranchiseBusinessScoped,
   orderIsHeadquartersDirectScoped,
+  resolveOrderDataScopeId,
   type OrderHistoryEntry,
   type OrderActorRole,
 } from '../lib/orderHistoryStorage';
@@ -57,7 +58,8 @@ import {
   type DirectStallDayEconomics,
 } from '../lib/directStallDayEconomics';
 import { getDataScopeContext } from '../lib/dataScope';
-import { getSalesRecord, patchSalesRecordRevenueGapReason } from '../lib/salesRecordStorage';
+import { computeLine } from '../lib/stallMath';
+import { getSalesRecord, mergeSalesRecordWithCatalog, patchSalesRecordRevenueGapReason } from '../lib/salesRecordStorage';
 
 const HQ_STALL_VIEW = 'headquarter' as const;
 const FRANCHISE_STALL_VIEW = 'franchisee' as const;
@@ -178,6 +180,46 @@ function weekdayChainPeriodLabel(k: number, dayShort: string): string {
 
 function ymdSlash(ymd: string): string {
   return ymd.replace(/-/g, '/');
+}
+
+function orderMatchesFranchiseeBusinessDash(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>,
+  franchiseeUserId: string,
+): boolean {
+  const uid = franchiseeUserId.trim();
+  if (!uid) return false;
+  const scope = resolveOrderDataScopeId(row);
+  if (scope === `scope:franchisee:${uid}`) return true;
+  return row.actorRole === 'franchisee' && row.actorUserId === uid;
+}
+
+function stallSnapshotMergedFromOrder(o: OrderHistoryEntry) {
+  if (o.stallCountSnapshot) return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
+  const b = o.stallCountBasisYmd?.trim();
+  if (b) {
+    const rec = getSalesRecord(b);
+    if (rec) return mergeSalesRecordWithCatalog(rec);
+  }
+  return null;
+}
+
+function accumulateSoldQtyByProductFromSnapshot(
+  dayMap: Map<string, number>,
+  snap: ReturnType<typeof mergeSalesRecordWithCatalog>,
+  retailView: SupplyRetailView,
+) {
+  for (const id of Object.keys(snap.lines)) {
+    const item = getSupplyItem(id, retailView);
+    if (!item || isConsumableItem(item)) continue;
+    const line = snap.lines[id] ?? { out: '', remain: '' };
+    const c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
+    if (c.remainUnfilled) continue;
+    dayMap.set(id, (dayMap.get(id) ?? 0) + c.sold);
+  }
+}
+
+function formatWeekdaySoldQty(n: number): string {
+  return n.toLocaleString('zh-TW', { maximumFractionDigits: 3, minimumFractionDigits: 0 });
 }
 
 function summaryRangeLabel(key: SummaryRangeKey): string {
@@ -967,6 +1009,90 @@ export default function Dashboard({
     return { dayCount: entries.length, sum, avg, max, min };
   }, [stallSalesEconomicsByYmd, weekdayChainFocusIdx]);
 
+  /** 與「同名星期・歷史實收統計」相同之曆日集合：各品項當日售出量加總後，再算平均／最高／最低 */
+  const sameWeekdayProductSoldStats = useMemo(() => {
+    const d = weekdayChainFocusIdx;
+    const todayStr = toYmd(new Date());
+    const retailView: SupplyRetailView = franchiseStallSalesBoardOwnerUserId
+      ? FRANCHISE_STALL_VIEW
+      : HQ_STALL_VIEW;
+    const franchiseId = franchiseStallSalesBoardOwnerUserId;
+
+    const qualifyingYmds: string[] = [];
+    for (const [ymd, row] of stallSalesEconomicsByYmd.entries()) {
+      if (mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+      if (ymd > todayStr) continue;
+      if (row.actual === null) continue;
+      qualifyingYmds.push(ymd);
+    }
+    qualifyingYmds.sort();
+
+    if (qualifyingYmds.length === 0) {
+      return {
+        dayCount: 0,
+        rows: [] as { id: string; name: string; avg: number; max: number; min: number }[],
+      };
+    }
+
+    const qualifying = new Set(qualifyingYmds);
+    const perDay = new Map<string, Map<string, number>>();
+
+    for (const o of effectiveOrders) {
+      if (!o.stallCountCompletedAt) continue;
+      if (franchiseId) {
+        if (!orderMatchesFranchiseeBusinessDash(o, franchiseId)) continue;
+      } else if (!orderIsHeadquartersDirectScoped(o)) {
+        continue;
+      }
+      const ymd = stallCountAttributeYmd(o);
+      if (!ymd || !qualifying.has(ymd)) continue;
+      const snap = stallSnapshotMergedFromOrder(o);
+      if (!snap) continue;
+      let dayMap = perDay.get(ymd);
+      if (!dayMap) {
+        dayMap = new Map();
+        perDay.set(ymd, dayMap);
+      }
+      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView);
+    }
+
+    for (const ymd of qualifyingYmds) {
+      if (perDay.has(ymd)) continue;
+      const raw = getSalesRecord(ymd);
+      if (!raw) continue;
+      const snap = mergeSalesRecordWithCatalog(raw);
+      const dayMap = new Map<string, number>();
+      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView);
+      if (dayMap.size > 0) perDay.set(ymd, dayMap);
+    }
+
+    const allIds = new Set<string>();
+    for (const m of perDay.values()) {
+      for (const id of m.keys()) allIds.add(id);
+    }
+
+    const n = qualifyingYmds.length;
+    const rows: { id: string; name: string; avg: number; max: number; min: number }[] = [];
+    for (const id of allIds) {
+      const item = getSupplyItem(id, retailView);
+      const name = item?.name ?? id;
+      const series = qualifyingYmds.map((ymd) => perDay.get(ymd)?.get(id) ?? 0);
+      const sum = series.reduce((s, v) => s + v, 0);
+      const avg = sum / n;
+      const max = Math.max(...series);
+      const min = Math.min(...series);
+      rows.push({ id, name, avg, max, min });
+    }
+    rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    return { dayCount: n, rows };
+  }, [
+    stallSalesEconomicsByYmd,
+    weekdayChainFocusIdx,
+    effectiveOrders,
+    franchiseStallSalesBoardOwnerUserId,
+    orderTick,
+  ]);
+
   const showFranchiseStallSalesBoard =
     franchiseOperatingExpenseModel && franchiseStallSalesBoardOwnerUserId != null;
   const showStallSalesBoard =
@@ -1677,12 +1803,9 @@ export default function Dashboard({
                 </p>
               </div>
 
-              <div className="xl:col-span-4 rounded-xl border border-sky-900/35 bg-sky-950/15 p-4 space-y-3">
-                <p className="text-xs font-medium text-sky-200/90">同名星期・歷史實收統計</p>
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  僅統計<strong className="text-zinc-400">截至今日</strong>且<strong className="text-zinc-400">已填盤點後實收</strong>之日。
-                </p>
-                <div className="space-y-2.5 text-sm">
+              <div className="xl:col-span-4 rounded-xl border border-sky-900/35 bg-sky-950/15 p-4 sm:p-5 space-y-3 text-base">
+                <p className="text-base sm:text-lg font-medium text-sky-200/90">同名星期・歷史實收統計</p>
+                <div className="space-y-2.5 text-base sm:text-[1.0625rem]">
                   <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
                     <span className="text-zinc-500">總營收（實收合計）</span>
                     <span className="tabular-nums text-sky-100">{moneyTW(sameWeekdayActualStats.sum)}</span>
@@ -1697,7 +1820,7 @@ export default function Dashboard({
                       <span className="tabular-nums text-emerald-300 block">
                         {sameWeekdayActualStats.max ? moneyTW(sameWeekdayActualStats.max.actual) : '—'}
                       </span>
-                      <span className="text-[11px] text-zinc-600 tabular-nums">
+                      <span className="text-sm sm:text-base text-zinc-600 tabular-nums">
                         {sameWeekdayActualStats.max ? ymdSlash(sameWeekdayActualStats.max.ymd) : ''}
                       </span>
                     </span>
@@ -1708,15 +1831,52 @@ export default function Dashboard({
                       <span className="tabular-nums text-rose-300 block">
                         {sameWeekdayActualStats.min ? moneyTW(sameWeekdayActualStats.min.actual) : '—'}
                       </span>
-                      <span className="text-[11px] text-zinc-600 tabular-nums">
+                      <span className="text-sm sm:text-base text-zinc-600 tabular-nums">
                         {sameWeekdayActualStats.min ? ymdSlash(sameWeekdayActualStats.min.ymd) : ''}
                       </span>
                     </span>
                   </div>
+                  {sameWeekdayActualStats.dayCount > 0 && (
+                    <div className="space-y-2.5 pt-1 border-b border-zinc-800/70 pb-2">
+                      <p className="text-base font-medium text-sky-200/85">各品項售出量（同名星期）</p>
+                      {sameWeekdayProductSoldStats.rows.length > 0 ? (
+                        <div className="overflow-x-auto rounded-lg border border-zinc-800/80 max-h-52 sm:max-h-64 overflow-y-auto -mx-0.5 px-0.5">
+                          <table className="w-full min-w-[280px] text-left text-sm sm:text-base">
+                            <thead className="sticky top-0 bg-sky-950/95 text-zinc-500 border-b border-zinc-800/80 text-sm sm:text-base">
+                              <tr>
+                                <th className="py-2 pr-2 pl-1 font-medium">品項</th>
+                                <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">平均</th>
+                                <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">最高</th>
+                                <th className="py-2 pl-1.5 pr-1 font-medium text-right whitespace-nowrap">最低</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
+                              {sameWeekdayProductSoldStats.rows.map((r) => (
+                                <tr key={r.id}>
+                                  <td className="py-2 pr-2 pl-1 text-zinc-200 leading-snug">{r.name}</td>
+                                  <td className="py-2 px-1.5 text-right tabular-nums text-sky-100/95">
+                                    {formatWeekdaySoldQty(r.avg)}
+                                  </td>
+                                  <td className="py-2 px-1.5 text-right tabular-nums text-emerald-300/90">
+                                    {formatWeekdaySoldQty(r.max)}
+                                  </td>
+                                  <td className="py-2 pl-1.5 pr-1 text-right tabular-nums text-rose-300/85">
+                                    {formatWeekdaySoldQty(r.min)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="text-sm sm:text-base text-zinc-600">尚無可匯總之盤點售出明細（或非販售品）。</p>
+                      )}
+                    </div>
+                  )}
                   <div className="pt-1 space-y-2">
                     <div className="flex justify-between gap-2 items-baseline">
                       <span className="text-zinc-500 shrink-0">業績打底</span>
-                      <span className="tabular-nums text-amber-200/90 text-xs">
+                      <span className="tabular-nums text-amber-200/90 text-sm sm:text-base">
                         已存：
                         {getWeekdayBaselineTarget(weekdayChainFocusIdx) !== undefined
                           ? moneyTW(getWeekdayBaselineTarget(weekdayChainFocusIdx)!)
@@ -1730,12 +1890,12 @@ export default function Dashboard({
                         value={weekdayBaselineDraft}
                         onChange={(e) => setWeekdayBaselineDraft(e.target.value)}
                         placeholder="目標金額"
-                        className="min-w-[8rem] flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-sm text-zinc-200 tabular-nums focus:outline-none focus:border-sky-600/50"
+                        className="min-w-[8rem] flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2.5 text-base sm:text-[1.0625rem] text-zinc-200 tabular-nums focus:outline-none focus:border-sky-600/50"
                       />
                       <button
                         type="button"
                         onClick={saveWeekdayBaseline}
-                        className="px-3 py-2 rounded-lg border border-sky-700/80 bg-sky-950/40 text-sky-200 text-xs hover:bg-sky-900/40"
+                        className="px-3 py-2.5 rounded-lg border border-sky-700/80 bg-sky-950/40 text-sky-200 text-sm sm:text-base hover:bg-sky-900/40"
                       >
                         儲存打底
                       </button>

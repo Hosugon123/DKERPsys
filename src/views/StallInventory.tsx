@@ -690,6 +690,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     <div className="flex items-center justify-end gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
                       <button
                         type="button"
+                        tabIndex={-1}
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'out', -1)}
@@ -708,6 +709,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       />
                       <button
                         type="button"
+                        tabIndex={-1}
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'out', 1)}
@@ -729,6 +731,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap min-w-0">
                       <button
                         type="button"
+                        tabIndex={-1}
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'remain', -1)}
@@ -755,6 +758,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       />
                       <button
                         type="button"
+                        tabIndex={-1}
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'remain', 1)}
@@ -765,6 +769,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       </button>
                       <button
                         type="button"
+                        tabIndex={-1}
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => setLine(item.id, 'remain', '0')}

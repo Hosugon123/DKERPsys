@@ -28,28 +28,31 @@ import {
 const HQ_STALL_RETAIL_VIEW: SupplyRetailView = 'headquarter';
 
 /**
- * 盤點營收歸屬月：優先 `stallCountBasisYmd` 之 YYYY-MM；無則以盤點完成時間之本機曆法年月。
+ * 盤點營收歸屬月：優先盤點完成時間之本機曆法年月；無完成時間時退採 `stallCountBasisYmd`（舊資料相容）。
+ * 與訂單建單日／指定日無關，避免週次對照錯位。
  */
 export function stallCountAttributeYmKey(
   o: Pick<OrderHistoryEntry, 'stallCountBasisYmd' | 'stallCountCompletedAt'>,
 ): string | null {
-  const b = o.stallCountBasisYmd?.trim();
-  if (b && /^\d{4}-\d{2}-\d{2}$/.test(b)) return b.slice(0, 7);
-  const iso = o.stallCountCompletedAt;
-  if (!iso) return null;
-  const ymd = toLocalYmdDashed(iso);
+  const ymd = stallCountAttributeYmd(o);
   return ymd ? ymd.slice(0, 7) : null;
 }
 
-/** 歸屬日 YYYY-MM-DD（區間摘要用）；無盤點日則以完成時間之本機日期。 */
+/**
+ * 歸屬日 YYYY-MM-DD（區間摘要用、儀表板週對照用）：
+ * 優先 `stallCountCompletedAt` 之本機曆法日（盤點當下），其次 `stallCountBasisYmd`。
+ */
 export function stallCountAttributeYmd(
   o: Pick<OrderHistoryEntry, 'stallCountBasisYmd' | 'stallCountCompletedAt'>,
 ): string | null {
+  const iso = o.stallCountCompletedAt?.trim();
+  if (iso) {
+    const ymd = toLocalYmdDashed(iso);
+    if (ymd) return ymd;
+  }
   const b = o.stallCountBasisYmd?.trim();
   if (b && /^\d{4}-\d{2}-\d{2}$/.test(b)) return b;
-  const iso = o.stallCountCompletedAt;
-  if (!iso) return null;
-  return toLocalYmdDashed(iso) || null;
+  return null;
 }
 
 function mergeOrdersForAdminFinance(): OrderHistoryEntry[] {
@@ -165,7 +168,7 @@ function resolveStallSnapshotForGap(o: OrderHistoryEntry) {
 
 /**
  * 彙總盤點登錄實收與帳面零售之差異、登記落差與推估呆帳。
- * @param range 以盤點歸屬日（stallCountBasisYmd 或完成時間）落在區間內之單據為準。
+ * @param range 以盤點完成時間之本機歸屬日（優先）落在區間內之單據為準；無完成時間時退採 basisYmd。
  */
 export function computeStallGapSummary(
   orders: OrderHistoryEntry[],
