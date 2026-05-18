@@ -182,7 +182,7 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
         <p>
           匯入前建議先使用「匯出 JSON」備份。單筆資料已盡量包含 <code className="text-amber-100/95">id</code>、
           <code className="text-amber-100/95">createdAt</code>、<code className="text-amber-100/95">updatedAt</code>{' '}
-         （訂單、流水帳、自訂品項等），便於外部工具與未來 API 對接。
+         （訂單、收入與支出、自訂品項等），便於外部工具與未來 API 對接。
         </p>
       </div>
 

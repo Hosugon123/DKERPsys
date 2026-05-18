@@ -1178,6 +1178,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                             </p>
                             <p className="break-words [overflow-wrap:anywhere] text-sm min-[430px]:col-span-2">
                               最後異動：{displayOrderLastUpdatedByLabel(raw)}
+                              <span className="text-zinc-600 tabular-nums text-[0.8em]">
+                                {' '}
+                                {formatSlashDateTimeWithWeekdayFromIso(raw.updatedAt || raw.createdAt)}
+                              </span>
                             </p>
                           </div>
                         </>

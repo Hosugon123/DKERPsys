@@ -144,7 +144,7 @@ export default function MarinadeCostAnalysis() {
               <h3 className="text-base font-semibold text-zinc-100">滷料成本分析</h3>
             </div>
             <p className="text-[0.6875rem] text-zinc-500 max-w-2xl">
-              資料來自流水帳大項「滷料」：依子類（糖、味精、醬油、中草藥、其他調味等）統計；無子類或無法對應者併入「未指定子類／其他」。與「食材支出」分開紀錄。明細請至「流水帳」新增或編輯。
+              資料來自收入與支出「滷料」大項：依子類（糖、味精、醬油、中草藥、其他調味等）統計；無子類或無法對應者併入「未指定子類／其他」。與「食材支出」分開紀錄。明細請至「收入與支出」新增或編輯。
             </p>
           </div>
 

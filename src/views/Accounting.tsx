@@ -422,7 +422,7 @@ export default function Accounting() {
 
   const onDelete = async (row: AccountingLedgerEntry) => {
     const ok = window.confirm(
-      `確定要刪除此筆流水帳嗎？\n${ymdDashToSlash(row.dateYmd)} · ${row.category} · $${money(row.amount)}\n此操作無法復原。`
+      `確定要刪除此筆收入與支出紀錄嗎？\n${ymdDashToSlash(row.dateYmd)} · ${row.category} · $${money(row.amount)}\n此操作無法復原。`
     );
     if (!ok) return;
     await remove(row.id);
@@ -446,7 +446,7 @@ export default function Accounting() {
         </div>
         <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
           <Wallet className="text-amber-500 shrink-0" size={28} />
-          流水帳
+          收入與支出
         </h2>
       </div>
 
@@ -908,7 +908,7 @@ export default function Accounting() {
           >
             <div className="flex items-start justify-between gap-3 mb-4">
               <h3 id="accounting-edit-title" className="text-lg font-semibold text-zinc-100">
-                編輯流水帳
+                編輯紀錄
               </h3>
               <button
                 type="button"

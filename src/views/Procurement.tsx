@@ -59,6 +59,10 @@ import {
   formatSlashDateTimeFromIso,
   formatSlashYmdWithWeekdayFromYmd,
 } from '../lib/dateDisplay';
+import {
+  computeProcurementLastWeekSameDaySold,
+  referenceWeekdayShortLabel,
+} from '../lib/procurementWeekdayReference';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import { getDataScopeContext } from '../lib/dataScope';
 import ItemCatalogSettings from './ItemCatalogSettings';
@@ -223,6 +227,16 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     }
     return m;
   }, [stallBasisOrderId, catalogItems, stallTick]);
+
+  const lastWeekSameDayRef = useMemo(
+    () => computeProcurementLastWeekSameDaySold(newOrderDateYmd, basisOrdersList, supplyRetailView),
+    [newOrderDateYmd, basisOrdersList, supplyRetailView, stallTick],
+  );
+
+  const lastWeekRefWeekdayLabel = useMemo(
+    () => referenceWeekdayShortLabel(lastWeekSameDayRef.referenceYmd),
+    [lastWeekSameDayRef.referenceYmd],
+  );
 
   const visibleItems = useMemo(() => {
     return catalogItems.filter((item) => {
@@ -1037,8 +1051,29 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     {item.pieceUnit}
                   </span>
                 </div>
+                {!isConsumableItem(item) && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span>上週{lastWeekRefWeekdayLabel}售出</span>
+                    <span className="tabular-nums text-sky-300/90 shrink-0">
+                      {lastWeekSameDayRef.hasCompletedStallDay &&
+                      lastWeekSameDayRef.soldByProductId.has(item.id) ? (
+                        <>
+                          {lastWeekSameDayRef.soldByProductId.get(item.id)!.toLocaleString()}
+                          <LiangJinQtyHint
+                            liangQty={lastWeekSameDayRef.soldByProductId.get(item.id)!}
+                            pieceUnit={item.pieceUnit}
+                            className="text-[0.625rem]"
+                          />{' '}
+                          {item.pieceUnit}
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2">
-                  <span>建議叫貨</span>
+                  <span>下單數量</span>
                   <span className="tabular-nums text-amber-300">
                     {q.toLocaleString()}
                     <LiangJinQtyHint liangQty={q} pieceUnit={item.pieceUnit} className="text-[0.625rem]" /> {item.pieceUnit}

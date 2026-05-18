@@ -55,6 +55,18 @@ export function stallCountAttributeYmd(
   return null;
 }
 
+/**
+ * 銷售數據「逐日列表」歸屬日：優先盤點營業日（`stallCountBasisYmd`），避免多張訂單僅因同日完成盤點而併入同一列。
+ * 週次對照／區間 KPI 仍用 {@link stallCountAttributeYmd}（完成時間優先）。
+ */
+export function stallSalesBoardRowYmd(
+  o: Pick<OrderHistoryEntry, 'stallCountBasisYmd' | 'stallCountCompletedAt'>,
+): string | null {
+  const b = o.stallCountBasisYmd?.trim();
+  if (b && /^\d{4}-\d{2}-\d{2}$/.test(b)) return b;
+  return stallCountAttributeYmd(o);
+}
+
 function mergeOrdersForAdminFinance(): OrderHistoryEntry[] {
   const mgmt = loadFranchiseManagementOrders().map<OrderHistoryEntry>((m) => ({
     id: m.id,

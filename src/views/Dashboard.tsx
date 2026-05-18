@@ -30,6 +30,7 @@ import {
   computeAdminDashboardFinanceForYmdRange,
   computeStallGapSummary,
   stallCountAttributeYmd,
+  stallSalesBoardRowYmd,
   type StallGapSummary,
 } from '../lib/financeLib';
 import {
@@ -1221,7 +1222,7 @@ export default function Dashboard({
       } else if (!orderIsHeadquartersDirectScoped(o)) {
         continue;
       }
-      const ymd = stallCountAttributeYmd(o);
+      const ymd = stallSalesBoardRowYmd(o);
       if (!ymd || !qualifying.has(ymd)) continue;
       const snap = stallSnapshotMergedFromOrder(o);
       if (!snap) continue;
@@ -1525,7 +1526,7 @@ export default function Dashboard({
               目前以加盟主視角檢視
               <span className="font-semibold text-amber-300 mx-1">{viewAsFranchisee.label}</span>
               的營運概況
-              <span className="text-amber-200/70 ml-1">（與加盟主自身畫面一致；流水帳支出取該店本機紀錄）</span>
+              <span className="text-amber-200/70 ml-1">（與加盟主自身畫面一致；收支支出取該店本機紀錄）</span>
             </p>
           </div>
           <button
@@ -1788,7 +1789,7 @@ export default function Dashboard({
                   <div className="flex items-center gap-1.5 text-zinc-500">
                     <Target size={16} className="shrink-0 text-rose-300" aria-hidden />
                     <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">
-                      {franchiseOperatingExpenseModel ? '總支出' : '流水帳支出'}
+                      {franchiseOperatingExpenseModel ? '總支出' : '收支支出'}
                     </p>
                   </div>
                   <p className="mt-2.5 text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
@@ -2425,7 +2426,7 @@ export default function Dashboard({
                 <>
                   <h3 className="text-lg font-medium text-zinc-100">營收與支出佔比</h3>
                   <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
-                    依訂單建單日・{summaryRangeLabel(productChartsRange)}・本店可視訂單與流水帳
+                    依訂單建單日・{summaryRangeLabel(productChartsRange)}・本店可視訂單與收支
                     <span className="text-zinc-600 ml-1">（點此展開）</span>
                   </p>
                 </>
@@ -2720,7 +2721,7 @@ export default function Dashboard({
                   <h3 className="text-lg font-medium text-zinc-100">支出結構表（本月）</h3>
                 </div>
                 <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
-                  依流水帳支出細項加總・{adminFinance.expenseBreakdown.length} 項類別
+                  依收入與支出細項加總・{adminFinance.expenseBreakdown.length} 項類別
                   <span className="text-zinc-600 ml-1">（點此展開）</span>
                 </p>
               </div>
