@@ -273,9 +273,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         stallDisplayItems.map((it) => [it.id, pricePerPackage(it)])
       ),
     };
+    const stampBasisYmd = viewOrder ? effectiveOrderDateYmd(viewOrder) : dateStr;
     void (async () => {
       const okStamp = await ordersApi.setOrderStallCountStamp(viewOrderId, {
-        basisYmd: dateStr,
+        basisYmd: stampBasisYmd,
         completedAt,
         snapshot: recordSnap,
       });
@@ -286,8 +287,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         return;
       }
       await withRemoteStorageWrite(() => {
-        saveDay(dateStr, next);
-        saveSalesRecord(dateStr, recordSnap);
+        saveDay(stampBasisYmd, next);
+        saveSalesRecord(stampBasisYmd, recordSnap);
       });
       setStallListTick((n) => n + 1);
       setStallCountConfirmOpen(false);

@@ -648,14 +648,20 @@ function DirectStallGapReasonCell({
   ymd,
   syncKey,
   preferredNote,
+  scopedNotesOnly = false,
 }: {
   ymd: string;
   syncKey: number;
   /** 同列經濟指標已依直營／加盟 scope 彙總之備註；避免讀到另一端的全域銷售紀錄 */
   preferredNote?: string;
+  /** 加盟本店：僅顯示該店訂單快照備註，不讀寫全域 salesRecord */
+  scopedNotesOnly?: boolean;
 }) {
-  const snap = useMemo(() => getSalesRecord(ymd), [ymd, syncKey]);
-  const snapReason = snap?.revenueGapReason?.trim() ?? '';
+  const snap = useMemo(
+    () => (scopedNotesOnly ? null : getSalesRecord(ymd)),
+    [ymd, syncKey, scopedNotesOnly],
+  );
+  const snapReason = scopedNotesOnly ? '' : snap?.revenueGapReason?.trim() ?? '';
   const seedReason =
     snapReason ||
     (preferredNote
@@ -667,13 +673,28 @@ function DirectStallGapReasonCell({
   useEffect(() => {
     setVal(seedReason);
   }, [seedReason]);
-  const amountLine =
-    snap?.revenueGapAmount?.trim() ||
-    preferredNote
-      ?.split(' · ')
-      .map((p) => p.trim())
-      .find((p) => p.startsWith('落差登錄'))
-      ?.replace(/^落差登錄\s*/, '');
+  const amountLine = scopedNotesOnly
+    ? preferredNote
+        ?.split(' · ')
+        .map((p) => p.trim())
+        .find((p) => p.startsWith('落差登錄'))
+        ?.replace(/^落差登錄\s*/, '')
+    : snap?.revenueGapAmount?.trim() ||
+      preferredNote
+        ?.split(' · ')
+        .map((p) => p.trim())
+        .find((p) => p.startsWith('落差登錄'))
+        ?.replace(/^落差登錄\s*/, '');
+  if (scopedNotesOnly) {
+    return (
+      <div className="flex min-w-[10rem] max-w-[18rem] flex-col gap-1 text-xs text-zinc-400">
+        {seedReason ? <span className="break-words">{seedReason}</span> : <span className="text-zinc-600">—</span>}
+        {amountLine ? (
+          <span className="text-[10px] leading-snug text-zinc-600">登錄落差 {amountLine}</span>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div className="flex min-w-[10rem] max-w-[18rem] flex-col gap-1">
       <input
@@ -2090,6 +2111,7 @@ export default function Dashboard({
                                 ymd={row.ymd}
                                 syncKey={orderTick}
                                 preferredNote={eco?.note}
+                                scopedNotesOnly={showFranchiseStallSalesBoard}
                               />
                             </td>
                           </tr>
