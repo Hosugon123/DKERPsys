@@ -54,9 +54,9 @@ import {
   effectiveOrderDateYmd,
   orderIsFranchiseBusinessScoped,
   orderIsHeadquartersDirectScoped,
+  orderMatchesSessionScope,
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
-  type OrderActorRole,
 } from '../lib/orderHistoryStorage';
 import { getWeekdayBaselineTarget, setWeekdayBaselineTarget } from '../lib/dashboardWeekdayBaselineStorage';
 import {
@@ -77,10 +77,15 @@ const INGREDIENT_STRUCTURE_PIE_COLORS = ['#ea580c', '#6366f1'];
 
 type DashboardOrder = OrderHistoryEntry;
 
-function roleVisible(actorRole: OrderActorRole, userRole: UserRole): boolean {
-  if (userRole === 'admin') return true;
-  if (userRole === 'franchisee') return actorRole === 'franchisee';
-  return actorRole === 'employee';
+function resolveFranchiseScopeOwnerUserId(
+  viewAsFranchisee: DashboardViewAsTarget | null | undefined,
+): string | null {
+  if (viewAsFranchisee?.userId?.trim()) return viewAsFranchisee.userId.trim();
+  const ctx = getDataScopeContext();
+  const fromScope = ctx.scopeId.match(/^scope:franchisee:(.+)$/)?.[1]?.trim();
+  if (fromScope) return fromScope;
+  if (ctx.role === 'franchisee' && ctx.userId.trim()) return ctx.userId.trim();
+  return null;
 }
 
 type ProductRevenueRow = { id: number; name: string; revenue: number; qty: number; pct: number };
@@ -980,7 +985,7 @@ export default function Dashboard({
       lastUpdatedByName: m.lastUpdatedByName,
     }));
     const history = loadOrderHistory();
-    const all = [...mgmt, ...history].filter((o) => roleVisible(o.actorRole, userRole));
+    const all = [...mgmt, ...history].filter((o) => orderMatchesSessionScope(o));
     all.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     return all;
   }, [userRole, orderTick]);
@@ -1014,14 +1019,11 @@ export default function Dashboard({
    * 與 view-as 對應的下方營收／支出計算皆改用此清單，確保與該加盟主自身 Dashboard 一致。
    */
   const effectiveOrders = useMemo(() => {
-    if (!viewAsFranchisee) return dashboardOrders;
-    const uid = viewAsFranchisee.userId;
-    return dashboardOrders.filter((o) => {
-      if (o.actorRole === 'franchisee' && o.actorUserId === uid) return true;
-      const scope = o.scopeId?.trim();
-      if (scope === `scope:franchisee:${uid}`) return true;
-      return false;
-    });
+    if (viewAsFranchisee) {
+      const uid = viewAsFranchisee.userId;
+      return dashboardOrders.filter((o) => orderMatchesFranchiseeBusinessDash(o, uid));
+    }
+    return dashboardOrders;
   }, [dashboardOrders, viewAsFranchisee]);
 
   /**
@@ -1034,26 +1036,25 @@ export default function Dashboard({
     return listAccountingLedgerEntries();
   }, [viewAsFranchisee, financeTick, userRole]);
 
-  /** 加盟主視角：支出＝批貨＋流水；直營等非加盟視角：支出僅流水帳 */
-  const franchiseOperatingExpenseModel = useMemo(
-    () => usesFranchiseeOperatingExpenseModel({ userRole, viewAsFranchisee }),
-    [userRole, viewAsFranchisee],
+  /** 「銷售數據」區：加盟 scope 為該店加盟主 userId；總部直營為 null */
+  const franchiseStallSalesBoardOwnerUserId = useMemo(
+    () => resolveFranchiseScopeOwnerUserId(viewAsFranchisee),
+    [viewAsFranchisee, userRole],
   );
 
-  /** 「銷售數據」區：加盟視角為該店加盟主 userId；總部直營為 null */
-  const franchiseStallSalesBoardOwnerUserId = useMemo(() => {
-    if (!franchiseOperatingExpenseModel) return null;
-    if (viewAsFranchisee) return viewAsFranchisee.userId;
-    const ctx = getDataScopeContext();
-    const m = ctx.scopeId.match(/^scope:franchisee:(.+)$/);
-    return m?.[1]?.trim() || null;
-  }, [franchiseOperatingExpenseModel, viewAsFranchisee]);
+  /** 加盟主視角：支出＝批貨＋流水；直營等非加盟視角：支出僅流水帳 */
+  const franchiseOperatingExpenseModel = useMemo(
+    () =>
+      franchiseStallSalesBoardOwnerUserId != null ||
+      usesFranchiseeOperatingExpenseModel({ userRole, viewAsFranchisee }),
+    [franchiseStallSalesBoardOwnerUserId, userRole, viewAsFranchisee],
+  );
 
   /** 總部直營：每日經濟指標（加盟視角略過以降低不必要計算） */
   const hqDirectStallEconomicsByYmd = useMemo(() => {
-    if (franchiseOperatingExpenseModel) return new Map<string, DirectStallDayEconomics>();
+    if (franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
     return buildDirectStallEconomicsByYmd(effectiveOrders, HQ_STALL_VIEW);
-  }, [effectiveOrders, franchiseOperatingExpenseModel, orderTick]);
+  }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick]);
 
   /** 指定加盟店：已完成盤點之訂單＋孤立銷售紀錄（加盟零售價視角） */
   const franchiseStoreEconomicsByYmd = useMemo(() => {
@@ -1282,10 +1283,9 @@ export default function Dashboard({
     orderTick,
   ]);
 
-  const showFranchiseStallSalesBoard =
-    franchiseOperatingExpenseModel && franchiseStallSalesBoardOwnerUserId != null;
+  const showFranchiseStallSalesBoard = franchiseStallSalesBoardOwnerUserId != null;
   const showStallSalesBoard =
-    (!franchiseOperatingExpenseModel && !viewAsFranchisee) || showFranchiseStallSalesBoard;
+    (realIsAdmin && !viewAsFranchisee) || showFranchiseStallSalesBoard;
 
   const saveWeekdayBaseline = useCallback(() => {
     if (weekdayChainFocusIdx === null) return;
@@ -1303,8 +1303,11 @@ export default function Dashboard({
       const ymd = stallCountAttributeYmd(o);
       return Boolean(ymd && ymd >= startYmd && ymd <= endYmd);
     });
+    const stallRetailView: SupplyRetailView = franchiseStallSalesBoardOwnerUserId
+      ? FRANCHISE_STALL_VIEW
+      : HQ_STALL_VIEW;
     const revenue = stallCompleted.reduce(
-      (s, o) => s + (getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW) ?? 0),
+      (s, o) => s + (getStallDisplaySoldAtRetail(o, stallRetailView) ?? 0),
       0,
     );
     const procurementCost = stallCompleted.reduce((s, o) => s + o.totalAmount, 0);
@@ -1326,7 +1329,7 @@ export default function Dashboard({
       netRate: pct(net, revenue),
       completed: stallCompleted,
     };
-  }, [effectiveOrders, franchiseOperatingExpenseModel, ledgerForView, isAdmin, summaryRange, userRole, viewAsFranchisee]);
+  }, [effectiveOrders, franchiseOperatingExpenseModel, franchiseStallSalesBoardOwnerUserId, ledgerForView, isAdmin, summaryRange, userRole, viewAsFranchisee]);
 
   /** 本店／view-as：與總部相同，依「建單日」落在區間內之已完成訂單（僅 effectiveOrders） */
   const nonAdminProductChartOrders = useMemo(() => {
