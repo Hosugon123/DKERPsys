@@ -16,7 +16,12 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
 import { getDefaultMainNavIdsForRole, type MainNavId } from '../lib/sidebarNavConfig';
-import { applySavedNavOrder, loadNavOrderForRole, saveNavOrderForRole } from '../lib/sidebarNavOrderStorage';
+import {
+  applySavedNavOrder,
+  flushNavOrderRemoteSync,
+  loadNavOrderForRole,
+  saveNavOrderForRole,
+} from '../lib/sidebarNavOrderStorage';
 import { cn } from '../lib/utils';
 
 interface SidebarProps {
@@ -186,6 +191,7 @@ export default function Sidebar({
                 onClick={() => {
                   setReorderMode(false);
                   setDragFrom(null);
+                  void flushNavOrderRemoteSync();
                 }}
                 className="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-lg bg-amber-600/20 text-amber-200 border border-amber-600/50 hover:bg-amber-600/30"
               >

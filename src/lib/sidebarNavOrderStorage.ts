@@ -1,4 +1,29 @@
+import { getStorageMode } from '../services/storageMode';
+
 const PREFIX = 'dongshan_sidebar_main_nav_order_v1';
+
+let remotePushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** remote 模式：排序寫入本機後延遲推送整包 bundle，避免重整時被舊雲端覆蓋 */
+function scheduleRemoteBundlePush() {
+  if (getStorageMode() !== 'remote') return;
+  if (remotePushTimer) clearTimeout(remotePushTimer);
+  remotePushTimer = setTimeout(() => {
+    remotePushTimer = null;
+    void import('../services/remoteSyncHub').then((m) => m.syncRemoteAfterDirectLocalMutation());
+  }, 400);
+}
+
+/** 立即推送（例如按「完成」後），避免使用者馬上重整時尚未 PUT */
+export async function flushNavOrderRemoteSync(): Promise<void> {
+  if (getStorageMode() !== 'remote') return;
+  if (remotePushTimer) {
+    clearTimeout(remotePushTimer);
+    remotePushTimer = null;
+  }
+  const { syncRemoteAfterDirectLocalMutation } = await import('../services/remoteSyncHub');
+  await syncRemoteAfterDirectLocalMutation();
+}
 
 function keyForRole(role: string): string {
   if (role === 'admin' || role === 'franchisee' || role === 'employee') {
@@ -42,6 +67,7 @@ export function loadNavOrderForRole(role: string): string[] | null {
 export function saveNavOrderForRole(role: string, orderIds: string[]) {
   try {
     localStorage.setItem(keyForRole(role), JSON.stringify(orderIds));
+    scheduleRemoteBundlePush();
   } catch {
     /* ignore */
   }
@@ -50,6 +76,7 @@ export function saveNavOrderForRole(role: string, orderIds: string[]) {
 export function clearNavOrderForRole(role: string) {
   try {
     localStorage.removeItem(keyForRole(role));
+    scheduleRemoteBundlePush();
   } catch {
     /* ignore */
   }
