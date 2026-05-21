@@ -255,6 +255,27 @@ function computeOrderDetailLineMetrics(
   };
 }
 
+/**
+ * 訂單列表「預估金額」：已完成盤點用快照 estTotal；否則依叫貨列＋扣庫參考剩餘推算帶出零售預估（與明細表一致）。
+ */
+function plannedEstimatedRetailFromOrder(raw: RawOrder, retailView: SupplyRetailView): number | null {
+  const fromStall = getStallDisplayRetailEstAndRemain(raw, retailView);
+  if (fromStall != null) return fromStall.estTotal;
+  const lines = raw.lines;
+  if (!lines?.length) return null;
+  const stallSnap = mergeOrderStallSnapshot(raw);
+  const carrySnap = loadRemainSnapshotForOrderManagementDisplay(raw);
+  let total = 0;
+  let any = false;
+  for (const line of lines) {
+    const item = getSupplyItem(line.productId, retailView);
+    if (!item || isConsumableItem(item)) continue;
+    any = true;
+    total += computeOrderDetailLineMetrics(line, stallSnap, carrySnap, retailView).retailEstSub;
+  }
+  return any ? Math.round(total * 100) / 100 : null;
+}
+
 /** 調整貨量時列小計用：員工顯示預估零售單價，其餘身分用訂單批價。 */
 function pickingLineUnitForDisplay(
   line: OrderHistoryLine,
@@ -384,7 +405,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [draftTo, setDraftTo] = useState('');
   const datePopoverRef = useRef<HTMLDivElement>(null);
   /** 出貨：兩階段確認 */
-  const [shipModal, setShipModal] = useState<null | { id: string; step: 1 | 2 }>(null);
+  const [shipModal, setShipModal] = useState<null | { id: string }>(null);
   /** 已出貨改回待出貨 */
   const [revertModal, setRevertModal] = useState<null | { id: string }>(null);
   const [cancelModal, setCancelModal] = useState<null | { id: string }>(null);
@@ -446,7 +467,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         : 0;
       const netPayableAmount = Math.max(0, payable - selfSuppliedDeduction);
       const remainAmount = stallRetailSummary?.remGoodsValue ?? null;
-      const estimatedAmount = stallRetailSummary?.estTotal ?? null;
+      const estimatedAmount = plannedEstimatedRetailFromOrder(r, view);
       const financials: OrderFinancialSummary = {
         procurementAmount: payable,
         selfSuppliedDeduction,
@@ -623,7 +644,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     e.stopPropagation();
     const r = rawList.find((o) => o.id === orderId);
     if (!r || !canEditOrderInList(r, userRole)) return;
-    setShipModal({ id: orderId, step: 1 });
+    setShipModal({ id: orderId });
   };
 
   const setStatus = (id: string, status: '待出貨' | '已完成' | '已取消') => {
@@ -1239,111 +1260,112 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
               {isExpanded && (
                 <div className="border-t border-zinc-800 bg-zinc-950 p-4 sm:p-6 animate-in slide-in-from-top-2">
                   <div className="min-w-0 w-full max-w-full">
-                    <div className="mb-2.5 rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                      <div className="min-w-0 space-y-1.5 flex-1">
-                        <h4 className="text-[1.330875rem] font-medium text-zinc-400 uppercase tracking-widest shrink-0">
-                          訂單品項明細
-                        </h4>
-                      </div>
+                    <div className="mb-3 w-full min-w-0 space-y-2.5">
+                      <h4 className="text-sm font-medium text-zinc-500 uppercase tracking-widest">
+                        訂單品項明細
+                      </h4>
                       {(order.status === '待出貨' || order.status === '已完成') && canEdit && (
-                        <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:min-w-0 sm:flex-1">
-                          {!isPickingThis &&
-                            !isPriceAdjustThis &&
-                            (stallLocked ? (
-                              <span className="text-[1.14075rem] text-zinc-500 shrink-0 text-left sm:text-right w-full sm:w-auto">
-                                已完成盤點押記，無法調整貨量（總部可用「更正批價」修正單價）
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => startPickingEdit(e, order.id)}
-                                className="h-9 min-h-9 px-3 rounded-lg bg-amber-600/90 text-zinc-950 text-[1.330875rem] font-medium hover:bg-amber-500 shrink-0"
-                              >
-                                調整貨量
-                              </button>
-                            ))}
-                          {isHeadquarters &&
-                            raw &&
-                            !isPickingThis &&
-                            !isPriceAdjustThis &&
-                            (order.status === '待出貨' || order.status === '已完成') && (
-                              <button
-                                type="button"
-                                onClick={(e) => startPriceAdjust(e, order.id)}
-                                className="h-9 min-h-9 px-3 rounded-lg border border-amber-500/50 bg-amber-950/30 text-amber-200 text-[1.330875rem] font-medium hover:bg-amber-950/50 shrink-0"
-                              >
-                                更正批價
-                              </button>
-                            )}
-                          {order.status === '待出貨' ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => openShipDialog(e, order.id)}
-                                disabled={orderEditLocked}
-                                title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
-                                className="h-9 min-h-9 px-3 rounded-lg bg-emerald-600 text-white text-[1.330875rem] font-semibold hover:bg-emerald-500 shadow-md shadow-emerald-900/25 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
-                              >
-                                標記出貨
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (isHeadquarters) setDeleteModal({ id: order.id });
-                                  else setCancelModal({ id: order.id });
-                                }}
-                                disabled={orderEditLocked}
-                                title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
-                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-[1.330875rem] font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                              >
-                                {isHeadquarters ? '刪除訂單' : '取消訂單'}
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setRevertModal({ id: order.id });
-                                }}
-                                disabled={stallLocked || orderEditLocked}
-                                title={
-                                  orderEditLocked
-                                    ? '請先儲存或放棄「調整貨量／更正批價」'
-                                    : stallLocked
-                                      ? '此單已完成盤點押記，無法改回待出貨'
-                                      : undefined
-                                }
-                                className="h-9 min-h-9 px-3 rounded-lg border border-zinc-600 bg-zinc-800/50 text-zinc-200 text-[1.330875rem] font-medium hover:bg-zinc-800 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800/50"
-                              >
-                                改回待出貨
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (isHeadquarters) setDeleteModal({ id: order.id });
-                                  else setCancelModal({ id: order.id });
-                                }}
-                                disabled={orderEditLocked}
-                                title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
-                                className="h-9 min-h-9 px-3 rounded-lg border border-rose-500/50 bg-rose-950/40 text-rose-200 text-[1.330875rem] font-medium hover:bg-rose-950/70 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                              >
-                                {isHeadquarters ? '刪除訂單' : '取消訂單'}
-                              </button>
-                            </>
+                        <div className="w-full min-w-0 flex flex-col gap-2">
+                          {!isPickingThis && !isPriceAdjustThis && stallLocked && (
+                            <p className="text-xs text-zinc-500 leading-snug">
+                              已完成盤點押記，無法調整貨量（總部可用「更正批價」修正單價）
+                            </p>
                           )}
+                          <div className="w-full min-w-0 rounded-xl border border-zinc-800/90 bg-zinc-900/50 p-2.5 sm:p-3">
+                            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600 mb-2">
+                              訂單操作
+                            </p>
+                            <div className="grid w-full grid-cols-2 gap-1.5 sm:grid-cols-[repeat(auto-fit,minmax(7.25rem,1fr))]">
+                              {!isPickingThis && !isPriceAdjustThis && !stallLocked && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => startPickingEdit(e, order.id)}
+                                  className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-amber-600/50 bg-amber-600/20 px-2 text-sm font-semibold text-amber-100 transition-colors hover:bg-amber-600/30 hover:border-amber-500/55 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  調整貨量
+                                </button>
+                              )}
+                              {!isPickingThis &&
+                                !isPriceAdjustThis &&
+                                isHeadquarters &&
+                                raw &&
+                                (order.status === '待出貨' || order.status === '已完成') && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => startPriceAdjust(e, order.id)}
+                                    className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-amber-600/50 bg-amber-600/20 px-2 text-sm font-semibold text-amber-100 transition-colors hover:bg-amber-600/30 hover:border-amber-500/55 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    更正批價
+                                  </button>
+                                )}
+                              {order.status === '待出貨' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => openShipDialog(e, order.id)}
+                                    disabled={orderEditLocked}
+                                    title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
+                                    className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-amber-600/50 bg-amber-600/20 px-2 text-sm font-semibold text-amber-100 transition-colors hover:bg-amber-600/30 hover:border-amber-500/55 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    標記出貨
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isHeadquarters) setDeleteModal({ id: order.id });
+                                      else setCancelModal({ id: order.id });
+                                    }}
+                                    disabled={orderEditLocked}
+                                    title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
+                                    className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-rose-700/70 bg-rose-800/85 px-2 text-sm font-medium text-rose-50 transition-colors hover:bg-rose-700 hover:border-rose-600/80 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    {isHeadquarters ? '刪除訂單' : '取消訂單'}
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRevertModal({ id: order.id });
+                                    }}
+                                    disabled={stallLocked || orderEditLocked}
+                                    title={
+                                      orderEditLocked
+                                        ? '請先儲存或放棄「調整貨量／更正批價」'
+                                        : stallLocked
+                                          ? '此單已完成盤點押記，無法改回待出貨'
+                                          : undefined
+                                    }
+                                    className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-zinc-700/90 bg-zinc-950/70 px-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    改回待出貨
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isHeadquarters) setDeleteModal({ id: order.id });
+                                      else setCancelModal({ id: order.id });
+                                    }}
+                                    disabled={orderEditLocked}
+                                    title={orderEditLocked ? '請先儲存或放棄「調整貨量／更正批價」' : undefined}
+                                    className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-rose-700/70 bg-rose-800/85 px-2 text-sm font-medium text-rose-50 transition-colors hover:bg-rose-700 hover:border-rose-600/80 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    {isHeadquarters ? '刪除訂單' : '取消訂單'}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
 
                     {isPickingThis && (
                       <div className="mb-2.5 space-y-2">
-                        <p className="text-[1.14075rem] text-amber-500/90 font-medium">
-                          揀貨模式：＋/－ 或輸入數字；每列 0～{PICK_MAX_Q.toLocaleString()}，可高於下單量。
-                        </p>
                         {pickingError && (
                           <p className="text-[1.330875rem] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
                             {pickingError}
@@ -1376,9 +1398,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
                     {isPriceAdjustThis && (
                       <div className="mb-2.5 space-y-2">
-                        <p className="text-[1.14075rem] text-amber-500/90 font-medium leading-relaxed">
-                          更正批價：僅修改「批價（每份）」；各列數量不變。適用菜價事後調整；已出貨或已盤點之訂單亦可，更正後儀表板與叫貨合計會依新單價重算。
-                        </p>
                         {priceAdjustError && (
                           <p className="text-[1.330875rem] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
                             {priceAdjustError}
@@ -1737,35 +1756,49 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 </td>
                               </>
                             ) : (
-                              <>
-                                <td
-                                  colSpan={showOrderProcurementSubtotalCol ? 5 : 4}
-                                  className="py-2.5 sm:py-4 px-2 sm:px-3 text-right text-[1.14075rem] sm:text-[1.330875rem] font-medium text-zinc-400"
-                                >
-                                  {hideOrderBatchPriceFromEmployee
-                                    ? '零售預估合計'
-                                    : '叫貨合計（下單）'}
-                                </td>
-                                {showOrderProcurementSubtotalCol && (
-                                  <td className="py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-[1.521rem] sm:text-[1.711125rem] font-bold text-emerald-400/95 tabular-nums whitespace-nowrap">
-                                    $ {(orderRetailEstFooterTotal ?? 0).toLocaleString('zh-TW')}
-                                  </td>
-                                )}
-                                <td
-                                  className={cn(
-                                    'py-2.5 sm:py-4 px-1.5 sm:px-2 text-right text-[1.521rem] sm:text-[1.711125rem] font-bold tabular-nums whitespace-nowrap',
-                                    hideOrderBatchPriceFromEmployee
-                                      ? 'text-emerald-400/95'
-                                      : 'text-amber-500',
+                              <td
+                                colSpan={showOrderProcurementSubtotalCol ? 7 : 5}
+                                className="py-2.5 sm:py-4 px-3 sm:px-4"
+                              >
+                                <div className="flex flex-wrap items-baseline justify-start gap-x-4 gap-y-2 text-left">
+                                  {showOrderProcurementSubtotalCol ? (
+                                    <>
+                                      <span className="text-[1.14075rem] sm:text-[1.330875rem] font-medium text-zinc-400 shrink-0">
+                                        預估金額
+                                      </span>
+                                      <span className="text-[1.521rem] sm:text-[1.711125rem] font-bold tabular-nums text-emerald-400/95 whitespace-nowrap">
+                                        $ {(orderRetailEstFooterTotal ?? 0).toLocaleString('zh-TW')}
+                                      </span>
+                                      <span className="text-[1.14075rem] sm:text-[1.330875rem] font-medium text-zinc-400 shrink-0">
+                                        叫貨金額
+                                      </span>
+                                      <span className="text-[1.521rem] sm:text-[1.711125rem] font-bold tabular-nums text-amber-500 whitespace-nowrap">
+                                        $ {Math.round(order.amount).toLocaleString('zh-TW')}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-[1.14075rem] sm:text-[1.330875rem] font-medium text-zinc-400 shrink-0">
+                                        {hideOrderBatchPriceFromEmployee ? '零售預估合計' : '預估金額'}
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          'text-[1.521rem] sm:text-[1.711125rem] font-bold tabular-nums whitespace-nowrap',
+                                          hideOrderBatchPriceFromEmployee
+                                            ? 'text-emerald-400/95'
+                                            : 'text-amber-500',
+                                        )}
+                                      >
+                                        ${' '}
+                                        {(hideOrderBatchPriceFromEmployee
+                                          ? orderDetailRetailEstFooterEmployee ?? 0
+                                          : order.amount
+                                        ).toLocaleString('zh-TW')}
+                                      </span>
+                                    </>
                                   )}
-                                >
-                                  ${' '}
-                                  {(hideOrderBatchPriceFromEmployee
-                                    ? orderDetailRetailEstFooterEmployee ?? 0
-                                    : order.amount
-                                  ).toLocaleString('zh-TW')}
-                                </td>
-                              </>
+                                </div>
+                              </td>
                             )}
                           </tr>
                         </tfoot>
@@ -1797,58 +1830,30 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
             <h3 id="ship-dialog-title" className="text-lg font-semibold text-[#f5f2ed]">
               標記為已出貨
             </h3>
-            {shipModal.step === 1 ? (
-              <>
-                <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
-                  即將把訂單 <span className="font-mono text-zinc-300">{shipModalOrder.id}</span> 自「待出貨」改為
-                  <span className="text-emerald-400/90">「已出貨」</span>。請先核對金額與品項。
-                </p>
-                <p className="mt-2 text-sm text-zinc-500">
-                  合計 <span className="text-amber-500/90 font-medium tabular-nums">$ {shipModalOrder.totalAmount.toLocaleString()}</span>
-                </p>
-                <p className="mt-3 text-xs text-amber-500/80">點「下一步」後會再要求您確認一次，避免誤觸。</p>
-                <div className="mt-6 flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShipModal(null)}
-                    className="px-4 py-2.5 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 text-sm font-medium"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShipModal((m) => (m ? { ...m, step: 2 } : null))}
-                    className="px-4 py-2.5 rounded-lg bg-amber-600 text-zinc-950 text-sm font-medium hover:bg-amber-500"
-                  >
-                    下一步
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="mt-3 text-sm text-zinc-300 leading-relaxed">
-                  最後確認：是否將此單標示為
-                  <span className="text-emerald-400/90">已出貨</span>？
-                </p>
-                <p className="mt-2 text-xs text-zinc-500">確認後仍可在本頁以「改回待出貨」復原狀態。</p>
-                <div className="mt-6 flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShipModal((m) => (m ? { ...m, step: 1 } : null))}
-                    className="px-4 py-2.5 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 text-sm font-medium"
-                  >
-                    上一步
-                  </button>
-                  <button
-                    type="button"
-                    onClick={applyShipped}
-                    className="px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500"
-                  >
-                    確認出貨
-                  </button>
-                </div>
-              </>
-            )}
+            <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
+              即將把訂單 <span className="font-mono text-zinc-300">{shipModalOrder.id}</span> 自「待出貨」改為
+              <span className="text-emerald-400/90">「已出貨」</span>。請先核對金額與品項。
+            </p>
+            <p className="mt-2 text-sm text-zinc-500">
+              合計 <span className="text-amber-500/90 font-medium tabular-nums">$ {shipModalOrder.totalAmount.toLocaleString()}</span>
+            </p>
+            <p className="mt-2 text-xs text-zinc-500">確認後仍可在本頁以「改回待出貨」復原狀態。</p>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShipModal(null)}
+                className="px-4 py-2.5 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 text-sm font-medium"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={applyShipped}
+                className="px-4 py-2.5 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500"
+              >
+                確認出貨
+              </button>
+            </div>
           </div>
         </div>
       )}
