@@ -15,6 +15,7 @@ import {
   Database,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
+import { getDefaultMainNavIdsForRole, type MainNavId } from '../lib/sidebarNavConfig';
 import { applySavedNavOrder, loadNavOrderForRole, saveNavOrderForRole } from '../lib/sidebarNavOrderStorage';
 import { cn } from '../lib/utils';
 
@@ -28,41 +29,43 @@ interface SidebarProps {
   onLogout: () => void;
 }
 
-const adminItems = [
-  { id: 'dashboard', label: '營運概況', icon: LayoutDashboard },
-  { id: 'orders', label: '訂單管理', icon: ShoppingCart },
-  { id: 'products', label: '產品與成本庫存', icon: Package },
-  { id: 'procurement', label: '批貨與下單', icon: ShoppingBasket },
-  { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
-  { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
-  { id: 'accounting', label: '收入與支出', icon: Wallet },
-] as const;
+const navItemById: Record<
+  MainNavId,
+  { id: MainNavId; label: string; icon: typeof LayoutDashboard }
+> = {
+  dashboard: { id: 'dashboard', label: '營運概況', icon: LayoutDashboard },
+  orders: { id: 'orders', label: '訂單管理', icon: ShoppingCart },
+  products: { id: 'products', label: '產品與成本庫存', icon: Package },
+  procurement: { id: 'procurement', label: '批貨與下單', icon: ShoppingBasket },
+  stallInventory: { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
+  salesRecord: { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
+  accounting: { id: 'accounting', label: '收入與支出', icon: Wallet },
+};
 
-const franchiseeItems = [
-  { id: 'dashboard', label: '我的營運概況', icon: LayoutDashboard },
-  { id: 'procurement', label: '批貨與下單', icon: ShoppingCart },
-  { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
-  { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
-  { id: 'accounting', label: '收入與支出', icon: Wallet },
-  { id: 'orders', label: '訂單管理', icon: ListOrdered },
-] as const;
+/** 加盟主與總部部分標籤／圖示不同 */
+const franchiseeNavOverrides: Partial<
+  Record<MainNavId, { label: string; icon: typeof LayoutDashboard }>
+> = {
+  dashboard: { label: '我的營運概況', icon: LayoutDashboard },
+  procurement: { label: '批貨與下單', icon: ShoppingCart },
+  orders: { label: '訂單管理', icon: ListOrdered },
+};
 
-const employeeItems = [
-  { id: 'orders', label: '訂單管理', icon: ListOrdered },
-  { id: 'stallInventory', label: '攤上盤點', icon: Boxes },
-  { id: 'salesRecord', label: '銷售紀錄', icon: Receipt },
-  { id: 'accounting', label: '收入與支出', icon: Wallet },
-] as const;
+const employeeNavOverrides: Partial<
+  Record<MainNavId, { label: string; icon: typeof LayoutDashboard }>
+> = {
+  orders: { label: '訂單管理', icon: ListOrdered },
+};
 
-type NavItem =
-  | (typeof adminItems)[number]
-  | (typeof franchiseeItems)[number]
-  | (typeof employeeItems)[number];
+type NavItem = { id: MainNavId; label: string; icon: typeof LayoutDashboard };
 
 function defaultItemsForRole(userRole: string): NavItem[] {
-  if (userRole === 'admin') return [...adminItems];
-  if (userRole === 'franchisee') return [...franchiseeItems];
-  return [...employeeItems];
+  const overrides = userRole === 'franchisee' ? franchiseeNavOverrides : userRole === 'employee' ? employeeNavOverrides : null;
+  return getDefaultMainNavIdsForRole(userRole).map((id) => {
+    const base = navItemById[id];
+    const o = overrides?.[id];
+    return o ? { ...base, label: o.label, icon: o.icon } : base;
+  });
 }
 
 function arrayMove<T>(list: T[], from: number, to: number): T[] {

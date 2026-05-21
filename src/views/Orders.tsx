@@ -1272,9 +1272,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                             </p>
                           )}
                           <div className="w-full min-w-0 rounded-xl border border-zinc-800/90 bg-zinc-900/50 p-2.5 sm:p-3">
-                            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600 mb-2">
-                              訂單操作
-                            </p>
                             <div className="grid w-full grid-cols-2 gap-1.5 sm:grid-cols-[repeat(auto-fit,minmax(7.25rem,1fr))]">
                               {!isPickingThis && !isPriceAdjustThis && !stallLocked && (
                                 <button

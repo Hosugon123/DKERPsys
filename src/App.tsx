@@ -28,6 +28,7 @@ import {
   type AuthSession,
 } from './lib/authSession';
 import { serializeDongshanDataBundle } from './lib/appDataBundle';
+import { getDefaultLandingViewForRole } from './lib/sidebarNavConfig';
 import { initRemoteSyncOnAppLoad, pushRemoteIfLocalBundleChangedSince } from './services/apiService';
 import { getStorageMode } from './services/storageMode';
 
@@ -82,12 +83,12 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
-    // 切換登入狀態時重置頁面：員工預設進訂單管理，其餘角色進儀表板。
+    // 切換登入狀態時開啟主選單排序後的第一頁（與側邊欄「調整導覽列順序」一致）
     if (!session) {
       setCurrentView('dashboard');
       return;
     }
-    setCurrentView(session.role === 'employee' ? 'orders' : 'dashboard');
+    setCurrentView(getDefaultLandingViewForRole(session.role));
   }, [session]);
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export default function App() {
 
   useEffect(() => {
     if (userRole !== 'admin' && currentView === 'permissions') {
-      setCurrentView('dashboard');
+      setCurrentView(getDefaultLandingViewForRole(userRole));
     }
   }, [userRole, currentView]);
 
