@@ -287,6 +287,58 @@ function pickingLineUnitForDisplay(
   return it ? estimatedRetailPerPackage(it) : 0;
 }
 
+/** 編輯品項表時固定於 Topbar 下方（用 fixed，避免訂單卡 overflow-hidden 使 sticky 失效） */
+function OrderEditActionBar({
+  error,
+  summary,
+  saveLabel,
+  onSave,
+  onCancel,
+}: {
+  error: string | null;
+  summary?: string;
+  saveLabel: string;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="fixed left-0 right-0 z-[25] top-[calc(env(safe-area-inset-top)+4rem)] border-b border-zinc-700/80 bg-zinc-950/95 backdrop-blur-md shadow-[0_8px_24px_rgba(0,0,0,0.35)] px-3 sm:px-4 md:px-6 lg:px-8 py-3"
+      role="toolbar"
+      aria-label={`${saveLabel}操作列`}
+    >
+      {error && (
+        <p className="mb-2 text-sm text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between max-w-[100rem] mx-auto w-full">
+        {summary ? (
+          <p className="text-sm text-zinc-400 tabular-nums">{summary}</p>
+        ) : (
+          <span className="hidden sm:block" aria-hidden />
+        )}
+        <div className="flex gap-2 w-full sm:w-auto sm:shrink-0">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 sm:flex-none py-2.5 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-sm font-medium hover:bg-zinc-800"
+          >
+            放棄
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            className="flex-1 sm:flex-none py-2.5 px-4 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500"
+          >
+            {saveLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildOrderExpandedDetailLines(
   order: OrderRow,
   raw: RawOrder | undefined,
@@ -850,8 +902,35 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const cancelModalOrder = cancelModal ? rawList.find((o) => o.id === cancelModal.id) ?? null : null;
   const deleteModalOrder = deleteModal ? rawList.find((o) => o.id === deleteModal.id) ?? null : null;
 
+  const pickingDockSummary = useMemo(() => {
+    if (!pickingOrderId) return null;
+    const pickKept = pickingLines.filter((l) => l.qty > 0);
+    const pickCount = pickKept.reduce((s, l) => s + l.qty, 0);
+    const pickTotal =
+      Math.round(
+        pickKept.reduce(
+          (s, l) => s + pickingLineUnitForDisplay(l, userRole, supplyRetailView) * l.qty,
+          0,
+        ) * 100,
+      ) / 100;
+    return {
+      pickCount,
+      pickTotal,
+      totalLabel: hideOrderBatchPriceFromEmployee ? '零售預估合計' : '實出合計',
+    };
+  }, [pickingOrderId, pickingLines, userRole, supplyRetailView, hideOrderBatchPriceFromEmployee]);
+
+  const priceAdjustDockSummary = useMemo(() => {
+    if (!priceAdjustOrderId) return null;
+    const kept = priceAdjustLines.filter((l) => l.qty > 0);
+    const total = Math.round(kept.reduce((s, l) => s + l.unitPrice * l.qty, 0) * 100) / 100;
+    return { total };
+  }, [priceAdjustOrderId, priceAdjustLines]);
+
+  const orderEditDockActive = pickingOrderId != null || priceAdjustOrderId != null;
+
   return (
-    <div className="space-y-6 pb-24">
+    <div className={cn('space-y-6 pb-24', orderEditDockActive && 'pb-32')}>
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -1130,7 +1209,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           return (
             <div
               key={order.id}
-              className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden transition-colors"
+              className={cn(
+                'bg-zinc-900 border border-zinc-800 rounded-2xl transition-colors',
+                isExpanded ? 'overflow-visible' : 'overflow-hidden',
+              )}
             >
               {/* Order Header / Summary：左側＋金額可點展開；刪除鈕僅超級管理員，浮在右上角 */}
               <div
@@ -1361,68 +1443,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       )}
                     </div>
 
-                    {isPickingThis && (
-                      <div className="mb-2.5 space-y-2">
-                        {pickingError && (
-                          <p className="text-[1.330875rem] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
-                            {pickingError}
-                          </p>
-                        )}
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              savePickingEdit(order.id);
-                            }}
-                            className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-[1.330875rem] font-semibold hover:bg-amber-500"
-                          >
-                            儲存貨量
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              exitPickingEdit();
-                            }}
-                            className="py-2 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-[1.330875rem] hover:bg-zinc-800"
-                          >
-                            放棄
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {isPriceAdjustThis && (
-                      <div className="mb-2.5 space-y-2">
-                        {priceAdjustError && (
-                          <p className="text-[1.330875rem] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2">
-                            {priceAdjustError}
-                          </p>
-                        )}
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              savePriceAdjust(order.id);
-                            }}
-                            className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-[1.330875rem] font-semibold hover:bg-amber-500"
-                          >
-                            儲存批價
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              exitPriceAdjust();
-                            }}
-                            className="py-2 px-4 rounded-lg border border-zinc-600 text-zinc-300 text-[1.330875rem] hover:bg-zinc-800"
-                          >
-                            放棄
-                          </button>
-                        </div>
-                      </div>
+                    {(isPickingThis || isPriceAdjustThis) && (
+                      <div className="h-[5.75rem] shrink-0" aria-hidden />
                     )}
 
                     <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto overscroll-x-contain touch-[pan-x_pan-y] w-full min-w-0 pb-px">
@@ -1809,6 +1831,25 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           );
         })}
       </div>
+
+      {pickingOrderId && pickingDockSummary && (
+        <OrderEditActionBar
+          error={pickingError}
+          summary={`${pickingDockSummary.pickCount} 份 · ${pickingDockSummary.totalLabel} $ ${pickingDockSummary.pickTotal.toLocaleString()}`}
+          saveLabel="儲存貨量"
+          onSave={() => savePickingEdit(pickingOrderId)}
+          onCancel={() => exitPickingEdit()}
+        />
+      )}
+      {priceAdjustOrderId && priceAdjustDockSummary && (
+        <OrderEditActionBar
+          error={priceAdjustError}
+          summary={`批價更正後合計 $ ${priceAdjustDockSummary.total.toLocaleString()}`}
+          saveLabel="儲存批價"
+          onSave={() => savePriceAdjust(priceAdjustOrderId)}
+          onCancel={() => exitPriceAdjust()}
+        />
+      )}
 
       {shipModal && shipModalOrder && (
         <div

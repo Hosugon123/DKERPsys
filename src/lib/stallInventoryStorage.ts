@@ -64,7 +64,7 @@ function emptyDay(): DaySnapshot {
   for (const it of getAllSupplyItems()) {
     lines[it.id] = { out: '', remain: '' };
   }
-  return { lines, actualRevenue: '', updatedAt: new Date().toISOString() };
+  return { lines, actualRevenue: '', revenueGapAmount: '0', updatedAt: new Date().toISOString() };
 }
 
 function loadAll(): StoreV1 {
@@ -91,7 +91,12 @@ function mergeDayWithCurrentCatalog(snap: DaySnapshot): DaySnapshot {
   for (const it of getAllSupplyItems()) {
     if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
   }
-  return { ...snap, lines };
+  const gapAmt = (snap.revenueGapAmount ?? '').trim();
+  return {
+    ...snap,
+    lines,
+    revenueGapAmount: gapAmt === '' ? '0' : snap.revenueGapAmount,
+  };
 }
 
 export function loadDay(ymdStr: string): DaySnapshot {

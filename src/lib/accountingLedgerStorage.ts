@@ -14,7 +14,7 @@ export const ACCOUNTING_CATEGORIES = [
   '雜項',
   '滷料',
   '食材支出',
-  '總店營業支出',
+  '直營店營業支出',
   '店外收入',
 ] as const;
 
@@ -119,16 +119,25 @@ export function deriveLedgerSqlFields(
   return { expenseDomain: 'general', normalizedSubKey: undefined };
 }
 
+const LEGACY_DIRECT_STORE_EXPENSE_LABEL = '總店營業支出';
+
+function normalizeLedgerCategory(category: string): AccountingCategory {
+  if (category === LEGACY_DIRECT_STORE_EXPENSE_LABEL) return '直營店營業支出';
+  return category as AccountingCategory;
+}
+
 function coerceEntry(e: AccountingLedgerEntry & { updatedAt?: string }): AccountingLedgerEntry {
+  const category = normalizeLedgerCategory(String(e.category));
   const needsSub =
-    (e.category === FOOD_EXPENSE_CATEGORY || e.category === MARINADE_EXPENSE_CATEGORY) &&
+    (category === FOOD_EXPENSE_CATEGORY || category === MARINADE_EXPENSE_CATEGORY) &&
     e.subCategory &&
     String(e.subCategory).trim();
   const sub = needsSub ? String(e.subCategory).trim() : undefined;
   const createdAt = e.createdAt;
-  const { expenseDomain, normalizedSubKey } = deriveLedgerSqlFields(e.category, sub);
+  const { expenseDomain, normalizedSubKey } = deriveLedgerSqlFields(category, sub);
   return {
     ...e,
+    category,
     subCategory: sub,
     expenseDomain,
     normalizedSubKey,
@@ -202,9 +211,9 @@ export function isCurrentMarinadeSubOption(s: string | undefined): boolean {
   return s !== undefined && (SEASONING_SUBS as readonly string[]).includes(s);
 }
 
-/** 新增「滷料」支出：滷料配料或已知舊版字串 */
+/** 新增「滷料」支出：子類別可不填；若有填則須為滷料配料或已知舊版字串 */
 export function isValidMarinadeSubForEntry(s: string | undefined): boolean {
-  if (!s || !String(s).trim()) return false;
+  if (!s || !String(s).trim()) return true;
   const t = String(s).trim();
   if ((SEASONING_SUBS as readonly string[]).includes(t)) return true;
   if ((LEGACY_SEASONING_SUBS as readonly string[]).includes(t)) return true;
@@ -218,8 +227,8 @@ export function canSaveMarinadeSubWhenEditing(
   previous: string | undefined
 ): boolean {
   const nt = next?.trim() ?? '';
+  if (!nt) return true;
   const pt = previous?.trim() ?? '';
-  if (!nt) return pt === '';
   if (isValidMarinadeSubForEntry(next)) return true;
   return nt === pt;
 }

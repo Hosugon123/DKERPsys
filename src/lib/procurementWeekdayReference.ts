@@ -1,4 +1,4 @@
-import { addDaysYmd, parseYmd } from './stallInventoryStorage';
+import { addDaysYmd, parseYmd, ymd } from './stallInventoryStorage';
 import { stallSalesBoardRowYmd } from './financeLib';
 import type { OrderHistoryEntry } from './orderHistoryStorage';
 import {
@@ -78,4 +78,35 @@ export function computeProcurementLastWeekSameDaySold(
 
 export function referenceWeekdayShortLabel(ymdDash: string): string {
   return parseYmd(ymdDash).toLocaleDateString('zh-TW', { weekday: 'short' });
+}
+
+/** 週一＝0 … 週日＝6（與儀表板同名星期對照一致） */
+export const PROCUREMENT_WEEKDAY_LABELS = [
+  '週一',
+  '週二',
+  '週三',
+  '週四',
+  '週五',
+  '週六',
+  '週日',
+] as const;
+
+export function weekdayIdxMon0FromYmd(ymdDash: string): number {
+  return (parseYmd(ymdDash).getDay() + 6) % 7;
+}
+
+/** 自 base 日（含）起，第一個落在該星期的日期（用於預計叫貨歸屬日） */
+export function ymdOnOrAfterWeekday(baseYmd: string, weekdayIdx: number): string {
+  const baseIdx = weekdayIdxMon0FromYmd(baseYmd);
+  const delta = (weekdayIdx - baseIdx + 7) % 7;
+  return addDaysYmd(baseYmd, delta);
+}
+
+/** 預設：明天是星期幾，就選星期幾（常見「今天叫明天貨」） */
+export function defaultProcurementReferenceWeekdayIdx(): number {
+  return weekdayIdxMon0FromYmd(addDaysYmd(ymd(new Date()), 1));
+}
+
+export function defaultProcurementOrderDateYmd(): string {
+  return addDaysYmd(ymd(new Date()), 1);
 }

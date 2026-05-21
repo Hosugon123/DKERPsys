@@ -61,7 +61,11 @@ import {
 } from '../lib/dateDisplay';
 import {
   computeProcurementLastWeekSameDaySold,
-  referenceWeekdayShortLabel,
+  defaultProcurementOrderDateYmd,
+  defaultProcurementReferenceWeekdayIdx,
+  PROCUREMENT_WEEKDAY_LABELS,
+  weekdayIdxMon0FromYmd,
+  ymdOnOrAfterWeekday,
 } from '../lib/procurementWeekdayReference';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import { getDataScopeContext } from '../lib/dataScope';
@@ -112,7 +116,11 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   /** 送出訂單前須在彈層內再按一次「確定送出」 */
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   /** 訂單歸屬日（可預先下單）；下單時間為送出當下之 createdAt */
-  const [newOrderDateYmd, setNewOrderDateYmd] = useState(() => ymd(new Date()));
+  const [newOrderDateYmd, setNewOrderDateYmd] = useState(() => defaultProcurementOrderDateYmd());
+  /** 預計叫貨落在星期幾；上週售出參考＝此歸屬日 −7 天 */
+  const [referenceWeekdayIdx, setReferenceWeekdayIdx] = useState(() =>
+    defaultProcurementReferenceWeekdayIdx()
+  );
 
   const syncFavorites = useCallback(() => {
     setFavorites(listProcurementFavorites());
@@ -233,10 +241,15 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     [newOrderDateYmd, basisOrdersList, supplyRetailView, stallTick],
   );
 
-  const lastWeekRefWeekdayLabel = useMemo(
-    () => referenceWeekdayShortLabel(lastWeekSameDayRef.referenceYmd),
-    [lastWeekSameDayRef.referenceYmd],
-  );
+  const selectReferenceWeekday = useCallback((idx: number) => {
+    setReferenceWeekdayIdx(idx);
+    setNewOrderDateYmd(ymdOnOrAfterWeekday(ymd(new Date()), idx));
+  }, []);
+
+  const syncOrderDateFromPicker = useCallback((ymdDash: string) => {
+    setNewOrderDateYmd(ymdDash);
+    setReferenceWeekdayIdx(weekdayIdxMon0FromYmd(ymdDash));
+  }, []);
 
   const visibleItems = useMemo(() => {
     return catalogItems.filter((item) => {
@@ -326,6 +339,18 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     return total + (item && q > 0 ? estimatedRetailPerPackage(item) * q : 0);
   }, 0);
 
+  /** 售完金額：昨日剩餘＋本次叫貨，以零售單價估算（與品項卡「明日預計帶出」一致） */
+  const soldOutRetailEstimate = useMemo(() => {
+    return Object.entries(cart).reduce((total, [id, n]) => {
+      const item = getSupplyItem(id, supplyRetailView);
+      const orderQty = roundProcurementQty(Number(n) || 0);
+      if (!item || orderQty <= 0) return total;
+      const remain = carryoverRemainByItem[id] ?? 0;
+      const outQty = roundProcurementQty(remain + orderQty);
+      return total + estimatedRetailPerPackage(item) * outQty;
+    }, 0);
+  }, [cart, carryoverRemainByItem, supplyRetailView]);
+
   /** 手機鍵盤／數量欄聚焦時：底部結帳列改單列精簡，並用 visualViewport 貼在鍵盤上方 */
   const checkoutDockRef = useRef<HTMLDivElement | null>(null);
   const [checkoutBarCompact, setCheckoutBarCompact] = useState(false);
@@ -362,8 +387,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   }, [syncCheckoutDock]);
 
   useEffect(() => {
-    if (totalCount > 0) syncCheckoutDock();
-  }, [totalCount, syncCheckoutDock]);
+    syncCheckoutDock();
+  }, [syncCheckoutDock]);
 
   const compactPayableHint =
     userRole === 'franchisee' && (selfSuppliedDeduction > 0 || totalSelfSuppliedCost > 0)
@@ -395,7 +420,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
 
   const openSubmitConfirm = () => {
     if (buildLinesFromCart().length === 0) return;
-    setNewOrderDateYmd(ymd(new Date()));
     setSubmitModalOpen(true);
   };
 
@@ -1053,7 +1077,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 </div>
                 {!isConsumableItem(item) && (
                   <div className="flex items-center justify-between gap-2">
-                    <span>上週{lastWeekRefWeekdayLabel}售出</span>
+                    <span>上週{PROCUREMENT_WEEKDAY_LABELS[referenceWeekdayIdx].slice(1)}售出</span>
                     <span className="tabular-nums text-sky-300/90 shrink-0">
                       {lastWeekSameDayRef.hasCompletedStallDay &&
                       lastWeekSameDayRef.soldByProductId.has(item.id) ? (
@@ -1183,56 +1207,84 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         })}
       </ul>
 
-      {totalCount > 0 && (
+      <div
+        ref={checkoutDockRef}
+        className={cn(
+          'fixed left-0 right-0 lg:left-64 z-40 pointer-events-none bg-gradient-to-t from-[#0a0a0a] to-transparent',
+          checkoutBarCompact
+            ? 'px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1'
+            : 'px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2'
+        )}
+      >
         <div
-          ref={checkoutDockRef}
           className={cn(
-            'fixed left-0 right-0 lg:left-64 z-40 pointer-events-none bg-gradient-to-t from-[#0a0a0a] to-transparent',
+            'max-w-3xl mx-auto pointer-events-auto border border-zinc-700/90 bg-zinc-950/95 backdrop-blur-md shadow-2xl',
             checkoutBarCompact
-              ? 'px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1'
-              : 'px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2'
+              ? 'rounded-xl p-2 flex flex-col gap-2'
+              : 'rounded-2xl p-3.5 sm:p-4 flex flex-col gap-3'
           )}
         >
           <div
             className={cn(
-              'max-w-3xl mx-auto pointer-events-auto border border-zinc-700/90 bg-zinc-950/95 backdrop-blur-md shadow-2xl',
+              'rounded-lg border border-zinc-800/90 bg-zinc-900/50 px-2 py-2',
+              checkoutBarCompact ? 'order-first' : '',
+            )}
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <span className="text-[10px] sm:text-xs text-zinc-500 shrink-0">參考時間</span>
+              <span className="text-[10px] sm:text-xs text-amber-200/90 tabular-nums shrink-0">
+                {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
+              </span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {PROCUREMENT_WEEKDAY_LABELS.map((label, idx) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => selectReferenceWeekday(idx)}
+                  className={cn(
+                    'min-w-[2.35rem] px-2 py-1 rounded-lg text-[11px] sm:text-xs font-medium border transition-colors',
+                    referenceWeekdayIdx === idx
+                      ? 'bg-amber-600/25 border-amber-500/55 text-amber-100'
+                      : 'bg-zinc-950/60 border-zinc-700 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className={cn(
               checkoutBarCompact
-                ? 'rounded-xl p-2 flex flex-row flex-nowrap items-stretch gap-2'
-                : 'rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'
+                ? 'flex flex-row flex-nowrap items-stretch gap-2'
+                : 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3',
             )}
           >
             {checkoutBarCompact ? (
               <>
                 <ShoppingBasket className="text-amber-500 shrink-0 self-center" size={22} aria-hidden />
                 <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-                  {showProcurementCost ? (
-                    <div
-                      className="flex flex-wrap items-baseline gap-x-1 gap-y-0 text-[11px] leading-snug tabular-nums"
-                      aria-label="訂單金額摘要"
+                  <div
+                    className="flex flex-wrap items-baseline gap-x-1 gap-y-0 text-[11px] leading-snug tabular-nums"
+                    aria-label="訂單金額摘要"
+                  >
+                    <span className="text-zinc-500 shrink-0">批貨</span>
+                    <span
+                      className="font-semibold text-amber-400 shrink-0"
+                      title={showProcurementCost ? compactPayableHint : undefined}
                     >
-                      <span className="text-zinc-500 shrink-0">{payableTitle}</span>
-                      <span
-                        className="font-semibold text-amber-400 shrink-0"
-                        title={compactPayableHint}
-                      >
-                        $ {totalPayablePrice.toLocaleString()}
-                      </span>
-                      <span className="text-zinc-600 shrink-0" aria-hidden>
-                        ·
-                      </span>
-                      <span className="text-zinc-500 shrink-0">零售</span>
-                      <span className="font-semibold text-emerald-400">
-                        $ {totalRetailEstimate.toLocaleString()}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="text-[11px] leading-snug tabular-nums flex flex-wrap items-baseline gap-x-1 gap-y-0">
-                      <span className="text-zinc-500 shrink-0">零售</span>
-                      <span className="font-semibold text-emerald-400">
-                        $ {totalRetailEstimate.toLocaleString()}
-                      </span>
-                    </div>
-                  )}
+                      $ {totalPayablePrice.toLocaleString()}
+                    </span>
+                    <span className="text-zinc-600 shrink-0" aria-hidden>
+                      ·
+                    </span>
+                    <span className="text-zinc-500 shrink-0">售完</span>
+                    <span className="font-semibold text-emerald-400 shrink-0">
+                      $ {soldOutRetailEstimate.toLocaleString()}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex shrink-0 gap-1.5 items-stretch">
                   <button
@@ -1249,7 +1301,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   <button
                     type="button"
                     onClick={openSubmitConfirm}
-                    className="min-w-0 min-h-0 h-10 px-3.5 rounded-lg bg-amber-500 text-zinc-950 text-sm font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1.5"
+                    disabled={totalCount <= 0}
+                    className="min-w-0 min-h-0 h-10 px-3.5 rounded-lg bg-amber-500 text-zinc-950 text-sm font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                     aria-label="送出訂單"
                   >
                     <ListOrdered size={17} className="shrink-0" aria-hidden />
@@ -1259,45 +1312,39 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
               </>
             ) : (
               <>
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div className="relative shrink-0">
                     <ShoppingBasket className="text-amber-500" size={28} />
                   </div>
-                  <div className="min-w-0">
-                    {showProcurementCost ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5 min-w-[15rem] sm:min-w-[26rem]">
-                        <div className="min-w-0 sm:pr-2">
-                          <p className="text-xs text-zinc-500">{payableTitle}</p>
-                          <p className="text-lg sm:text-xl font-semibold text-amber-400 tabular-nums">
-                            $ {totalPayablePrice.toLocaleString()}
+                  <div className="min-w-0 flex-1">
+                    <div className="grid grid-cols-2 w-full items-start gap-3 sm:gap-5 min-w-0">
+                      <div className="min-w-0">
+                        <p className="text-xs text-zinc-500 whitespace-nowrap">批貨金額</p>
+                        <p className="text-base sm:text-lg font-semibold text-amber-400 tabular-nums leading-tight">
+                          $ {totalPayablePrice.toLocaleString()}
+                        </p>
+                        {showProcurementCost && userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
+                          <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">
+                            扣除自備品項 $ {Math.round(selfSuppliedDeduction).toLocaleString()} 後，實際應付 $
+                            {Math.round(franchiseeNetPayable).toLocaleString()}
                           </p>
-                          {userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
-                            <p className="text-[11px] text-zinc-500 mt-0.5">
-                              扣除自備品項 $ {Math.round(selfSuppliedDeduction).toLocaleString()} 後，實際應付 $
-                              {Math.round(franchiseeNetPayable).toLocaleString()}
-                            </p>
-                          )}
-                          {userRole === 'franchisee' && totalSelfSuppliedCost > 0 && (
-                            <p className="text-[11px] text-zinc-500">
-                              自備成本（計入支出）$ {Math.round(totalSelfSuppliedCost).toLocaleString()}
-                            </p>
-                          )}
-                        </div>
-                        <div className="min-w-0 sm:pl-2 sm:border-l sm:border-zinc-800/70">
-                          <p className="text-xs text-zinc-500">零售（售完參考）</p>
-                          <p className="text-lg sm:text-xl font-semibold text-emerald-400 tabular-nums">
-                            $ {totalRetailEstimate.toLocaleString()}
+                        )}
+                        {showProcurementCost && userRole === 'franchisee' && totalSelfSuppliedCost > 0 && (
+                          <p className="text-[11px] text-zinc-500 leading-snug">
+                            自備成本（計入支出）$ {Math.round(totalSelfSuppliedCost).toLocaleString()}
                           </p>
-                        </div>
+                        )}
                       </div>
-                    ) : (
-                      <div>
-                        <p className="text-xs text-zinc-500">零售合計（售完參考）</p>
-                        <p className="text-xl font-semibold text-emerald-400 tabular-nums">
-                          $ {totalRetailEstimate.toLocaleString()}
+                      <div className="min-w-0 pl-3 sm:pl-4 border-l border-zinc-800/70">
+                        <p className="text-xs text-zinc-500 leading-snug whitespace-nowrap">
+                          售完金額
+                          <span className="ml-0.5 text-[10px] text-zinc-600 font-normal">（批貨+剩餘）</span>
+                        </p>
+                        <p className="text-base sm:text-lg font-semibold text-emerald-400 tabular-nums leading-tight mt-0.5">
+                          $ {soldOutRetailEstimate.toLocaleString()}
                         </p>
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex flex-row flex-wrap gap-2 w-full sm:w-auto sm:shrink-0 sm:justify-end">
@@ -1315,7 +1362,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   <button
                     type="button"
                     onClick={openSubmitConfirm}
-                    className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-6 rounded-xl bg-amber-500 text-zinc-950 text-base font-bold active:scale-[0.98] flex items-center justify-center gap-2"
+                    disabled={totalCount <= 0}
+                    className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-6 rounded-xl bg-amber-500 text-zinc-950 text-base font-bold active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <ListOrdered size={20} />
                     送出訂單
@@ -1325,7 +1373,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
             )}
           </div>
         </div>
-      )}
+      </div>
 
       {submitModalOpen && (
         <div
@@ -1391,7 +1439,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <X size={22} />
               </button>
             </div>
-            <div className="mt-4 space-y-2">
+            <div className="mt-4">
               <label
                 htmlFor="new-order-date-ymd"
                 className="block cursor-pointer rounded-xl border-2 border-zinc-700/90 bg-zinc-950/80 p-3 transition-colors hover:border-zinc-600 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/25"
@@ -1402,7 +1450,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     id="new-order-date-ymd"
                     type="date"
                     value={newOrderDateYmd}
-                    onChange={(e) => setNewOrderDateYmd(e.target.value)}
+                    onChange={(e) => syncOrderDateFromPicker(e.target.value)}
                     className="w-full min-h-12 cursor-pointer rounded-lg border border-zinc-600/80 bg-zinc-900/90 pl-3 pr-11 py-2.5 text-base text-zinc-100 [color-scheme:dark] focus:outline-none sm:text-sm"
                   />
                   <CalendarDays
@@ -1412,9 +1460,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   />
                 </div>
               </label>
-              <p className="text-[0.6875rem] text-zinc-500 leading-relaxed">
-                可選未來日期作為預先叫貨之歸屬日。實際下單時間以按下「確定送出」時之系統時間為準。
-              </p>
             </div>
             <div className="mt-5 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
               <button

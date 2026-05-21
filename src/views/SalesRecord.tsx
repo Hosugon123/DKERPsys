@@ -542,21 +542,19 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                 : 'grid-cols-2 sm:grid-cols-2 lg:grid-cols-5'
                             )}
                           >
-                            <div>
-                              <p className="text-xs text-zinc-500">盤點金額</p>
-                              <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(displayRetailSold)}</p>
-                              <p className="text-[0.625rem] text-zinc-600 mt-0.5">零售價 × 售出量</p>
-                            </div>
                             {userRole !== 'employee' && (
                               <div>
                                 <p className="text-xs text-zinc-500">成本金額</p>
                                 <p className="text-lg font-semibold text-zinc-300 tabular-nums">$ {money(displayWholesaleSold)}</p>
-                                <p className="text-[0.625rem] text-zinc-600 mt-0.5">批價 × 帶出量</p>
                               </div>
                             )}
                             <div>
                               <p className="text-xs text-zinc-500">預估金額</p>
                               <p className="text-lg font-semibold text-emerald-400 tabular-nums">$ {money(displayRetailEstTotal)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-zinc-500">盤點金額</p>
+                              <p className="text-lg font-semibold text-amber-400 tabular-nums">$ {money(displayRetailSold)}</p>
                             </div>
                             <div>
                               <p className="text-xs text-zinc-500">剩餘貨品金額</p>
@@ -592,27 +590,26 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                             </button>
                           )}
                         </div>
-                        <div className="mt-4 pt-4 border-t border-amber-900/40 space-y-3">
-                          <p className="text-xs font-medium text-zinc-500">營收落差登記</p>
-                          <p className="text-[0.6875rem] text-zinc-600 leading-relaxed">
-                            參考差額（登錄實收 − 盤點金額）：
-                            <span
-                              className={cn(
-                                'tabular-nums font-medium ml-1',
-                                refLedgerGap < 0
-                                  ? 'text-rose-400/90'
-                                  : refLedgerGap > 0
-                                    ? 'text-emerald-300/90'
-                                    : 'text-zinc-300',
-                              )}
-                            >
-                              {refLedgerGap === 0
-                                ? '$0'
-                                : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
-                            </span>
-                          </p>
+                        <div className="mt-4 pt-4 border-t border-amber-900/40">
                           {isStallEditThis && stallEditDraft ? (
                             <div className="space-y-3">
+                              <p className="text-sm text-zinc-300">
+                                <span className="text-zinc-100">盤點後落差金額：</span>
+                                <span
+                                  className={cn(
+                                    'tabular-nums font-medium',
+                                    refLedgerGap < 0
+                                      ? 'text-rose-400/90'
+                                      : refLedgerGap > 0
+                                        ? 'text-emerald-300/90'
+                                        : 'text-zinc-300',
+                                  )}
+                                >
+                                  {refLedgerGap === 0
+                                    ? '$0'
+                                    : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
+                                </span>
+                              </p>
                               <div>
                                 <label className="text-xs text-zinc-500 block">落差金額（自填，可與參考差額不同）</label>
                                 <input
@@ -643,27 +640,45 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                 />
                               </div>
                             </div>
-                          ) : (displaySnap.revenueGapAmount?.trim() || displaySnap.revenueGapReason?.trim()) ? (
-                            <div className="space-y-1.5 text-sm">
+                          ) : (
+                            <div className="flex flex-wrap items-baseline gap-x-5 sm:gap-x-8 gap-y-2 text-sm">
+                              <p className="text-zinc-300 shrink-0">
+                                <span className="text-zinc-100">盤點後落差金額：</span>
+                                <span
+                                  className={cn(
+                                    'tabular-nums font-medium',
+                                    refLedgerGap < 0
+                                      ? 'text-rose-400/90'
+                                      : refLedgerGap > 0
+                                        ? 'text-emerald-300/90'
+                                        : 'text-zinc-300',
+                                  )}
+                                >
+                                  {refLedgerGap === 0
+                                    ? '$0'
+                                    : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
+                                </span>
+                              </p>
                               {displaySnap.revenueGapAmount?.trim() ? (
-                                <p className="text-zinc-300">
-                                  <span className="text-zinc-500">落差金額：</span>
+                                <p className="text-zinc-300 shrink-0">
+                                  <span className="text-zinc-100">損耗金額：</span>
                                   <span className="tabular-nums text-amber-200/90 font-medium">
                                     $ {money(num(displaySnap.revenueGapAmount))}
                                   </span>
                                 </p>
                               ) : null}
                               {displaySnap.revenueGapReason?.trim() ? (
-                                <p className="text-zinc-300">
-                                  <span className="text-zinc-500">原因：</span>
+                                <p className="text-zinc-300 min-w-0">
+                                  <span className="text-zinc-100 shrink-0">原因：</span>
                                   {displaySnap.revenueGapReason.trim()}
                                 </p>
                               ) : null}
+                              {!displaySnap.revenueGapAmount?.trim() && !displaySnap.revenueGapReason?.trim() ? (
+                                <p className="text-xs text-zinc-600">
+                                  尚未登記落差。點「調整盤點」可填寫金額與原因（亦可在攤上盤點完成當日填寫）。
+                                </p>
+                              ) : null}
                             </div>
-                          ) : (
-                            <p className="text-xs text-zinc-600">
-                              尚未登記落差。點「調整盤點」可填寫金額與原因（亦可在攤上盤點完成當日填寫）。
-                            </p>
                           )}
                         </div>
                       </div>

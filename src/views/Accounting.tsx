@@ -6,13 +6,9 @@ import {
   FOOD_EXPENSE_CATEGORY,
   MARINADE_EXPENSE_CATEGORY,
   MAIN_INGREDIENT_SUBS,
-  SEASONING_SUBS,
   isCurrentIngredientSubOption,
-  isCurrentMarinadeSubOption,
   isValidIngredientSubForEntry,
-  isValidMarinadeSubForEntry,
   canSaveIngredientSubWhenEditing,
-  canSaveMarinadeSubWhenEditing,
   ledgerEntryHasMarinadeTag,
   ledgerEntryHasMisplacedSeasoningUnderFood,
   type AccountingCategory,
@@ -114,36 +110,6 @@ function MainIngredientSubcategorySelect({
       {showLegacyOptgroup ? (
         <optgroup label="目前紀錄（滷料子項請改列「滷料」大項）">
           <option value={value}>{value}</option>
-        </optgroup>
-      ) : null}
-    </select>
-  );
-}
-
-function MarinadeSubcategorySelect({
-  value,
-  onChange,
-  className,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  className?: string;
-}) {
-  const showLegacyOptgroup = Boolean(value) && !isCurrentMarinadeSubOption(value);
-
-  return (
-    <select value={value} onChange={(ev) => onChange(ev.target.value)} className={className}>
-      <option value="">請選擇子類別</option>
-      <optgroup label="滷料配料">
-        {SEASONING_SUBS.map((s) => (
-          <option key={s} value={s}>
-            {s}
-          </option>
-        ))}
-      </optgroup>
-      {showLegacyOptgroup ? (
-        <optgroup label="目前紀錄（無子類整筆或舊字串）">
-          <option value={value}>{value || '（無）'}</option>
         </optgroup>
       ) : null}
     </select>
@@ -258,6 +224,55 @@ export default function Accounting() {
     setFormError(null);
   }, []);
 
+  const clearFormForAnotherEntry = useCallback(() => {
+    setNote('');
+    setAmountRaw('');
+    setFormError(null);
+  }, []);
+
+  const isNewEntrySubmitDisabled =
+    !category ||
+    (category === FOOD_EXPENSE_CATEGORY &&
+      flowType === 'expense' &&
+      !isValidIngredientSubForEntry(subCategory));
+
+  const submitNewEntry = useCallback(async (): Promise<boolean> => {
+    setFormError(null);
+
+    if (!category) {
+      setFormError('請先選擇類別。');
+      return false;
+    }
+
+    const amt = parseMoneyAmount(amountRaw.trim());
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setFormError('請輸入大於 0 的有效金額。');
+      return false;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
+      setFormError('日期格式不正確。');
+      return false;
+    }
+
+    if (category === FOOD_EXPENSE_CATEGORY) {
+      if (!isValidIngredientSubForEntry(subCategory)) {
+        setFormError('請選擇有效的食材子類別（主食材進貨）。');
+        return false;
+      }
+    }
+
+    await add({
+      dateYmd,
+      flowType,
+      category,
+      subCategory: category === FOOD_EXPENSE_CATEGORY ? subCategory : undefined,
+      note,
+      amount: amt,
+    });
+    return true;
+  }, [add, amountRaw, category, dateYmd, flowType, note, subCategory]);
+
   const clearDateFilter = useCallback(() => {
     setQuickPreset(null);
     const { start, end } = monthBoundsFromYm(currentYm());
@@ -327,49 +342,11 @@ export default function Accounting() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setFormError(null);
+    if (await submitNewEntry()) resetForm();
+  };
 
-    if (!category) {
-      setFormError('請先選擇類別。');
-      return;
-    }
-
-    const amt = parseMoneyAmount(amountRaw.trim());
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setFormError('請輸入大於 0 的有效金額。');
-      return;
-    }
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
-      setFormError('日期格式不正確。');
-      return;
-    }
-
-    if (category === FOOD_EXPENSE_CATEGORY) {
-      if (!isValidIngredientSubForEntry(subCategory)) {
-        setFormError('請選擇有效的食材子類別（主食材進貨）。');
-        return;
-      }
-    }
-    if (category === MARINADE_EXPENSE_CATEGORY) {
-      if (!isValidMarinadeSubForEntry(subCategory)) {
-        setFormError('請選擇有效的滷料子類別；滷料為獨立大項，不列在食材支出內。');
-        return;
-      }
-    }
-
-    await add({
-      dateYmd,
-      flowType,
-      category,
-      subCategory:
-        category === FOOD_EXPENSE_CATEGORY || category === MARINADE_EXPENSE_CATEGORY
-          ? subCategory
-          : undefined,
-      note,
-      amount: amt,
-    });
-    resetForm();
+  const onSubmitAnother = async () => {
+    if (await submitNewEntry()) clearFormForAnotherEntry();
   };
 
   const onEditSubmit = async (e: FormEvent) => {
@@ -399,21 +376,12 @@ export default function Accounting() {
         return;
       }
     }
-    if (editCategory === MARINADE_EXPENSE_CATEGORY) {
-      if (!canSaveMarinadeSubWhenEditing(editSubCategory, editingEntry.subCategory)) {
-        setEditError('請選擇有效的滷料子類別，或保留原整筆紀錄。');
-        return;
-      }
-    }
 
     await update(editingEntry.id, {
       dateYmd: editDateYmd,
       flowType: editFlowType,
       category: editCategory,
-      subCategory:
-        editCategory === FOOD_EXPENSE_CATEGORY || editCategory === MARINADE_EXPENSE_CATEGORY
-          ? editSubCategory
-          : undefined,
+      subCategory: editCategory === FOOD_EXPENSE_CATEGORY ? editSubCategory : undefined,
       note: editNote,
       amount: amt,
     });
@@ -533,53 +501,34 @@ export default function Accounting() {
                 ))}
               </select>
             </label>
-            <label className="block space-y-1.5 sm:col-span-1">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">金額</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder="僅限數字"
-                value={amountRaw}
-                onChange={(ev) => onAmountChange(ev.target.value)}
-                className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-3 py-2.5 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-600/50"
-              />
-            </label>
+            <div className="space-y-4 sm:col-span-1">
+              {category === FOOD_EXPENSE_CATEGORY && flowType === 'expense' && (
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">子類別（主食材進貨）</span>
+                  <MainIngredientSubcategorySelect
+                    value={subCategory}
+                    onChange={setSubCategory}
+                    className={cn(
+                      'w-full rounded-xl bg-zinc-950/80 border px-3 py-2.5 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50',
+                      !subCategory ? 'border-amber-700/50' : 'border-zinc-700/80'
+                    )}
+                  />
+                </label>
+              )}
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">金額</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="0"
+                  value={amountRaw}
+                  onChange={(ev) => onAmountChange(ev.target.value)}
+                  className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-3 py-2.5 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-600/50"
+                />
+              </label>
+            </div>
           </div>
-
-          {category === FOOD_EXPENSE_CATEGORY && flowType === 'expense' && (
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">子類別（主食材進貨）</span>
-              <MainIngredientSubcategorySelect
-                value={subCategory}
-                onChange={setSubCategory}
-                className={cn(
-                  'w-full rounded-xl bg-zinc-950/80 border px-3 py-2.5 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50',
-                  !subCategory ? 'border-amber-700/50' : 'border-zinc-700/80'
-                )}
-              />
-              <p className="text-[0.625rem] text-zinc-600">
-                僅主食材進貨（COGS）。糖、醬油等滷汁成本請另選大項「滷料」，勿列在食材支出。
-              </p>
-            </label>
-          )}
-
-          {category === MARINADE_EXPENSE_CATEGORY && flowType === 'expense' && (
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">子類別（滷料配料）</span>
-              <MarinadeSubcategorySelect
-                value={subCategory}
-                onChange={setSubCategory}
-                className={cn(
-                  'w-full rounded-xl bg-zinc-950/80 border px-3 py-2.5 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50',
-                  !subCategory ? 'border-amber-700/50' : 'border-zinc-700/80'
-                )}
-              />
-              <p className="text-[0.625rem] text-zinc-600">
-                滷料為獨立支出大項，與「食材支出」分開；會計入儀表板滷汁成本。
-              </p>
-            </label>
-          )}
 
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">備註</span>
@@ -601,31 +550,28 @@ export default function Accounting() {
           <div className="flex flex-wrap gap-3 pt-1">
             <button
               type="submit"
-              disabled={
-                !category ||
-                (category === FOOD_EXPENSE_CATEGORY &&
-                  flowType === 'expense' &&
-                  !isValidIngredientSubForEntry(subCategory)) ||
-                (category === MARINADE_EXPENSE_CATEGORY &&
-                  flowType === 'expense' &&
-                  !isValidMarinadeSubForEntry(subCategory))
-              }
+              disabled={isNewEntrySubmitDisabled}
               className={cn(
                 'px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors',
-                category &&
-                  !(
-                    (category === FOOD_EXPENSE_CATEGORY &&
-                      flowType === 'expense' &&
-                      !isValidIngredientSubForEntry(subCategory)) ||
-                    (category === MARINADE_EXPENSE_CATEGORY &&
-                      flowType === 'expense' &&
-                      !isValidMarinadeSubForEntry(subCategory))
-                  )
+                !isNewEntrySubmitDisabled
                   ? 'bg-amber-600 text-white hover:bg-amber-500 shadow-lg shadow-amber-900/20'
                   : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
               )}
             >
               新增紀錄
+            </button>
+            <button
+              type="button"
+              disabled={isNewEntrySubmitDisabled}
+              onClick={() => void onSubmitAnother()}
+              className={cn(
+                'px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors',
+                !isNewEntrySubmitDisabled
+                  ? 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400 shadow-lg shadow-emerald-900/25'
+                  : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+              )}
+            >
+              再記一筆
             </button>
             <button
               type="button"
@@ -1015,20 +961,6 @@ export default function Accounting() {
                 </label>
               )}
 
-              {editCategory === MARINADE_EXPENSE_CATEGORY && editFlowType === 'expense' && (
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">子類別（滷料配料）</span>
-                  <MarinadeSubcategorySelect
-                    value={editSubCategory}
-                    onChange={setEditSubCategory}
-                    className={cn(
-                      'w-full rounded-xl bg-zinc-950/80 border px-3 py-2.5 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50',
-                      !editSubCategory ? 'border-amber-700/50' : 'border-zinc-700/80'
-                    )}
-                  />
-                </label>
-              )}
-
               <label className="block space-y-1.5">
                 <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">金額</span>
                 <input
@@ -1063,21 +995,15 @@ export default function Accounting() {
                     !editCategory ||
                     (editCategory === FOOD_EXPENSE_CATEGORY &&
                       editFlowType === 'expense' &&
-                      !canSaveIngredientSubWhenEditing(editSubCategory, editingEntry.subCategory)) ||
-                    (editCategory === MARINADE_EXPENSE_CATEGORY &&
-                      editFlowType === 'expense' &&
-                      !canSaveMarinadeSubWhenEditing(editSubCategory, editingEntry.subCategory))
+                      !canSaveIngredientSubWhenEditing(editSubCategory, editingEntry.subCategory))
                   }
                   className={cn(
                     'px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors',
                     editCategory &&
                       !(
-                        (editCategory === FOOD_EXPENSE_CATEGORY &&
-                          editFlowType === 'expense' &&
-                          !canSaveIngredientSubWhenEditing(editSubCategory, editingEntry.subCategory)) ||
-                        (editCategory === MARINADE_EXPENSE_CATEGORY &&
-                          editFlowType === 'expense' &&
-                          !canSaveMarinadeSubWhenEditing(editSubCategory, editingEntry.subCategory))
+                        editCategory === FOOD_EXPENSE_CATEGORY &&
+                        editFlowType === 'expense' &&
+                        !canSaveIngredientSubWhenEditing(editSubCategory, editingEntry.subCategory)
                       )
                       ? 'bg-amber-600 text-white hover:bg-amber-500'
                       : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'

@@ -607,7 +607,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:gap-4">
             <label className="block min-w-0 flex-1 space-y-1.5 lg:max-w-[16rem]">
               <span className="text-xs font-medium text-zinc-400">實收現金</span>
               <input
@@ -622,42 +622,47 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             </label>
             <div
               id="stall-diff-explainer"
-              className="flex flex-1 flex-col justify-center rounded-xl border border-amber-900/45 bg-black/35 px-3.5 py-3 sm:px-4 sm:py-4 min-h-[5.75rem]"
+              className="flex min-h-11 h-11 w-full flex-1 items-center justify-between gap-3 rounded-lg border border-amber-900/45 bg-black/35 px-3 sm:px-3.5"
             >
-              <p className="text-[0.65rem] sm:text-xs text-zinc-500 leading-snug">帳面落差</p>
-              <p
+              <span className="text-xs font-medium text-zinc-500 shrink-0">帳面落差</span>
+              <span
                 className={cn(
-                  'mt-1.5 text-2xl sm:text-3xl font-semibold tabular-nums tracking-tight',
+                  'text-base font-semibold tabular-nums tracking-tight leading-none',
                   diff < 0 ? 'text-rose-400' : diff > 0 ? 'text-emerald-400' : 'text-zinc-200',
                 )}
               >
                 {diff === 0 ? '$0' : `${diff < 0 ? '−' : '+'}$${money(Math.abs(diff))}`}
-              </p>
+              </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,13rem)_1fr] sm:gap-4 sm:items-start pt-1 border-t border-amber-900/35">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-400">認列金額</label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,13rem)_1fr] sm:gap-4 sm:items-end pt-1 border-t border-amber-900/35">
+            <label className="flex min-w-0 flex-col gap-1.5">
+              <span className="text-xs font-medium text-zinc-400">認列金額</span>
               <input
                 type="text"
                 inputMode="decimal"
                 value={snap.revenueGapAmount ?? ''}
                 onChange={(e) => setSnap((p) => ({ ...p, revenueGapAmount: e.target.value }))}
-                className="w-full min-h-10 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-amber-100 font-mono text-sm shadow-inner placeholder:text-zinc-600"
-                placeholder="例：500 或 -200"
+                onBlur={(e) => {
+                  if (e.target.value.trim() === '') {
+                    setSnap((p) => ({ ...p, revenueGapAmount: '0' }));
+                  }
+                }}
+                className="w-full min-h-11 h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-base text-amber-100 font-mono tabular-nums shadow-inner"
+                placeholder="0"
               />
-            </div>
-            <div className="space-y-1.5 min-w-0">
-              <label className="text-xs font-medium text-zinc-400">落差原因</label>
+            </label>
+            <label className="flex min-w-0 flex-col gap-1.5">
+              <span className="text-xs font-medium text-zinc-400">落差原因</span>
               <textarea
                 value={snap.revenueGapReason ?? ''}
                 onChange={(e) => setSnap((p) => ({ ...p, revenueGapReason: e.target.value }))}
                 rows={1}
-                className="w-full resize-none min-h-10 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600"
+                className="w-full resize-none min-h-11 h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-[calc(0.875rem*0.7)] leading-snug text-zinc-200 placeholder:text-zinc-600 placeholder:text-[calc(0.875rem*0.7)]"
                 placeholder="例：請客、食材耗損、收銀短溢、零錢誤差…"
               />
-            </div>
+            </label>
           </div>
         </section>
       </div>
@@ -829,52 +834,19 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       <div
-        className="fixed bottom-4 z-40 inset-x-3 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:left-auto sm:max-w-md sm:w-[min(28rem,calc(100vw-3rem))]"
-        aria-label="實收對帳與盤點完成"
+        className="fixed bottom-4 z-40 inset-x-3 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:left-auto"
+        aria-label="盤點完成"
       >
-        <div className="w-full rounded-2xl border border-amber-500/40 bg-zinc-950/95 backdrop-blur-md shadow-2xl shadow-black/60 ring-1 ring-amber-500/20 p-2 sm:p-2.5 flex flex-col gap-1.5">
-          <div className="flex w-full items-stretch justify-between gap-2 sm:gap-2">
-            <label
-              className="flex min-w-0 flex-1 items-stretch rounded-xl border border-zinc-700 bg-zinc-900/80 overflow-hidden focus-within:border-amber-500/60 focus-within:ring-1 focus-within:ring-amber-500/30"
-              title="盤點後實收：當日現金／收銀實收金額。與上方「實收對帳」欄位連動。"
-            >
-              <span className="px-2 sm:px-2.5 py-2 text-[11px] sm:text-xs text-amber-300 font-medium flex items-center gap-1 whitespace-nowrap border-r border-zinc-700/80 bg-zinc-900/60 shrink-0">
-                <Wallet size={14} className="text-amber-500 shrink-0" aria-hidden />
-                實收
-              </span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={snap.actualRevenue}
-                onChange={(e) => setSnap((p) => ({ ...p, actualRevenue: e.target.value }))}
-                placeholder="0"
-                aria-label="盤點後實收金額"
-                className="min-w-0 flex-1 bg-transparent px-2 py-2 text-amber-100 font-mono text-sm sm:text-base tabular-nums focus:outline-none placeholder:text-zinc-600"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={requestInventoryComplete}
-              className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[48px] px-3 sm:px-4 rounded-xl bg-amber-600 text-zinc-950 font-semibold text-sm hover:bg-amber-500 active:scale-[0.98] ring-1 ring-amber-400/40 self-stretch"
-              aria-label="盤點完成（與上方按鈕相同）"
-            >
-              <CheckCircle2 size={18} className="shrink-0" />
-              盤點完成
-            </button>
-          </div>
-          {snap.actualRevenue.trim() !== '' && (
-            <p className="text-[10.5px] sm:text-[11px] text-zinc-500 px-1 leading-snug tabular-nums">
-              應有 ${money(dayKpi.shouldRevenue)}・落差{' '}
-              <span
-                className={cn(
-                  'font-medium',
-                  diff < 0 ? 'text-rose-400' : diff > 0 ? 'text-emerald-300' : 'text-zinc-300',
-                )}
-              >
-                {diff === 0 ? '$0' : `${diff < 0 ? '−' : '+'}$${money(Math.abs(diff))}`}
-              </span>
-            </p>
-          )}
+        <div className="rounded-2xl border border-amber-500/40 bg-zinc-950/95 backdrop-blur-md shadow-2xl shadow-black/60 ring-1 ring-amber-500/20 p-2 sm:p-2.5">
+          <button
+            type="button"
+            onClick={requestInventoryComplete}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[48px] px-4 sm:px-5 rounded-xl bg-amber-600 text-zinc-950 font-semibold text-sm hover:bg-amber-500 active:scale-[0.98] ring-1 ring-amber-400/40"
+            aria-label="盤點完成"
+          >
+            <CheckCircle2 size={18} className="shrink-0" />
+            盤點完成
+          </button>
         </div>
       </div>
 
