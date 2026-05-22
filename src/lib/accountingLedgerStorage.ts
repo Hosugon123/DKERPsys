@@ -1,7 +1,6 @@
 /**
  * 非訂單類流水帳（本機 localStorage）
  */
-import { readSession, isSuperAdminSession } from './authSession';
 import {
   getDataScopeContext,
   HQ_SCOPE_ID,
@@ -10,12 +9,6 @@ import {
 } from './dataScope';
 import { resolveUserDisplayNameById } from './sessionActorDisplayName';
 import { listSystemUsers } from './systemUsersStorage';
-
-/** 僅超級管理員（dk001）可跨 scope 瀏覽／維護全部流水帳；直營店管理員僅限總部 scope */
-function canOperateAllAccountingScopes(): boolean {
-  const s = readSession();
-  return !!s && s.role === 'admin' && isSuperAdminSession(s.loginId);
-}
 
 const STORAGE_KEY = 'dongshan_accounting_ledger_v1';
 export const ACCOUNTING_LEDGER_UPDATED_EVENT = 'accountingLedgerUpdated';
@@ -481,26 +474,18 @@ function filterLedgerEntriesForRole(rows: AccountingLedgerEntry[]): AccountingLe
   return rows.filter((e) => e.createdByUserId === uid);
 }
 
-/** 所有紀錄（新→舊）；員工僅能看見自己登記之項目 */
+/** 所有紀錄（新→舊）：僅目前身分對應之 scope；員工僅能看見自己登記之項目 */
 export function listAccountingLedgerEntries(): AccountingLedgerEntry[] {
   const scopeId = resolveAccountingLedgerScopeId();
   const s = loadStore();
-  if (canOperateAllAccountingScopes()) {
-    const all = Object.values(s.byScope).flat();
-    return sortEntries(filterLedgerEntriesForRole(all));
-  }
   return sortEntries(filterLedgerEntriesForRole(s.byScope[scopeId] ?? []));
 }
 
 /**
- * 指定 scope 之紀錄（新→舊）。
- * 僅在「總部以管理視角檢視某加盟店」場景使用：呼叫端應自行確認執行者為 admin。
- * 一般使用者請改用 `listAccountingLedgerEntries()`，會依目前登入身份自動圈定 scope。
+ * 指定 scope 之紀錄（新→舊）。僅儀表板「檢視某加盟店」等需跨 scope 讀取時使用，不影響收入與支出列表。
  */
 export function listAccountingLedgerEntriesForScopeId(scopeId: string): AccountingLedgerEntry[] {
   if (!scopeId) return [];
-  const { isAdmin } = getDataScopeContext();
-  if (!isAdmin) return [];
   const s = loadStore();
   return sortEntries(s.byScope[scopeId] ?? []);
 }
@@ -552,20 +537,6 @@ export function removeAccountingLedgerEntry(id: string): boolean {
   const s = loadStore();
   const ctx = getDataScopeContext();
   const scopeId = resolveAccountingLedgerScopeId();
-  if (canOperateAllAccountingScopes()) {
-    let changed = false;
-    for (const k of Object.keys(s.byScope)) {
-      const prev = s.byScope[k] ?? [];
-      const next = prev.filter((e) => e.id !== id);
-      if (next.length !== prev.length) {
-        s.byScope[k] = next;
-        changed = true;
-      }
-    }
-    if (!changed) return false;
-    saveStore(s);
-    return true;
-  }
   const prev = s.byScope[scopeId] ?? [];
   const hit = prev.find((e) => e.id === id);
   if (!hit) return false;
@@ -593,24 +564,15 @@ export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerU
   const s = loadStore();
   const ctx = getDataScopeContext();
   const scopeId = resolveAccountingLedgerScopeId();
-  const buckets = canOperateAllAccountingScopes() ? Object.keys(s.byScope) : [scopeId];
-  let foundBucket = '';
-  let i = -1;
-  for (const b of buckets) {
-    i = (s.byScope[b] ?? []).findIndex((e) => e.id === id);
-    if (i >= 0) {
-      foundBucket = b;
-      break;
-    }
-  }
-  if (!foundBucket || i < 0) return false;
-  const prev = s.byScope[foundBucket]![i];
-  if (!canOperateAllAccountingScopes() && ctx.role === 'employee') {
+  const i = (s.byScope[scopeId] ?? []).findIndex((e) => e.id === id);
+  if (i < 0) return false;
+  const prev = s.byScope[scopeId]![i];
+  if (ctx.role === 'employee') {
     const uid = ctx.userId.trim();
     if (!uid || !prev.createdByUserId || prev.createdByUserId !== uid) return false;
   }
   const now = new Date().toISOString();
-  s.byScope[foundBucket]![i] = coerceEntry({
+  s.byScope[scopeId]![i] = coerceEntry({
     ...prev,
     dateYmd: patch.dateYmd,
     flowType: patch.flowType,

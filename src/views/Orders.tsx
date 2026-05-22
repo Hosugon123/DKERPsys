@@ -411,12 +411,8 @@ async function loadMgmtSliceForRole(role: UserRole): Promise<FranchiseManagement
   return [];
 }
 
-async function loadHistorySliceForRole(role: UserRole): Promise<OrderHistoryEntry[]> {
-  const all = await ordersApi.loadOrderHistory();
-  if (role === 'admin') return all;
-  if (role === 'franchisee') return all.filter((e) => e.actorRole === 'franchisee');
-  if (role === 'employee') return all.filter((e) => e.actorRole === 'employee' || e.actorRole === 'admin');
-  return [];
+async function loadHistorySliceForRole(_role: UserRole): Promise<OrderHistoryEntry[]> {
+  return ordersApi.loadOrderHistory();
 }
 
 /** 內部儲存仍為「已完成」；列表／分頁等畫面顯示用「已出貨」 */

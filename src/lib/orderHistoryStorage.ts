@@ -172,8 +172,8 @@ function resolveStoreCode3ForNewOrder(): string {
 
 function newOrderId(): string {
   const ids = [
-    ...loadFranchiseManagementOrders().map((o) => o.id),
-    ...loadOrderHistory().map((o) => o.id),
+    ...loadFranchiseManagementOrdersAll().map((o) => o.id),
+    ...loadOrderHistoryAllEntries().map((o) => o.id),
   ];
   return allocateOrderSerialId(ids, new Date(), resolveStoreCode3ForNewOrder());
 }
@@ -275,7 +275,6 @@ function canAccessOrder(
   row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>,
   ctx: ReturnType<typeof getDataScopeContext>
 ): boolean {
-  if (ctx.isAdmin) return true;
   const declared = row.scopeId?.trim();
   const effectiveScope = declared || inferScopeIdFromActorUserId(row.actorUserId);
   if (effectiveScope) return effectiveScope === ctx.scopeId;
@@ -370,7 +369,6 @@ export function loadFranchiseManagementOrders(): FranchiseManagementOrder[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as (FranchiseManagementOrder & { updatedAt?: string })[];
     const list = Array.isArray(parsed) ? parsed.map(normalizeFranchiseManagementOrder) : [];
-    if (ctx.isAdmin) return list;
     return list.filter((o) => canAccessOrder(o, ctx));
   } catch {
     return [];
@@ -444,7 +442,7 @@ export function loadCompletedOrderHistoryListForRole(
   return all.filter((e) => e.actorRole === 'admin' || e.actorRole === 'employee');
 }
 
-/** 讀取本機 `order_history` 全部項目（不過濾舊版 admin 寫入，供內部刪除用） */
+/** 讀取本機 `order_history` 全部項目（不過濾 scope，供寫入合併用） */
 function loadOrderHistoryAllEntries(): OrderHistoryEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -459,19 +457,70 @@ function loadOrderHistoryAllEntries(): OrderHistoryEntry[] {
   }
 }
 
+function loadFranchiseManagementOrdersAll(): FranchiseManagementOrder[] {
+  try {
+    const raw = localStorage.getItem(FRANCHISE_MGMT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as (FranchiseManagementOrder & { updatedAt?: string })[];
+    const list = Array.isArray(parsed) ? parsed : [];
+    return list.map(normalizeFranchiseManagementOrder);
+  } catch {
+    return [];
+  }
+}
+
+function patchOrderHistoryById(
+  id: string,
+  patch: (row: OrderHistoryEntry) => OrderHistoryEntry | null
+): boolean {
+  const ctx = getDataScopeContext();
+  const all = loadOrderHistoryAllEntries();
+  const i = all.findIndex((o) => o.id === id);
+  if (i < 0) return false;
+  if (!canAccessOrder(all[i], ctx)) return false;
+  const updated = patch(all[i]);
+  if (!updated) return false;
+  const next = [...all];
+  next[i] = updated;
+  saveOrderHistory(next);
+  return true;
+}
+
+function patchFranchiseManagementOrderById(
+  id: string,
+  patch: (row: FranchiseManagementOrder) => FranchiseManagementOrder | null
+): boolean {
+  const ctx = getDataScopeContext();
+  const all = loadFranchiseManagementOrdersAll();
+  const i = all.findIndex((o) => o.id === id);
+  if (i < 0) return false;
+  if (!canAccessOrder(all[i], ctx)) return false;
+  const updated = patch(all[i]);
+  if (!updated) return false;
+  const next = [...all];
+  next[i] = updated;
+  saveFranchiseManagementOrders(next);
+  return true;
+}
+
 /**
- * 從本機「歷史訂單」或「訂單管理」儲存中永久移除一筆訂單（超級管理員專用）。
+ * 從本機「歷史訂單」或「訂單管理」儲存中永久移除一筆訂單（僅限目前身分可存取之 scope）。
  * @returns 是否曾找到該筆並已刪除
  */
 export function deleteOrderByIdFromAnyStore(orderId: string): boolean {
-  const mgmt = loadFranchiseManagementOrders();
-  if (mgmt.some((o) => o.id === orderId)) {
-    saveFranchiseManagementOrders(mgmt.filter((o) => o.id !== orderId));
+  const ctx = getDataScopeContext();
+  const mgmtAll = loadFranchiseManagementOrdersAll();
+  const mgmtHit = mgmtAll.find((o) => o.id === orderId);
+  if (mgmtHit) {
+    if (!canAccessOrder(mgmtHit, ctx)) return false;
+    saveFranchiseManagementOrders(mgmtAll.filter((o) => o.id !== orderId));
     return true;
   }
-  const hist = loadOrderHistoryAllEntries();
-  if (hist.some((o) => o.id === orderId)) {
-    saveOrderHistory(hist.filter((o) => o.id !== orderId));
+  const histAll = loadOrderHistoryAllEntries();
+  const histHit = histAll.find((o) => o.id === orderId);
+  if (histHit) {
+    if (!canAccessOrder(histHit, ctx)) return false;
+    saveOrderHistory(histAll.filter((o) => o.id !== orderId));
     return true;
   }
   return false;
@@ -517,31 +566,25 @@ function appendFranchiseManagementOrderInternal(params: {
       ? { procurementDeductionBasisOrderId }
       : {}),
   };
-  saveFranchiseManagementOrders([entry, ...loadFranchiseManagementOrders()]);
+  saveFranchiseManagementOrders([entry, ...loadFranchiseManagementOrdersAll()]);
 }
 
 export function updateFranchiseManagementOrderStatus(id: string, status: FranchiseOrderStatus) {
-  const list = loadFranchiseManagementOrders();
-  const i = list.findIndex((o) => o.id === id);
-  if (i < 0) return;
-  if (status === '待出貨' && orderHasStallCountCompleted(list[i])) return;
-  const next = [...list];
   const now = new Date().toISOString();
   const who = persistableActorDisplayName();
-  next[i] = { ...next[i], status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
-  saveFranchiseManagementOrders(next);
+  patchFranchiseManagementOrderById(id, (row) => {
+    if (status === '待出貨' && orderHasStallCountCompleted(row)) return null;
+    return { ...row, status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
+  });
 }
 
 export function updateOrderHistoryStatus(id: string, status: FranchiseOrderStatus) {
-  const list = loadOrderHistory();
-  const i = list.findIndex((o) => o.id === id);
-  if (i < 0) return;
-  if (status === '待出貨' && orderHasStallCountCompleted(list[i])) return;
-  const next = [...list];
   const now = new Date().toISOString();
   const who = persistableActorDisplayName();
-  next[i] = { ...next[i], status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
-  saveOrderHistory(next);
+  patchOrderHistoryById(id, (row) => {
+    if (status === '待出貨' && orderHasStallCountCompleted(row)) return null;
+    return { ...row, status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
+  });
 }
 
 /**
@@ -596,16 +639,14 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
   const { lines, itemCount, totalAmount } = aggregateOrderLinesForSave(nextLines);
   if (lines.length === 0) return { ok: false, reason: 'empty' };
 
-  const mgmt = loadFranchiseManagementOrders();
-  const mi = mgmt.findIndex((o) => o.id === id);
-  if (mi >= 0) {
-    if (mgmt[mi].status !== '待出貨') return { ok: false, reason: 'not_pending' };
-    if (orderHasStallCountCompleted(mgmt[mi])) return { ok: false, reason: 'stall_count_locked' };
-    const m = [...mgmt];
+  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  if (mgmtHit) {
+    if (mgmtHit.status !== '待出貨') return { ok: false, reason: 'not_pending' };
+    if (orderHasStallCountCompleted(mgmtHit)) return { ok: false, reason: 'stall_count_locked' };
     const now = new Date().toISOString();
     const who = persistableActorDisplayName();
-    m[mi] = {
-      ...m[mi],
+    const patched = patchFranchiseManagementOrderById(id, (row) => ({
+      ...row,
       lines,
       itemCount,
       totalAmount,
@@ -613,23 +654,20 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
       selfSuppliedCostAmount: 0,
       updatedAt: now,
       ...(who ? { lastUpdatedByName: who } : {}),
-    };
-    saveFranchiseManagementOrders(m);
-    return { ok: true };
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
   }
 
-  const hist = loadOrderHistory();
-  const hi = hist.findIndex((o) => o.id === id);
-  if (hi >= 0) {
-    if (hist[hi].status !== '待出貨') return { ok: false, reason: 'not_pending' };
-    if (orderHasStallCountCompleted(hist[hi])) return { ok: false, reason: 'stall_count_locked' };
-    const h = [...hist];
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (histHit) {
+    if (histHit.status !== '待出貨') return { ok: false, reason: 'not_pending' };
+    if (orderHasStallCountCompleted(histHit)) return { ok: false, reason: 'stall_count_locked' };
     const now = new Date().toISOString();
     const payableAmount = totalAmount;
-    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, h[hi].actorRole);
+    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, histHit.actorRole);
     const who = persistableActorDisplayName();
-    h[hi] = {
-      ...h[hi],
+    const patched = patchOrderHistoryById(id, (row) => ({
+      ...row,
       lines,
       itemCount,
       totalAmount,
@@ -637,9 +675,8 @@ export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryL
       selfSuppliedCostAmount,
       updatedAt: now,
       ...(who ? { lastUpdatedByName: who } : {}),
-    };
-    saveOrderHistory(h);
-    return { ok: true };
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
   }
 
   return { ok: false, reason: 'not_found' };
@@ -689,7 +726,8 @@ export function adminPatchOrderLineUnitPricesById(
   id: string,
   nextLines: OrderHistoryLine[]
 ): AdminPatchOrderUnitPricesResult {
-  if (!getDataScopeContext().isAdmin) return { ok: false, reason: 'forbidden' };
+  const ctx = getDataScopeContext();
+  if (!ctx.isAdmin) return { ok: false, reason: 'forbidden' };
 
   const nextAgg = aggregateOrderLinesForSave(nextLines);
   if (nextAgg.lines.length === 0) return { ok: false, reason: 'empty' };
@@ -726,15 +764,13 @@ export function adminPatchOrderLineUnitPricesById(
     return { ok: true };
   };
 
-  const mgmt = loadFranchiseManagementOrders();
-  const mi = mgmt.findIndex((o) => o.id === id);
-  if (mi >= 0) {
+  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  if (mgmtHit) {
     const now = new Date().toISOString();
     const who = persistableActorDisplayName();
-    const m = [...mgmt];
-    const res = tryPatch(m[mi], (tot) => {
-      m[mi] = {
-        ...m[mi],
+    const res = tryPatch(mgmtHit, (tot) => {
+      patchFranchiseManagementOrderById(id, (row) => ({
+        ...row,
         lines: tot.lines,
         itemCount: tot.itemCount,
         totalAmount: tot.totalAmount,
@@ -742,23 +778,20 @@ export function adminPatchOrderLineUnitPricesById(
         selfSuppliedCostAmount: 0,
         updatedAt: now,
         ...(who ? { lastUpdatedByName: who } : {}),
-      };
-      saveFranchiseManagementOrders(m);
+      }));
     });
     return res;
   }
 
-  const hist = loadOrderHistory();
-  const hi = hist.findIndex((o) => o.id === id);
-  if (hi >= 0) {
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (histHit) {
     const now = new Date().toISOString();
     const who = persistableActorDisplayName();
-    const h = [...hist];
-    const res = tryPatch(h[hi], (tot) => {
+    const res = tryPatch(histHit, (tot) => {
       const payableAmount = tot.totalAmount;
-      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(tot.lines, h[hi].actorRole);
-      h[hi] = {
-        ...h[hi],
+      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(tot.lines, histHit.actorRole);
+      patchOrderHistoryById(id, (row) => ({
+        ...row,
         lines: tot.lines,
         itemCount: tot.itemCount,
         totalAmount: tot.totalAmount,
@@ -766,8 +799,7 @@ export function adminPatchOrderLineUnitPricesById(
         selfSuppliedCostAmount,
         updatedAt: now,
         ...(who ? { lastUpdatedByName: who } : {}),
-      };
-      saveOrderHistory(h);
+      }));
     });
     return res;
   }
@@ -786,16 +818,14 @@ export function updateEditableOrderLinesById(
   const { lines, itemCount, totalAmount } = aggregateOrderLinesForSave(nextLines);
   if (lines.length === 0) return { ok: false, reason: 'empty' };
 
-  const mgmt = loadFranchiseManagementOrders();
-  const mi = mgmt.findIndex((o) => o.id === id);
-  if (mi >= 0) {
-    if (mgmt[mi].status === '已取消') return { ok: false, reason: 'canceled' };
-    if (orderHasStallCountCompleted(mgmt[mi])) return { ok: false, reason: 'stall_count_locked' };
-    const m = [...mgmt];
+  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  if (mgmtHit) {
+    if (mgmtHit.status === '已取消') return { ok: false, reason: 'canceled' };
+    if (orderHasStallCountCompleted(mgmtHit)) return { ok: false, reason: 'stall_count_locked' };
     const now = new Date().toISOString();
     const who = persistableActorDisplayName();
-    m[mi] = {
-      ...m[mi],
+    const patched = patchFranchiseManagementOrderById(id, (row) => ({
+      ...row,
       lines,
       itemCount,
       totalAmount,
@@ -803,23 +833,20 @@ export function updateEditableOrderLinesById(
       selfSuppliedCostAmount: 0,
       updatedAt: now,
       ...(who ? { lastUpdatedByName: who } : {}),
-    };
-    saveFranchiseManagementOrders(m);
-    return { ok: true };
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
   }
 
-  const hist = loadOrderHistory();
-  const hi = hist.findIndex((o) => o.id === id);
-  if (hi >= 0) {
-    if (hist[hi].status === '已取消') return { ok: false, reason: 'canceled' };
-    if (orderHasStallCountCompleted(hist[hi])) return { ok: false, reason: 'stall_count_locked' };
-    const h = [...hist];
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (histHit) {
+    if (histHit.status === '已取消') return { ok: false, reason: 'canceled' };
+    if (orderHasStallCountCompleted(histHit)) return { ok: false, reason: 'stall_count_locked' };
     const now = new Date().toISOString();
     const payableAmount = totalAmount;
-    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, h[hi].actorRole);
+    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, histHit.actorRole);
     const who = persistableActorDisplayName();
-    h[hi] = {
-      ...h[hi],
+    const patched = patchOrderHistoryById(id, (row) => ({
+      ...row,
       lines,
       itemCount,
       totalAmount,
@@ -827,16 +854,15 @@ export function updateEditableOrderLinesById(
       selfSuppliedCostAmount,
       updatedAt: now,
       ...(who ? { lastUpdatedByName: who } : {}),
-    };
-    saveOrderHistory(h);
-    return { ok: true };
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
   }
 
   return { ok: false, reason: 'not_found' };
 }
 
 /**
- * 超級管理員叫貨 → 訂單管理（專用儲存）；
+ * 直營店管理員叫貨 → 訂單管理（專用儲存）；
  * 加盟主／店員叫貨 → 歷史訂單（本清單）。
  */
 export function appendProcurementOrderEntry(params: {
@@ -904,8 +930,7 @@ export function appendProcurementOrderEntry(params: {
       : {}),
   };
 
-  const next = [entry, ...loadOrderHistory()];
-  saveOrderHistory(next);
+  saveOrderHistory([entry, ...loadOrderHistoryAllEntries()]);
 }
 
 /**
@@ -926,37 +951,20 @@ export function setOrderStallCountStamp(
     ...(completedByUserId ? { stallCountCompletedByUserId: completedByUserId } : {}),
     ...(who ? { stallCountCompletedByName: who, lastUpdatedByName: who } : {}),
   };
-  const mgmt = loadFranchiseManagementOrders();
-  const mi = mgmt.findIndex((o) => o.id === orderId);
-  if (mi >= 0) {
-    const now = new Date().toISOString();
-    const next = mgmt.map((o, i) =>
-      i === mi
-        ? {
-            ...o,
-            ...stampPatch,
-            updatedAt: now,
-          }
-        : o
-    );
-    saveFranchiseManagementOrders(next);
-    return true;
+  const now = new Date().toISOString();
+  if (loadFranchiseManagementOrdersAll().some((o) => o.id === orderId)) {
+    return patchFranchiseManagementOrderById(orderId, (row) => ({
+      ...row,
+      ...stampPatch,
+      updatedAt: now,
+    }));
   }
-  const hist = loadOrderHistory();
-  const hi = hist.findIndex((o) => o.id === orderId);
-  if (hi >= 0) {
-    const now = new Date().toISOString();
-    const next = hist.map((o, i) =>
-      i === hi
-        ? {
-            ...o,
-            ...stampPatch,
-            updatedAt: now,
-          }
-        : o
-    );
-    saveOrderHistory(next);
-    return true;
+  if (loadOrderHistoryAllEntries().some((o) => o.id === orderId)) {
+    return patchOrderHistoryById(orderId, (row) => ({
+      ...row,
+      ...stampPatch,
+      updatedAt: now,
+    }));
   }
   return false;
 }
@@ -974,34 +982,28 @@ export function updateStallCountSnapshotByOrderId(
   const now = new Date().toISOString();
   const nextSnap: SalesRecordDaySnapshot = { ...merged, updatedAt: snapshot.updatedAt || now };
 
-  const mgmt = loadFranchiseManagementOrders();
-  const mi = mgmt.findIndex((o) => o.id === orderId);
   const who = persistableActorDisplayName();
-  if (mi >= 0) {
-    if (!mgmt[mi].stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
-    const m = [...mgmt];
-    m[mi] = {
-      ...m[mi],
+  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === orderId);
+  if (mgmtHit) {
+    if (!mgmtHit.stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
+    const patched = patchFranchiseManagementOrderById(orderId, (row) => ({
+      ...row,
       stallCountSnapshot: nextSnap,
       updatedAt: now,
       ...(who ? { lastUpdatedByName: who } : {}),
-    };
-    saveFranchiseManagementOrders(m);
-    return { ok: true };
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
   }
-  const hist = loadOrderHistory();
-  const hi = hist.findIndex((o) => o.id === orderId);
-  if (hi >= 0) {
-    if (!hist[hi].stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
-    const h = [...hist];
-    h[hi] = {
-      ...h[hi],
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === orderId);
+  if (histHit) {
+    if (!histHit.stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
+    const patched = patchOrderHistoryById(orderId, (row) => ({
+      ...row,
       stallCountSnapshot: nextSnap,
       updatedAt: now,
       ...(who ? { lastUpdatedByName: who } : {}),
-    };
-    saveOrderHistory(h);
-    return { ok: true };
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
   }
   return { ok: false, reason: 'not_found' };
 }
@@ -1025,6 +1027,5 @@ export function listOrdersWithStallCountCompleted(): OrderHistoryEntry[] {
     const tb = b.stallCountCompletedAt ?? '';
     return ta < tb ? 1 : ta > tb ? -1 : 0;
   });
-  if (ctx.isAdmin) return sorted;
   return sorted.filter((e) => canAccessOrder(e, ctx));
 }
