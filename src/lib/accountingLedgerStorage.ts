@@ -1,8 +1,15 @@
 /**
  * 非訂單類流水帳（本機 localStorage）
  */
+import { readSession, isSuperAdminSession } from './authSession';
 import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
 import { resolveUserDisplayNameById } from './sessionActorDisplayName';
+
+/** 僅超級管理員（dk001）可跨 scope 瀏覽／維護全部流水帳；直營店管理員僅限總部 scope */
+function canOperateAllAccountingScopes(): boolean {
+  const s = readSession();
+  return !!s && s.role === 'admin' && isSuperAdminSession(s.loginId);
+}
 
 const STORAGE_KEY = 'dongshan_accounting_ledger_v1';
 export const ACCOUNTING_LEDGER_UPDATED_EVENT = 'accountingLedgerUpdated';
@@ -420,9 +427,9 @@ function filterLedgerEntriesForRole(rows: AccountingLedgerEntry[]): AccountingLe
 
 /** 所有紀錄（新→舊）；員工僅能看見自己登記之項目 */
 export function listAccountingLedgerEntries(): AccountingLedgerEntry[] {
-  const { isAdmin, scopeId } = getDataScopeContext();
+  const { scopeId } = getDataScopeContext();
   const s = loadStore();
-  if (isAdmin) {
+  if (canOperateAllAccountingScopes()) {
     const all = Object.values(s.byScope).flat();
     return sortEntries(filterLedgerEntriesForRole(all));
   }
@@ -487,8 +494,8 @@ export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): Ac
 export function removeAccountingLedgerEntry(id: string): boolean {
   const s = loadStore();
   const ctx = getDataScopeContext();
-  const { isAdmin, scopeId } = ctx;
-  if (isAdmin) {
+  const { scopeId } = ctx;
+  if (canOperateAllAccountingScopes()) {
     let changed = false;
     for (const k of Object.keys(s.byScope)) {
       const prev = s.byScope[k] ?? [];
@@ -529,7 +536,7 @@ export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerU
   const s = loadStore();
   const ctx = getDataScopeContext();
   const { isAdmin, scopeId } = ctx;
-  const buckets = isAdmin ? Object.keys(s.byScope) : [scopeId];
+  const buckets = canOperateAllAccountingScopes() ? Object.keys(s.byScope) : [scopeId];
   let foundBucket = '';
   let i = -1;
   for (const b of buckets) {

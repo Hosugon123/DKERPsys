@@ -22,10 +22,14 @@ export function getDataScopeContext(): DataScopeContext {
     return { isAdmin: false, scopeId: `scope:franchisee:${s.userId}`, userId: s.userId, role: 'franchisee' };
   }
   const u = listSystemUsers().find((x) => x.id === s.userId);
-  if (u?.employeeOrgType === 'franchisee' && u.parentFranchiseeUserId) {
+  if (u?.employeeOrgType === 'hq') {
+    return { isAdmin: false, scopeId: HQ_SCOPE_ID, userId: s.userId, role: 'employee' };
+  }
+  const parentFranchiseeId = u?.parentFranchiseeUserId?.trim();
+  if (parentFranchiseeId) {
     return {
       isAdmin: false,
-      scopeId: `scope:franchisee:${u.parentFranchiseeUserId}`,
+      scopeId: `scope:franchisee:${parentFranchiseeId}`,
       userId: s.userId,
       role: 'employee',
     };

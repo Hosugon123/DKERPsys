@@ -15,7 +15,8 @@ import {
   type AccountingFlowType,
   type AccountingLedgerEntry,
 } from '../lib/accountingLedgerStorage';
-import { ymdDashToSlash } from '../lib/dateDisplay';
+import { formatSlashDateTimeFromIso, ymdDashToSlash } from '../lib/dateDisplay';
+import { resolveUserDisplayNameById } from '../lib/sessionActorDisplayName';
 import { cn } from '../lib/utils';
 
 function todayYmd(): string {
@@ -800,6 +801,21 @@ export default function Accounting() {
                     ) : null}
                   </div>
                   {row.note ? <p className="text-xs text-zinc-500 mt-1 break-words">{row.note}</p> : null}
+                  <p className="text-[0.6875rem] text-zinc-600 mt-1 leading-snug">
+                    <span className="text-zinc-500">登記者</span>{' '}
+                    <span className="text-zinc-400">
+                      {row.createdByName?.trim() ||
+                        (row.createdByUserId ? resolveUserDisplayNameById(row.createdByUserId) : '') ||
+                        '—'}
+                    </span>
+                    <span className="text-zinc-700 mx-1.5" aria-hidden>
+                      ·
+                    </span>
+                    <span className="text-zinc-500">登記時間</span>{' '}
+                    <span className="text-zinc-400 tabular-nums">
+                      {formatSlashDateTimeFromIso(row.createdAt) || '—'}
+                    </span>
+                  </p>
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-2 sm:shrink-0">
                   <span

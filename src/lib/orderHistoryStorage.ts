@@ -123,24 +123,47 @@ export type FranchiseManagementOrder = {
   procurementDeductionBasisOrderId?: string;
 };
 
-/** 依目前登入身分決定訂單店號前綴：BOSS 用本機總部店號；加盟主／其員工用權限表之 orderStoreCode（未填則 001） */
+function franchiseeUserIdFromScopeId(scopeId: string): string | null {
+  const m = /^scope:franchisee:(.+)$/.exec(scopeId);
+  const id = m?.[1]?.trim();
+  return id || null;
+}
+
+function orderStoreCode3ForFranchiseeUserId(
+  franchiseeUserId: string,
+  users: ReturnType<typeof listSystemUsers>
+): string | null {
+  const u = users.find((x) => x.id === franchiseeUserId);
+  const raw = u?.orderStoreCode?.trim();
+  return raw ? normalizeStoreCode3Digits(raw) : null;
+}
+
+/**
+ * 依登入身分決定訂單店號前綴：
+ * - 加盟 scope（加盟主／其員工）：權限表「訂單店號」orderStoreCode
+ * - 總部／直營員工：本機「本機店號」{@link getStoreCode3}
+ */
 function resolveStoreCode3ForNewOrder(): string {
   const ctx = getDataScopeContext();
   const users = listSystemUsers();
+
+  const scopeFranchiseeId = franchiseeUserIdFromScopeId(ctx.scopeId);
+  if (scopeFranchiseeId) {
+    const fromScope = orderStoreCode3ForFranchiseeUserId(scopeFranchiseeId, users);
+    if (fromScope) return fromScope;
+  }
+
   if (ctx.role === 'admin' || ctx.role === 'unknown' || !ctx.userId) {
     return getStoreCode3();
   }
   if (ctx.role === 'franchisee') {
-    const u = users.find((x) => x.id === ctx.userId);
-    const raw = u?.orderStoreCode?.trim();
-    return raw ? normalizeStoreCode3Digits(raw) : '001';
+    return orderStoreCode3ForFranchiseeUserId(ctx.userId, users) ?? getStoreCode3();
   }
   if (ctx.role === 'employee') {
     const u = users.find((x) => x.id === ctx.userId);
-    if (u?.employeeOrgType === 'franchisee' && u.parentFranchiseeUserId) {
-      const parent = users.find((x) => x.id === u.parentFranchiseeUserId);
-      const raw = parent?.orderStoreCode?.trim();
-      return raw ? normalizeStoreCode3Digits(raw) : '001';
+    const parentId = u?.parentFranchiseeUserId?.trim();
+    if (parentId) {
+      return orderStoreCode3ForFranchiseeUserId(parentId, users) ?? getStoreCode3();
     }
     return getStoreCode3();
   }
