@@ -2,8 +2,14 @@
  * 非訂單類流水帳（本機 localStorage）
  */
 import { readSession, isSuperAdminSession } from './authSession';
-import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
+import {
+  getDataScopeContext,
+  HQ_SCOPE_ID,
+  resolveAccountingLedgerScopeId,
+  resolveLedgerScopeIdForUser,
+} from './dataScope';
 import { resolveUserDisplayNameById } from './sessionActorDisplayName';
+import { listSystemUsers } from './systemUsersStorage';
 
 /** 僅超級管理員（dk001）可跨 scope 瀏覽／維護全部流水帳；直營店管理員僅限總部 scope */
 function canOperateAllAccountingScopes(): boolean {
@@ -22,6 +28,7 @@ export const ACCOUNTING_CATEGORIES = [
   '滷料',
   '食材支出',
   '直營店營業支出',
+  '加盟店營業支出',
   '店外收入',
 ] as const;
 
@@ -80,6 +87,8 @@ export type AccountingLedgerEntry = {
   createdByUserId?: string;
   /** 登記者顯示名（冗餘方便列表） */
   createdByName?: string;
+  /** 資料範圍（直營 scope:hq；加盟 scope:franchisee:{userId}） */
+  scopeId?: string;
 };
 
 type StoreV1 = {
@@ -133,6 +142,50 @@ function normalizeLedgerCategory(category: string): AccountingCategory {
   return category as AccountingCategory;
 }
 
+function inferLedgerScopeIdFromCreator(createdByUserId: string | undefined): string | undefined {
+  const id = createdByUserId?.trim();
+  if (!id) return undefined;
+  const u = listSystemUsers().find((x) => x.id === id);
+  if (!u) return undefined;
+  return resolveLedgerScopeIdForUser(u);
+}
+
+function migrateMisplacedLedgerScopes(s: StoreV2): { store: StoreV2; changed: boolean } {
+  const hq = [...(s.byScope[HQ_SCOPE_ID] ?? [])];
+  if (hq.length === 0) return { store: s, changed: false };
+
+  const byScope: Record<string, AccountingLedgerEntry[]> = { ...s.byScope };
+  const stay: AccountingLedgerEntry[] = [];
+  let changed = false;
+
+  for (const e of hq) {
+    const inferred =
+      e.scopeId?.trim() || inferLedgerScopeIdFromCreator(e.createdByUserId) || HQ_SCOPE_ID;
+    if (inferred === HQ_SCOPE_ID) {
+      stay.push({ ...e, scopeId: HQ_SCOPE_ID });
+      continue;
+    }
+    const bucket = [...(byScope[inferred] ?? [])];
+    if (bucket.some((x) => x.id === e.id)) continue;
+    bucket.push({ ...e, scopeId: inferred });
+    byScope[inferred] = bucket;
+    changed = true;
+  }
+
+  if (!changed) return { store: s, changed: false };
+  byScope[HQ_SCOPE_ID] = stay;
+  return { store: { version: 2, byScope }, changed: true };
+}
+
+function finalizeLoadedStore(store: StoreV2): StoreV2 {
+  const { store: migrated, changed } = migrateMisplacedLedgerScopes(store);
+  if (changed) {
+    saveStore(migrated);
+    return migrated;
+  }
+  return store;
+}
+
 function coerceEntry(e: AccountingLedgerEntry & { updatedAt?: string }): AccountingLedgerEntry {
   const category = normalizeLedgerCategory(String(e.category));
   const needsSub =
@@ -141,11 +194,14 @@ function coerceEntry(e: AccountingLedgerEntry & { updatedAt?: string }): Account
     String(e.subCategory).trim();
   const sub = needsSub ? String(e.subCategory).trim() : undefined;
   const createdAt = e.createdAt;
+  const scopeId =
+    e.scopeId?.trim() || inferLedgerScopeIdFromCreator(e.createdByUserId) || HQ_SCOPE_ID;
   const { expenseDomain, normalizedSubKey } = deriveLedgerSqlFields(category, sub);
   return {
     ...e,
     category,
     subCategory: sub,
+    scopeId,
     expenseDomain,
     normalizedSubKey,
     updatedAt: e.updatedAt ?? createdAt,
@@ -165,14 +221,14 @@ function loadStore(): StoreV2 {
           ? (rows as AccountingLedgerEntry[]).map((row) => coerceEntry(row as AccountingLedgerEntry))
           : [];
       }
-      return { version: 2, byScope };
+      return finalizeLoadedStore({ version: 2, byScope });
     }
     // v1 migration: 舊資料統一歸屬總部，避免依當前登入者造成跨帳號外溢
     const scopeId = HQ_SCOPE_ID;
     const legacyRows = Array.isArray((p as StoreV1).entries)
       ? (p as StoreV1).entries.map((row) => coerceEntry(row as AccountingLedgerEntry))
       : [];
-    return { version: 2, byScope: { [scopeId]: legacyRows } };
+    return finalizeLoadedStore({ version: 2, byScope: { [scopeId]: legacyRows } });
   } catch {
     return { version: 2, byScope: {} };
   }
@@ -427,7 +483,7 @@ function filterLedgerEntriesForRole(rows: AccountingLedgerEntry[]): AccountingLe
 
 /** 所有紀錄（新→舊）；員工僅能看見自己登記之項目 */
 export function listAccountingLedgerEntries(): AccountingLedgerEntry[] {
-  const { scopeId } = getDataScopeContext();
+  const scopeId = resolveAccountingLedgerScopeId();
   const s = loadStore();
   if (canOperateAllAccountingScopes()) {
     const all = Object.values(s.byScope).flat();
@@ -467,7 +523,7 @@ export type NewAccountingLedgerInput = {
 export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): AccountingLedgerEntry {
   const s = loadStore();
   const ctx = getDataScopeContext();
-  const scopeId = ctx.scopeId;
+  const scopeId = resolveAccountingLedgerScopeId();
   const rows = s.byScope[scopeId] ?? [];
   const now = new Date().toISOString();
   const uid = ctx.userId.trim();
@@ -482,6 +538,7 @@ export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): Ac
     amount: input.amount,
     createdAt: now,
     updatedAt: now,
+    scopeId,
     ...(uid ? { createdByUserId: uid, createdByName } : {}),
   };
   const finalized = coerceEntry(entry);
@@ -494,7 +551,7 @@ export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): Ac
 export function removeAccountingLedgerEntry(id: string): boolean {
   const s = loadStore();
   const ctx = getDataScopeContext();
-  const { scopeId } = ctx;
+  const scopeId = resolveAccountingLedgerScopeId();
   if (canOperateAllAccountingScopes()) {
     let changed = false;
     for (const k of Object.keys(s.byScope)) {
@@ -535,7 +592,7 @@ export type AccountingLedgerUpdate = {
 export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerUpdate): boolean {
   const s = loadStore();
   const ctx = getDataScopeContext();
-  const { isAdmin, scopeId } = ctx;
+  const scopeId = resolveAccountingLedgerScopeId();
   const buckets = canOperateAllAccountingScopes() ? Object.keys(s.byScope) : [scopeId];
   let foundBucket = '';
   let i = -1;
@@ -548,7 +605,7 @@ export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerU
   }
   if (!foundBucket || i < 0) return false;
   const prev = s.byScope[foundBucket]![i];
-  if (!isAdmin && ctx.role === 'employee') {
+  if (!canOperateAllAccountingScopes() && ctx.role === 'employee') {
     const uid = ctx.userId.trim();
     if (!uid || !prev.createdByUserId || prev.createdByUserId !== uid) return false;
   }

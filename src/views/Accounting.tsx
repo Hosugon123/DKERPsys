@@ -801,7 +801,7 @@ export default function Accounting() {
                     ) : null}
                   </div>
                   {row.note ? <p className="text-xs text-zinc-500 mt-1 break-words">{row.note}</p> : null}
-                  <p className="text-[0.6875rem] text-zinc-600 mt-1 leading-snug">
+                  <p className="text-[0.55rem] text-zinc-600 mt-1 leading-snug">
                     <span className="text-zinc-500">登記者</span>{' '}
                     <span className="text-zinc-400">
                       {row.createdByName?.trim() ||
