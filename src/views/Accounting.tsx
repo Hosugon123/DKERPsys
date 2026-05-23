@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Wallet, CalendarDays, Pencil, Trash2, X, Search } from 'lucide-react';
+import { Wallet, CalendarDays, ChevronDown, Pencil, Trash2, X, Search } from 'lucide-react';
 import { useAccountingLedger } from '../hooks/useAccountingLedger';
 import {
   ACCOUNTING_CATEGORIES,
@@ -194,6 +194,16 @@ export default function Accounting() {
     }
     return { income, expense, net: income - expense };
   }, [filtered]);
+
+  const dateFilterSummaryLabel = useMemo(() => {
+    if (quickPreset === 'today') return '今天';
+    if (quickPreset === 'week') return '本週';
+    if (quickPreset === '30d') return '近 30 天';
+    if (rangeBounds.lo && rangeBounds.hi) {
+      return `${ymdDashToSlash(rangeBounds.lo)} ～ ${ymdDashToSlash(rangeBounds.hi)}`;
+    }
+    return '全部紀錄';
+  }, [quickPreset, rangeBounds.lo, rangeBounds.hi]);
 
   const categoryOptions = useMemo(
     () =>
@@ -614,99 +624,106 @@ export default function Accounting() {
               </div>
             </div>
 
-            <div
-              className={cn(
-                'order-1 md:order-2 w-full md:w-auto md:max-w-full shrink-0 rounded-xl border border-amber-900/35 bg-zinc-950/60',
-                'p-3 md:p-2 md:py-1.5 flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:gap-x-2 md:gap-y-2',
-              )}
-              role="group"
-              aria-label="日期範圍篩選"
-            >
-              <div
+            <details className="order-1 md:order-2 group w-full min-w-0 max-w-full shrink-0 rounded-xl border border-amber-900/35 bg-zinc-950/60">
+              <summary
                 className={cn(
-                  'grid grid-cols-3 gap-2 w-full md:w-auto md:flex md:flex-nowrap md:items-stretch',
-                  'md:mr-0 md:pr-2 md:border-r md:border-zinc-800/90',
+                  'flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-left',
+                  '[&::-webkit-details-marker]:hidden',
                 )}
               >
-                {(
-                  [
-                    { id: 'today' as const, label: '今天', onClick: applyQuickToday },
-                    { id: 'week' as const, label: '本週', onClick: applyQuickWeek },
-                    { id: '30d' as const, label: '近 30 天', onClick: applyQuick30Days },
-                  ] as const
-                ).map(({ id, label, onClick }) => (
+                <span className="flex min-w-0 flex-1 items-center gap-2 text-xs text-zinc-400">
+                  <CalendarDays size={16} className="shrink-0 text-amber-600/80" aria-hidden />
+                  <span className="min-w-0 truncate">
+                    日期區間：
+                    <span className="text-amber-200/90 font-medium">{dateFilterSummaryLabel}</span>
+                  </span>
+                </span>
+                <ChevronDown
+                  size={16}
+                  className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
+                  aria-hidden
+                />
+              </summary>
+              <div
+                className="flex flex-col gap-3 border-t border-zinc-800/80 p-3 pt-2.5 w-full min-w-0 max-w-full overflow-x-hidden"
+                role="group"
+                aria-label="日期範圍篩選"
+              >
+                <div className="grid grid-cols-3 gap-2 w-full min-w-0">
+                  {(
+                    [
+                      { id: 'today' as const, label: '今天', onClick: applyQuickToday },
+                      { id: 'week' as const, label: '本週', onClick: applyQuickWeek },
+                      { id: '30d' as const, label: '近 30 天', onClick: applyQuick30Days },
+                    ] as const
+                  ).map(({ id, label, onClick }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={onClick}
+                      aria-pressed={quickPreset === id}
+                      className={cn(
+                        'min-h-10 min-w-0 px-1.5 py-2 text-xs rounded-lg font-medium transition-colors border',
+                        quickPreset === id
+                          ? 'bg-amber-600 text-white border-amber-500 shadow-sm shadow-amber-900/30'
+                          : 'bg-zinc-950/50 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-col gap-2 w-full min-w-0">
+                  <p className="text-xs text-zinc-500">自訂日期範圍</p>
+                  <div className="grid grid-cols-1 gap-2 w-full min-w-0 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 min-w-0">
+                      <span className="text-[0.6875rem] text-zinc-500 shrink-0">從</span>
+                      <input
+                        type="date"
+                        value={rangeStart}
+                        onChange={(ev) => {
+                          setRangeStart(ev.target.value);
+                          setQuickPreset(null);
+                        }}
+                        className={rangeDateInputClass}
+                        aria-label="起始日期"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 min-w-0">
+                      <span className="text-[0.6875rem] text-zinc-500 shrink-0">至</span>
+                      <input
+                        type="date"
+                        value={rangeEnd}
+                        onChange={(ev) => {
+                          setRangeEnd(ev.target.value);
+                          setQuickPreset(null);
+                        }}
+                        className={rangeDateInputClass}
+                        aria-label="結束日期"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 w-full min-w-0">
                   <button
-                    key={id}
                     type="button"
-                    onClick={onClick}
-                    aria-pressed={quickPreset === id}
-                    className={cn(
-                      'min-h-10 px-2 py-2 md:py-1 text-xs rounded-lg font-medium transition-colors border',
-                      quickPreset === id
-                        ? 'bg-amber-600 text-white border-amber-500 shadow-sm shadow-amber-900/30'
-                        : 'bg-zinc-950/50 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600',
-                    )}
+                    onClick={clearDateFilter}
+                    className="min-h-10 min-w-0 px-2 rounded-lg text-xs font-medium border border-zinc-600/70 text-zinc-300 bg-zinc-950/40 hover:bg-zinc-800/90 hover:text-zinc-100 hover:border-zinc-500/60 transition-colors"
                   >
-                    {label}
+                    清除篩選
                   </button>
-                ))}
-              </div>
-
-              <div className="flex flex-col gap-2 w-full min-w-0 md:flex-1 md:flex-row md:flex-wrap md:items-center md:gap-x-1.5 md:gap-y-1 md:w-auto">
-                <div className="flex items-center gap-2 text-xs text-zinc-500 md:hidden">
-                  <CalendarDays size={16} className="text-amber-600/80 shrink-0" aria-hidden />
-                  <span>自訂日期範圍</span>
-                </div>
-                <div className="flex flex-col gap-2 w-full min-w-0 sm:grid sm:grid-cols-2 sm:gap-2 md:flex md:flex-row md:flex-nowrap md:items-center md:gap-1.5 md:w-auto">
-                  <label className="flex flex-col gap-1 min-w-0 md:flex-row md:items-center md:gap-1.5 md:w-auto md:min-w-[10rem]">
-                    <span className="text-[0.6875rem] text-zinc-500 shrink-0 md:flex md:items-center md:gap-1">
-                      <CalendarDays size={14} className="hidden md:inline text-amber-600/75 shrink-0" aria-hidden />
-                      <span className="md:whitespace-nowrap">從</span>
-                    </span>
-                    <input
-                      type="date"
-                      value={rangeStart}
-                      onChange={(ev) => {
-                        setRangeStart(ev.target.value);
-                        setQuickPreset(null);
-                      }}
-                      className={rangeDateInputClass}
-                      aria-label="起始日期"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 min-w-0 md:flex-row md:items-center md:gap-1.5 md:w-auto md:min-w-[10rem]">
-                    <span className="text-[0.6875rem] text-zinc-500 whitespace-nowrap shrink-0">至</span>
-                    <input
-                      type="date"
-                      value={rangeEnd}
-                      onChange={(ev) => {
-                        setRangeEnd(ev.target.value);
-                        setQuickPreset(null);
-                      }}
-                      className={rangeDateInputClass}
-                      aria-label="結束日期"
-                    />
-                  </label>
+                  <button
+                    type="button"
+                    onClick={showAllDateRange}
+                    className="min-h-10 min-w-0 px-2 rounded-lg text-xs font-medium border border-amber-600/50 text-amber-100 bg-amber-950/30 hover:bg-amber-950/45 hover:border-amber-500/55 transition-colors"
+                  >
+                    顯示全部
+                  </button>
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 w-full md:w-auto md:flex md:flex-nowrap md:gap-1.5">
-                <button
-                  type="button"
-                  onClick={clearDateFilter}
-                  className="min-h-10 md:h-9 px-3 rounded-lg text-xs font-medium border border-zinc-600/70 text-zinc-300 bg-zinc-950/40 hover:bg-zinc-800/90 hover:text-zinc-100 hover:border-zinc-500/60 transition-colors"
-                >
-                  清除篩選
-                </button>
-                <button
-                  type="button"
-                  onClick={showAllDateRange}
-                  className="min-h-10 md:h-9 px-3 rounded-lg text-xs font-medium border border-amber-600/50 text-amber-100 bg-amber-950/30 hover:bg-amber-950/45 hover:border-amber-500/55 transition-colors"
-                >
-                  顯示全部
-                </button>
-              </div>
-            </div>
+            </details>
           </div>
 
           <div className="relative">

@@ -390,7 +390,7 @@ function DashboardSummaryRangePicker({
     <div
       className={cn(
         'flex flex-wrap items-center',
-        wideStretch ? 'w-full min-w-0 gap-1.5 sm:flex-nowrap' : wideGapClass,
+        wideStretch ? 'w-full min-w-0 max-w-full gap-1' : wideGapClass,
       )}
     >
       {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
@@ -480,8 +480,8 @@ function DashboardInlineSummaryRangePicker({
           role="listbox"
           aria-label={ariaLabel}
           className={cn(
-            'absolute top-full z-30 mt-1 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30',
-            narrowMenuClassName ?? 'right-0 w-28',
+            'absolute top-full z-30 mt-1 max-h-[min(16rem,50vh)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30',
+            narrowMenuClassName ?? 'left-0 right-0 w-full min-w-0',
           )}
         >
           {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
@@ -1638,19 +1638,39 @@ export default function Dashboard({
                     直營店營運摘要
                   </button>
                 </div>
-                <div className="w-full min-w-0 border-t border-zinc-800/80 pt-2.5">
-                  <DashboardInlineSummaryRangePicker
-                    value={adminFinanceSummaryRange}
-                    onChange={setAdminFinanceSummaryRange}
-                    isNarrow={isNarrow}
-                    ariaLabel="營運數據區間"
-                    wideGapClass="gap-1.5"
-                    narrowTriggerClassName={ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS}
-                    narrowMenuClassName="left-0 right-0 w-full"
-                    narrowWrapperClassName="w-full min-w-0"
-                    wideStretch
-                  />
-                </div>
+                <details className="group w-full min-w-0 max-w-full border-t border-zinc-800/80">
+                  <summary
+                    className={cn(
+                      'flex cursor-pointer list-none items-center justify-between gap-2 py-2.5 text-left',
+                      '[&::-webkit-details-marker]:hidden',
+                    )}
+                  >
+                    <span className="min-w-0 truncate text-xs text-zinc-500">
+                      數據區間：
+                      <span className="font-medium text-amber-200/90">
+                        {summaryRangeLabel(adminFinanceSummaryRange)}
+                      </span>
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
+                      aria-hidden
+                    />
+                  </summary>
+                  <div className="pb-2.5 pt-0.5 w-full min-w-0 max-w-full overflow-x-hidden">
+                    <DashboardInlineSummaryRangePicker
+                      value={adminFinanceSummaryRange}
+                      onChange={setAdminFinanceSummaryRange}
+                      isNarrow={isNarrow}
+                      ariaLabel="營運數據區間"
+                      wideGapClass="gap-1"
+                      narrowTriggerClassName={ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS}
+                      narrowMenuClassName="left-0 right-0 w-full min-w-0"
+                      narrowWrapperClassName="w-full min-w-0"
+                      wideStretch
+                    />
+                  </div>
+                </details>
               </div>
             </div>
 
@@ -1755,27 +1775,46 @@ export default function Dashboard({
           </div>
         ) : (
           <div className="lg:col-span-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-[1.15rem] sm:p-7">
-            <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="mb-2 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-500/90">
                 <TrendingUp size={22} className="shrink-0" aria-hidden />
                 <h3 className="text-lg font-medium leading-snug text-zinc-100 sm:text-xl">
                   {nonAdminSummary?.rangeLabel ?? '本月'}營運摘要
                 </h3>
               </div>
-              <div
-                className={cn(
-                  'ml-auto flex shrink-0 items-center',
-                  isNarrow ? 'w-24 sm:w-auto sm:max-w-[min(12rem,calc(100vw-12rem))]' : '',
-                )}
-              >
-                <DashboardInlineSummaryRangePicker
-                  value={summaryRange}
-                  onChange={setSummaryRange}
-                  isNarrow={isNarrow}
-                  ariaLabel="營運摘要區間"
-                  wideGapClass="justify-end gap-1.5"
-                />
-              </div>
+              <details className="group w-full min-w-0 max-w-full shrink-0 sm:w-auto sm:min-w-[11rem] sm:max-w-[20rem]">
+                <summary
+                  className={cn(
+                    'flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-left',
+                    '[&::-webkit-details-marker]:hidden',
+                  )}
+                >
+                  <span className="min-w-0 truncate text-xs text-zinc-500">
+                    區間：
+                    <span className="font-medium text-amber-200/90">
+                      {summaryRangeLabel(summaryRange)}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
+                    aria-hidden
+                  />
+                </summary>
+                <div className="mt-2 w-full min-w-0 max-w-full overflow-x-hidden">
+                  <DashboardInlineSummaryRangePicker
+                    value={summaryRange}
+                    onChange={setSummaryRange}
+                    isNarrow={isNarrow}
+                    ariaLabel="營運摘要區間"
+                    wideGapClass="gap-1"
+                    narrowTriggerClassName={ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS}
+                    narrowMenuClassName="left-0 right-0 w-full min-w-0"
+                    narrowWrapperClassName="w-full min-w-0"
+                    wideStretch
+                  />
+                </div>
+              </details>
             </div>
             <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-zinc-800/80">
