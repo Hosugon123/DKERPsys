@@ -275,6 +275,8 @@ function canAccessOrder(
   row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>,
   ctx: ReturnType<typeof getDataScopeContext>
 ): boolean {
+  // 總部管理員需跨 scope 檢視／維護加盟店訂單；非管理員仍僅能存取自身資料範圍
+  if (ctx.isAdmin) return true;
   const declared = row.scopeId?.trim();
   const effectiveScope = declared || inferScopeIdFromActorUserId(row.actorUserId);
   if (effectiveScope) return effectiveScope === ctx.scopeId;
