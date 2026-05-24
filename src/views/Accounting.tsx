@@ -120,8 +120,9 @@ function MainIngredientSubcategorySelect({
 const EMPTY_CATEGORY = '' as const;
 const EMPTY_SUB = '';
 
-const dateInputClass =
-  'w-full rounded-xl bg-zinc-950/80 border border-zinc-700/80 pl-10 pr-3 py-2.5 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]';
+/** 新增／編輯表單日期：全寬 + min-w-0，手機不加左側圖示留白（標題已有圖示） */
+const formDateInputClass =
+  'box-border block w-full min-w-0 max-w-full h-11 sm:h-auto rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-3 sm:pl-10 sm:pr-3 py-2.5 text-base sm:text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]';
 
 /** 支出明細列內之日期範圍：手機全寬避免裁切；桌面維持精簡高度 */
 const rangeDateInputClass =
@@ -417,7 +418,7 @@ export default function Accounting() {
   };
 
   return (
-    <div className="space-y-6 pb-24 max-w-[900px] mx-auto">
+    <div className="space-y-6 pb-24 max-w-[900px] mx-auto min-w-0 w-full overflow-x-hidden px-0.5">
       <div>
         <div className="flex items-center gap-2 text-amber-500/90 mb-1">
           <Wallet size={22} className="shrink-0" />
@@ -429,32 +430,32 @@ export default function Accounting() {
         </h2>
       </div>
 
-      <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-5 md:p-6">
+      <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-4 sm:p-5 md:p-6 min-w-0 max-w-full overflow-x-hidden">
         <h3 className="text-lg font-semibold text-zinc-200 mb-4">新增紀錄</h3>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="grid lg:grid-cols-2 gap-4">
-            <label className="block space-y-1.5">
+        <form onSubmit={onSubmit} className="space-y-4 min-w-0 max-w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
+            <label className="block space-y-1.5 min-w-0 max-w-full">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
-                <CalendarDays size={14} className="text-amber-600/80" />
+                <CalendarDays size={14} className="text-amber-600/80 shrink-0" />
                 日期
               </span>
-              <div className="relative">
+              <div className="relative min-w-0 max-w-full overflow-hidden">
                 <CalendarDays
                   size={18}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
                   aria-hidden
                 />
                 <input
                   type="date"
                   value={dateYmd}
                   onChange={(ev) => setDateYmd(ev.target.value)}
-                  className={dateInputClass}
+                  className={formDateInputClass}
                 />
               </div>
             </label>
-            <label className="block space-y-1.5">
+            <label className="block space-y-1.5 min-w-0 max-w-full">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">收支類型</span>
-              <div className="flex rounded-xl border border-zinc-700/80 overflow-hidden p-0.5 bg-zinc-950/60">
+              <div className="flex min-w-0 max-w-full rounded-xl border border-zinc-700/80 overflow-hidden p-0.5 bg-zinc-950/60">
                 {(
                   [
                     { id: 'expense' as const, label: '支出' },
@@ -905,17 +906,17 @@ export default function Accounting() {
                   <CalendarDays size={14} className="text-amber-600/80" />
                   日期
                 </span>
-                <div className="relative">
+                <div className="relative min-w-0 max-w-full overflow-hidden">
                   <CalendarDays
                     size={18}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
                     aria-hidden
                   />
                   <input
                     type="date"
                     value={editDateYmd}
                     onChange={(ev) => setEditDateYmd(ev.target.value)}
-                    className={dateInputClass}
+                    className={formDateInputClass}
                   />
                 </div>
               </label>
