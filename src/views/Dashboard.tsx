@@ -195,6 +195,13 @@ function mondayFirstWeekdayIndexFromYmd(ymd: string): number {
 
 const WEEKDAY_TOGGLE_LABELS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'] as const;
 
+/** 營業額打底：週二（index 1）公休，不顯示、不設目標 */
+const REVENUE_BASELINE_OFF_WEEKDAY_IDX = 1;
+
+const REVENUE_BASELINE_WEEKDAYS = WEEKDAY_TOGGLE_LABELS.map((label, idx) => ({ label, idx })).filter(
+  (x) => x.idx !== REVENUE_BASELINE_OFF_WEEKDAY_IDX,
+);
+
 /** 本週、上週、上上週…共對照幾列（同名星期） */
 const WEEKDAY_CHAIN_ROW_COUNT = 16;
 
@@ -627,33 +634,35 @@ function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
   };
 
   return (
-    <div className="rounded-xl border border-amber-900/40 bg-amber-950/10 p-3 sm:p-4 space-y-3">
-      <div>
-        <p className="text-sm font-medium text-amber-200/95">營業額打底</p>
-        <p className="text-[11px] text-zinc-500 mt-1 leading-snug">
-          設定各星期目標金額；當日登錄實收超過打底即有獎金資格，可隨時修改。
-        </p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
-          <label key={label} className="flex items-center gap-2 min-w-0">
-            <span className="text-xs text-zinc-400 w-9 shrink-0">{label}</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={drafts[idx] ?? ''}
-              onChange={(e) => setDrafts((d) => ({ ...d, [idx]: e.target.value }))}
-              onBlur={() => commit(idx)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur();
-              }}
-              placeholder="未設定"
-              aria-label={`${label}營業額打底`}
-              className="min-w-0 flex-1 rounded-lg border border-zinc-700/80 bg-zinc-950/90 px-2 py-2 text-sm text-zinc-100 tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-600/45"
-            />
-            <span className="text-[10px] text-zinc-600 shrink-0">元</span>
-          </label>
-        ))}
+    <div className="rounded-xl border border-amber-900/40 bg-amber-950/10 px-2.5 py-2 sm:px-3 sm:py-2.5 min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-xs font-medium text-amber-200/95 shrink-0 whitespace-nowrap">
+          營業額打底
+        </span>
+        <div className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain">
+          <div className="grid grid-cols-6 gap-1 min-w-[15rem] sm:min-w-0 sm:w-full">
+            {REVENUE_BASELINE_WEEKDAYS.map(({ label, idx }) => (
+              <label key={label} className="flex flex-col items-stretch gap-0.5 min-w-0">
+                <span className="text-[10px] leading-none text-zinc-500 text-center truncate">
+                  {label.slice(1)}
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={drafts[idx] ?? ''}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [idx]: e.target.value }))}
+                  onBlur={() => commit(idx)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                  }}
+                  placeholder="—"
+                  aria-label={`${label}營業額打底`}
+                  className="w-full min-w-0 h-8 sm:h-9 box-border rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1 py-0 text-center text-xs sm:text-sm text-zinc-100 tabular-nums focus:outline-none focus:ring-1 focus:ring-amber-600/45"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1360,13 +1369,15 @@ export default function Dashboard({
     return () => window.removeEventListener(REVENUE_BASELINE_UPDATED_EVENT, onUpdate);
   }, []);
 
+  const focusDayWeekdayIdx = useMemo(
+    () => (calendarWeekFocusYmd ? mondayFirstWeekdayIndexFromYmd(calendarWeekFocusYmd) : null),
+    [calendarWeekFocusYmd],
+  );
+
   const focusDayRevenueBaseline = useMemo(() => {
-    if (!calendarWeekFocusYmd) return undefined;
-    return getRevenueBaselineTarget(
-      stallRevenueBaselineScopeId,
-      mondayFirstWeekdayIndexFromYmd(calendarWeekFocusYmd),
-    );
-  }, [calendarWeekFocusYmd, stallRevenueBaselineScopeId, revenueBaselineTick]);
+    if (!calendarWeekFocusYmd || focusDayWeekdayIdx === REVENUE_BASELINE_OFF_WEEKDAY_IDX) return undefined;
+    return getRevenueBaselineTarget(stallRevenueBaselineScopeId, focusDayWeekdayIdx);
+  }, [calendarWeekFocusYmd, focusDayWeekdayIdx, stallRevenueBaselineScopeId, revenueBaselineTick]);
 
   const focusDayMeetsRevenueBaseline = useMemo(() => {
     if (focusDayRevenueBaseline === undefined) return false;
@@ -2120,7 +2131,9 @@ export default function Dashboard({
                         ? moneyTW(focusDayEconomics.actual)
                         : '—'}
                     </p>
-                    {focusDayRevenueBaseline !== undefined ? (
+                    {focusDayWeekdayIdx === REVENUE_BASELINE_OFF_WEEKDAY_IDX ? (
+                      <p className="text-[10px] text-zinc-600 mt-1">週二公休</p>
+                    ) : focusDayRevenueBaseline !== undefined ? (
                       <p className="text-[10px] text-zinc-500 mt-1 tabular-nums">
                         打底 {moneyTW(focusDayRevenueBaseline)}
                         {focusDayMeetsRevenueBaseline ? (
