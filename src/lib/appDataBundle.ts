@@ -45,7 +45,8 @@ export type DongshanDataBundleV1 = {
 
 export const DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT = 'dongshanDataBundleImported';
 
-function dispatchPostImportSync() {
+/** 匯入 bundle 或本機下拉重新整理後，通知各畫面重讀 localStorage */
+export function dispatchDongshanStorageSyncEvents(): void {
   const events = [
     'accountingLedgerUpdated',
     'orderHistoryUpdated',
@@ -62,6 +63,10 @@ function dispatchPostImportSync() {
     window.dispatchEvent(new Event(type));
   }
   window.dispatchEvent(new Event(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT));
+}
+
+function dispatchPostImportSync() {
+  dispatchDongshanStorageSyncEvents();
 }
 
 /** 產生可下載之 bundle 物件 */
