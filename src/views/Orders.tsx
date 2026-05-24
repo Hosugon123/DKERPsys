@@ -1,11 +1,11 @@
-import { useState, useMemo, useEffect, useRef, useCallback, type MouseEvent } from 'react';
-import { Search, Package, Calendar, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
+import { useState, useMemo, useEffect, useCallback, type MouseEvent } from 'react';
+import { Package, CalendarDays, ChevronDown, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
-  orderDateQueryMatches,
   formatSlashYmdWithWeekdayFromYmd,
   formatSlashDateTimeWithWeekdayFromIso,
   orderMatchesActiveWeekdaysFromYmd,
+  ymdDashToSlash,
 } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
@@ -54,6 +54,38 @@ const STORE_TYPE_TABS: { id: StoreTypeFilter; label: string }[] = [
   { id: 'hq', label: '直營店' },
   { id: 'franchise', label: '加盟店' },
 ];
+
+/** 加盟店數量增加後再顯示「直營／加盟」類型篩選 */
+const SHOW_ORDERS_STORE_TYPE_FILTER = false;
+
+type DateQuickPreset = 'today' | 'week' | '30d';
+
+function todayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function addDaysToYmd(ymd: string, deltaDays: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + deltaDays);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+function thisWeekMonToSunBounds(): { start: string; end: string } {
+  const now = new Date();
+  const dow = now.getDay();
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+  const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday);
+  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+  return {
+    start: `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`,
+    end: `${sun.getFullYear()}-${String(sun.getMonth() + 1).padStart(2, '0')}-${String(sun.getDate()).padStart(2, '0')}`,
+  };
+}
+
+const ORDER_FILTER_SELECT_CLASS =
+  'box-border h-9 w-full min-w-0 appearance-none rounded-lg border border-zinc-700/80 bg-zinc-950/80 pl-8 pr-3 text-xs text-zinc-300 focus:border-amber-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50';
 
 type OrderRow = {
   id: string;
@@ -443,15 +475,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [storeTypeFilter, setStoreTypeFilter] = useState<StoreTypeFilter>('all');
   /** 指定店家篩選；'all' 表示不指定，其他為已解析後的店名（與列表顯示一致） */
   const [storeLabelFilter, setStoreLabelFilter] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState('');
   /** 建單星期篩選（空＝不篩選） */
   const [activeWeekdays, setActiveWeekdays] = useState<number[]>([]);
-  const [datePanelOpen, setDatePanelOpen] = useState(false);
-  /** 已套用的訂單日期篩選（含起迄日）；null 表示不篩日期 */
-  const [appliedDateRange, setAppliedDateRange] = useState<{ from: string; to: string } | null>(null);
-  const [draftFrom, setDraftFrom] = useState('');
-  const [draftTo, setDraftTo] = useState('');
-  const datePopoverRef = useRef<HTMLDivElement>(null);
+  const [dateRangeFrom, setDateRangeFrom] = useState('');
+  const [dateRangeTo, setDateRangeTo] = useState('');
+  const [dateQuickPreset, setDateQuickPreset] = useState<DateQuickPreset | null>(null);
   /** 出貨：兩階段確認 */
   const [shipModal, setShipModal] = useState<null | { id: string }>(null);
   /** 已出貨改回待出貨 */
@@ -574,6 +602,35 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   /** 是否顯示店家篩選 UI：加盟主僅看自己一家，無意義；其他角色至少出現過 1 家以上才顯示 */
   const showStoreFilter = userRole !== 'franchisee' && storeOptions.length >= 2;
 
+  const effectiveDateRange = useMemo(() => {
+    if (!dateRangeFrom || !dateRangeTo) return null;
+    let from = dateRangeFrom;
+    let to = dateRangeTo;
+    if (from > to) [from, to] = [to, from];
+    return { from, to };
+  }, [dateRangeFrom, dateRangeTo]);
+
+  const dateFilterSummaryLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (effectiveDateRange) {
+      parts.push(`${ymdDashToSlash(effectiveDateRange.from)}～${ymdDashToSlash(effectiveDateRange.to)}`);
+    } else if (dateRangeFrom || dateRangeTo) {
+      parts.push('請選完整起迄');
+    }
+    if (activeWeekdays.length === 1) {
+      const wd = ['', '週一', '週二', '週三', '週四', '週五', '週六', '週日'][activeWeekdays[0]!];
+      if (wd) parts.push(wd);
+    }
+    return parts.length > 0 ? parts.join(' · ') : '全部日期';
+  }, [effectiveDateRange, dateRangeFrom, dateRangeTo, activeWeekdays]);
+
+  const hasActiveFilters =
+    statusFilter !== '所有訂單' ||
+    storeTypeFilter !== 'all' ||
+    storeLabelFilter !== 'all' ||
+    effectiveDateRange != null ||
+    activeWeekdays.length > 0;
+
   const filteredOrders = useMemo(() => {
     const byWeekday = ordersData.filter((order) => {
       const o = rawList.find((r) => r.id === order.id);
@@ -593,42 +650,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       if (statusFilter === '所有訂單') return true;
       return order.status === statusFilter;
     });
-    const byDate = byStatus.filter((order) => {
-      if (!appliedDateRange) return true;
+    return byStatus.filter((order) => {
+      if (!effectiveDateRange) return true;
       const o = rawList.find((r) => r.id === order.id);
       if (!o) return false;
       const key = effectiveOrderDateYmd(o);
       if (!key) return false;
-      return key >= appliedDateRange.from && key <= appliedDateRange.to;
+      return key >= effectiveDateRange.from && key <= effectiveDateRange.to;
     });
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return byDate;
-    return byDate.filter((order) => {
-      const phoneNorm = order.phone.replace(/\s/g, '');
-      const qNorm = q.replace(/\s/g, '');
-      const raw = rawList.find((r) => r.id === order.id);
-      if (
-        raw &&
-        orderDateQueryMatches(raw.createdAt, {
-          stallCountBasisYmd: raw.stallCountBasisYmd,
-          stallCountCompletedAt: raw.stallCountCompletedAt,
-          orderDateYmd: raw.orderDateYmd,
-        }, searchQuery.trim())
-      ) {
-        return true;
-      }
-      return (
-        order.franchisee.toLowerCase().includes(q) ||
-        order.id.toLowerCase().includes(q) ||
-        order.contact.toLowerCase().includes(q) ||
-        order.address.toLowerCase().includes(q) ||
-        (qNorm && phoneNorm.includes(qNorm)) ||
-        order.itemLines.some(
-          (it) => it.name.toLowerCase().includes(q) || String(it.qty).includes(q)
-        )
-      );
-    });
-  }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, searchQuery, appliedDateRange, ordersData, rawList]);
+  }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, effectiveDateRange, ordersData, rawList]);
 
   useEffect(() => {
     if (expandedOrderId && !filteredOrders.some((o) => o.id === expandedOrderId)) {
@@ -636,49 +666,40 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     }
   }, [expandedOrderId, filteredOrders]);
 
-  useEffect(() => {
-    if (!datePanelOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const el = datePopoverRef.current;
-      if (el && !el.contains(e.target as Node)) setDatePanelOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDatePanelOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [datePanelOpen]);
+  const applyQuickToday = useCallback(() => {
+    const t = todayYmd();
+    setDateRangeFrom(t);
+    setDateRangeTo(t);
+    setDateQuickPreset('today');
+  }, []);
 
-  const openDatePanel = () => {
-    if (appliedDateRange) {
-      setDraftFrom(appliedDateRange.from);
-      setDraftTo(appliedDateRange.to);
-    }
-    setDatePanelOpen(true);
-  };
+  const applyQuickWeek = useCallback(() => {
+    const { start, end } = thisWeekMonToSunBounds();
+    setDateRangeFrom(start);
+    setDateRangeTo(end);
+    setDateQuickPreset('week');
+  }, []);
 
-  const applyDateRange = () => {
-    if (!draftFrom || !draftTo) return;
-    let from = draftFrom;
-    let to = draftTo;
-    if (from > to) [from, to] = [to, from];
-    setAppliedDateRange({ from, to });
-    setDraftFrom(from);
-    setDraftTo(to);
-    setDatePanelOpen(false);
-  };
+  const applyQuick30Days = useCallback(() => {
+    const end = todayYmd();
+    setDateRangeTo(end);
+    setDateRangeFrom(addDaysToYmd(end, -29));
+    setDateQuickPreset('30d');
+  }, []);
 
-  const clearDateRange = () => {
-    setAppliedDateRange(null);
-    setDraftFrom('');
-    setDraftTo('');
+  const clearDateFilter = useCallback(() => {
+    setDateRangeFrom('');
+    setDateRangeTo('');
     setActiveWeekdays([]);
-    setDatePanelOpen(false);
-  };
+    setDateQuickPreset(null);
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setStatusFilter('所有訂單');
+    setStoreTypeFilter('all');
+    setStoreLabelFilter('all');
+    clearDateFilter();
+  }, [clearDateFilter]);
 
   const toggleOrder = (id: string) => {
     if (expandedOrderId === id) {
@@ -927,211 +948,237 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
   return (
     <div className={cn('space-y-6 pb-24', orderEditDockActive && 'pb-32')}>
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <ListOrdered className="text-amber-500 shrink-0" size={28} />
-            訂單管理
-          </h2>
+      <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+        <ListOrdered className="text-amber-500 shrink-0" size={28} />
+        訂單管理
+      </h2>
+
+      <section
+        className="rounded-2xl border border-zinc-800/90 bg-zinc-900/40 p-3 sm:p-4 space-y-3"
+        aria-label="訂單篩選"
+      >
+        <div
+          className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none -mx-0.5 px-0.5"
+          role="tablist"
+          aria-label="訂單狀態"
+        >
+          {STATUS_TABS.map((tab) => {
+            const isActive = statusFilter === tab;
+            return (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setStatusFilter(tab)}
+                className={cn(
+                  'box-border inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full border px-3.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm',
+                  isActive
+                    ? 'bg-amber-600/20 text-amber-500 border-amber-600/30'
+                    : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800',
+                )}
+              >
+                {tab === '已完成' ? '已出貨' : tab}
+              </button>
+            );
+          })}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-            <input 
-              type="text" 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜尋訂單、加盟店、日期（例 2026/4/25）"
-              className="pl-10 pr-4 py-2 border border-zinc-700 bg-zinc-900 rounded-lg focus:outline-none focus:border-amber-500 transition-colors text-sm text-zinc-300 w-full sm:w-64"
-            />
-          </div>
-          <div className="relative" ref={datePopoverRef}>
-            <button
-              type="button"
-              aria-expanded={datePanelOpen}
-              aria-haspopup="dialog"
-              onClick={() => (datePanelOpen ? setDatePanelOpen(false) : openDatePanel())}
+
+        <div
+          className={cn(
+            'grid grid-cols-1 gap-2',
+            showStoreFilter ? 'sm:grid-cols-2' : 'sm:max-w-md',
+          )}
+        >
+          <details className="group min-w-0 rounded-xl border border-amber-900/30 bg-zinc-950/60">
+            <summary
               className={cn(
-                'px-4 py-2 rounded-lg transition-colors font-medium text-sm flex gap-2 items-center border',
-                appliedDateRange
-                  ? 'bg-amber-600/15 border-amber-600/40 text-amber-500 hover:bg-amber-600/25'
-                  : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
+                'flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-left',
+                '[&::-webkit-details-marker]:hidden',
+                (effectiveDateRange || activeWeekdays.length > 0) && 'text-amber-200/90',
               )}
             >
-              <Calendar size={16} aria-hidden />
-              篩選日期
-              {appliedDateRange && (
-                <span className="max-w-[10rem] truncate text-xs font-normal opacity-90">
-                  {appliedDateRange.from} ~ {appliedDateRange.to}
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-xs text-zinc-400">
+                <CalendarDays size={15} className="shrink-0 text-amber-600/80" aria-hidden />
+                <span className="min-w-0 truncate">
+                  日期：
+                  <span className="font-medium text-amber-200/90">{dateFilterSummaryLabel}</span>
                 </span>
-              )}
-            </button>
-            {datePanelOpen && (
-              <div
-                role="dialog"
-                aria-label="訂單日期範圍"
-                className="absolute right-0 top-full z-50 mt-2 w-[min(100vw-2rem,20rem)] rounded-xl border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
-              >
-                <p className="text-xs text-zinc-500 mb-3">以訂單建立日（依列表上的日期）篩選，起迄皆含當日。</p>
-                <div className="space-y-3">
-                  <label className="block text-sm text-zinc-400">
-                    <span className="mb-1 block">起始日</span>
-                    <input
-                      type="date"
-                      value={draftFrom}
-                      onChange={(e) => setDraftFrom(e.target.value)}
-                      className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none"
-                    />
-                  </label>
-                  <label className="block text-sm text-zinc-400">
-                    <span className="mb-1 block">結束日</span>
-                    <input
-                      type="date"
-                      value={draftTo}
-                      onChange={(e) => setDraftTo(e.target.value)}
-                      className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none"
-                    />
-                  </label>
-                  <OrderWeekdayFilter
-                    value={activeWeekdays}
-                    onChange={setActiveWeekdays}
-                    className="border-zinc-800 bg-zinc-950/60"
-                  />
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
+              </span>
+              <ChevronDown
+                size={15}
+                className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
+                aria-hidden
+              />
+            </summary>
+            <div
+              className="flex flex-col gap-3 border-t border-zinc-800/80 p-3 pt-2.5"
+              role="group"
+              aria-label="日期與建單星期"
+            >
+              <p className="text-[0.6875rem] leading-snug text-zinc-500">
+                以列表上的訂單日期篩選，起迄皆含當日。
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(
+                  [
+                    { id: 'today' as const, label: '今天', onClick: applyQuickToday },
+                    { id: 'week' as const, label: '本週', onClick: applyQuickWeek },
+                    { id: '30d' as const, label: '近 30 天', onClick: applyQuick30Days },
+                  ] as const
+                ).map(({ id, label, onClick }) => (
                   <button
+                    key={id}
                     type="button"
-                    disabled={!draftFrom || !draftTo}
-                    onClick={applyDateRange}
-                    className="flex-1 min-w-[6rem] rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={onClick}
+                    aria-pressed={dateQuickPreset === id}
+                    className={cn(
+                      'box-border min-h-9 rounded-lg border px-1 py-1.5 text-xs font-medium transition-colors',
+                      dateQuickPreset === id
+                        ? 'border-amber-500 bg-amber-600 text-white shadow-sm shadow-amber-900/30'
+                        : 'border-zinc-700 bg-zinc-950/50 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200',
+                    )}
                   >
-                    套用
+                    {label}
                   </button>
-                  <button
-                    type="button"
-                    onClick={clearDateRange}
-                    className="rounded-lg border border-zinc-600 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
-                  >
-                    清除
-                  </button>
-                </div>
+                ))}
               </div>
-            )}
-          </div>
-        </div>
-      </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex min-w-0 flex-col gap-1">
+                  <span className="text-[0.6875rem] text-zinc-500">從</span>
+                  <input
+                    type="date"
+                    value={dateRangeFrom}
+                    onChange={(e) => {
+                      setDateRangeFrom(e.target.value);
+                      setDateQuickPreset(null);
+                    }}
+                    className="box-border h-9 w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none [color-scheme:dark]"
+                    aria-label="起始日期"
+                  />
+                </label>
+                <label className="flex min-w-0 flex-col gap-1">
+                  <span className="text-[0.6875rem] text-zinc-500">至</span>
+                  <input
+                    type="date"
+                    value={dateRangeTo}
+                    onChange={(e) => {
+                      setDateRangeTo(e.target.value);
+                      setDateQuickPreset(null);
+                    }}
+                    className="box-border h-9 w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none [color-scheme:dark]"
+                    aria-label="結束日期"
+                  />
+                </label>
+              </div>
+              <OrderWeekdayFilter
+                value={activeWeekdays}
+                onChange={setActiveWeekdays}
+                className="border-zinc-800/80 bg-zinc-950/40 px-2 py-1"
+              />
+              <button
+                type="button"
+                onClick={clearDateFilter}
+                className="box-border min-h-9 w-full rounded-lg border border-zinc-600/70 bg-zinc-950/40 px-2 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500/60 hover:bg-zinc-800/90 hover:text-zinc-100"
+              >
+                清除日期篩選
+              </button>
+            </div>
+          </details>
 
-      {showStoreFilter && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-          <div
-            className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none shrink-0"
-            role="tablist"
-            aria-label="訂單店家類型篩選"
-          >
-            {STORE_TYPE_TABS.map((tab) => {
-              const isActive = storeTypeFilter === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => setStoreTypeFilter(tab.id)}
+          {showStoreFilter && (
+            <>
+              {SHOW_ORDERS_STORE_TYPE_FILTER && (
+                <div className="relative min-w-0">
+                  <label htmlFor="orders-store-type-filter" className="sr-only">
+                    店家類型
+                  </label>
+                  <Store
+                    size={14}
+                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
+                    aria-hidden
+                  />
+                  <select
+                    id="orders-store-type-filter"
+                    value={storeTypeFilter}
+                    onChange={(e) => setStoreTypeFilter(e.target.value as StoreTypeFilter)}
+                    className={cn(
+                      ORDER_FILTER_SELECT_CLASS,
+                      storeTypeFilter !== 'all' && 'border-amber-600/50 text-amber-300',
+                    )}
+                  >
+                    {STORE_TYPE_TABS.map((tab) => (
+                      <option key={tab.id} value={tab.id}>
+                        {tab.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="relative min-w-0">
+                <label htmlFor="orders-store-filter" className="sr-only">
+                  指定店家
+                </label>
+                <Store
+                  size={14}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
+                  aria-hidden
+                />
+                <select
+                  id="orders-store-filter"
+                  value={storeLabelFilter}
+                  onChange={(e) => setStoreLabelFilter(e.target.value)}
+                  disabled={visibleStoreOptions.length === 0}
                   className={cn(
-                    'flex-shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-medium transition-colors border text-xs sm:text-sm',
-                    isActive
-                      ? 'bg-amber-600/15 text-amber-400 border-amber-600/40'
-                      : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800'
+                    ORDER_FILTER_SELECT_CLASS,
+                    storeLabelFilter !== 'all' && 'border-amber-600/50 text-amber-300',
                   )}
                 >
-                  {tab.id === 'hq' && <Store size={13} aria-hidden />}
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-          <div className="relative flex-1 min-w-0 sm:max-w-xs">
-            <label htmlFor="orders-store-filter" className="sr-only">
-              指定店家
-            </label>
-            <Store
-              size={15}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
-              aria-hidden
-            />
-            <select
-              id="orders-store-filter"
-              value={storeLabelFilter}
-              onChange={(e) => setStoreLabelFilter(e.target.value)}
-              disabled={visibleStoreOptions.length === 0}
-              className={cn(
-                'w-full appearance-none pl-8 pr-3 py-1.5 rounded-lg border bg-zinc-900 text-xs sm:text-sm focus:outline-none focus:border-amber-500 transition-colors',
-                storeLabelFilter !== 'all'
-                  ? 'border-amber-600/50 text-amber-300'
-                  : 'border-zinc-700 text-zinc-300',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-            >
-              <option value="all">
-                {storeTypeFilter === 'all'
-                  ? '所有店家'
-                  : storeTypeFilter === 'hq'
-                    ? '所有直營店'
-                    : '所有加盟店'}
-              </option>
-              {visibleStoreOptions.map((s) => (
-                <option key={s.label} value={s.label}>
-                  {s.label}（{s.count}）
-                </option>
-              ))}
-            </select>
-          </div>
-          {(storeTypeFilter !== 'all' || storeLabelFilter !== 'all') && (
+                  <option value="all">
+                    {storeTypeFilter === 'all'
+                      ? '所有店家'
+                      : storeTypeFilter === 'hq'
+                        ? '所有直營店'
+                        : '所有加盟店'}
+                  </option>
+                  {visibleStoreOptions.map((s) => (
+                    <option key={s.label} value={s.label}>
+                      {s.label}（{s.count}）
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-2 text-xs text-zinc-500">
+          <span>
+            共 <span className="font-medium text-zinc-300 tabular-nums">{filteredOrders.length}</span> 筆
+            {statusFilter !== '所有訂單' && (
+              <span className="text-zinc-600">
+                {' '}
+                · {statusFilter === '已完成' ? '已出貨' : statusFilter}
+              </span>
+            )}
+          </span>
+          {hasActiveFilters && (
             <button
               type="button"
-              onClick={() => {
-                setStoreTypeFilter('all');
-                setStoreLabelFilter('all');
-              }}
-              className="self-start sm:self-auto inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70"
-              aria-label="清除店家篩選"
+              onClick={clearAllFilters}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-zinc-400 transition-colors hover:bg-zinc-800/70 hover:text-zinc-200"
             >
               <X size={12} aria-hidden />
-              清除店家篩選
+              清除全部篩選
             </button>
           )}
         </div>
-      )}
-
-      <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-none" role="tablist" aria-label="訂單狀態篩選">
-            {STATUS_TABS.map((tab) => {
-          const isActive = statusFilter === tab;
-          return (
-            <button 
-              key={tab}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => setStatusFilter(tab)}
-              className={cn(
-                "flex-shrink-0 px-5 py-2 rounded-full font-medium transition-colors border text-sm",
-                isActive
-                  ? "bg-amber-600/20 text-amber-500 border-amber-600/30" 
-                  : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800"
-              )}
-            >
-              {tab === '已完成' ? '已出貨' : tab}
-            </button>
-          );
-        })}
-      </div>
+      </section>
 
       <div className="space-y-4">
         {filteredOrders.length === 0 && (
           <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/30 px-6 py-12 text-center text-sm text-zinc-500">
-            {searchQuery.trim()
-              ? '沒有符合搜尋條件的訂單，請調整關鍵字或併用狀態／日期／建單星期篩選。'
-              : '沒有符合目前篩選條件的訂單。請調整狀態分頁、建單星期、日期範圍或關鍵字搜尋。'}
+            沒有符合目前篩選條件的訂單，請調整狀態、日期、建單星期或店家條件。
           </div>
         )}
         {filteredOrders.map((order) => {
