@@ -6,7 +6,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import PullToRefresh from './components/PullToRefresh';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
-import { APP_PAGE_REFRESH_EVENT, refreshAppPageData } from './lib/appRefresh';
+import {
+  APP_PAGE_REFRESH_EVENT,
+  PULL_RELOAD_QUERY_KEY,
+  refreshAppPageData,
+} from './lib/appRefresh';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import Dashboard, { type DashboardViewAsTarget } from './views/Dashboard';
@@ -48,6 +52,15 @@ export default function App() {
   const scrollLockYRef = useRef(0);
 
   const isSuperAdmin = session ? isSuperAdminSession(session.loginId) : false;
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has(PULL_RELOAD_QUERY_KEY)) {
+      url.searchParams.delete(PULL_RELOAD_QUERY_KEY);
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState(null, '', next);
+    }
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -107,7 +120,7 @@ export default function App() {
   }, []);
 
   const handlePullRefresh = useCallback(async () => {
-    await refreshAppPageData();
+    await refreshAppPageData({ reloadShell: true });
   }, []);
 
   useEffect(() => {

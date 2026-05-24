@@ -1,5 +1,6 @@
 /**
  * 全頁下拉重新整理：遠端模式拉取 sync-bundle；本機模式廣播各模組更新事件。
+ * 手機下拉另可觸發整頁重新載入，以取得最新部署的 JS/CSS（等同瀏覽器重新整理）。
  */
 import { getStorageMode } from '../services/storageMode';
 import { fetchRemoteBundle } from '../services/remoteSyncHub';
@@ -7,7 +8,26 @@ import { dispatchDongshanStorageSyncEvents, importDongshanDataBundle } from './a
 
 export const APP_PAGE_REFRESH_EVENT = 'appPageRefresh';
 
-export async function refreshAppPageData(): Promise<void> {
+/** 下拉重整用於略過 CDN／瀏覽器快取的查詢參數（載入後會由 App 清除） */
+export const PULL_RELOAD_QUERY_KEY = '_ptr';
+
+export type RefreshAppPageOptions = {
+  /**
+   * 同步資料後重新載入整頁（僅 production 建置）。
+   * 開發模式仍只重掛元件，避免中斷 Vite HMR。
+   */
+  reloadShell?: boolean;
+};
+
+/** 強制重新載入頁面（帶快取破除參數，載入後由 App 還原網址） */
+export function reloadAppShell(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(PULL_RELOAD_QUERY_KEY);
+  url.searchParams.set(PULL_RELOAD_QUERY_KEY, String(Date.now()));
+  window.location.replace(url.toString());
+}
+
+export async function refreshAppPageData(options?: RefreshAppPageOptions): Promise<void> {
   if (getStorageMode() === 'remote') {
     const bundle = await fetchRemoteBundle();
     const result = importDongshanDataBundle(bundle);
@@ -17,5 +37,11 @@ export async function refreshAppPageData(): Promise<void> {
   } else {
     dispatchDongshanStorageSyncEvents();
   }
+
+  if (options?.reloadShell && import.meta.env.PROD) {
+    reloadAppShell();
+    return;
+  }
+
   window.dispatchEvent(new Event(APP_PAGE_REFRESH_EVENT));
 }

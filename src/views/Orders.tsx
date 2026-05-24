@@ -624,13 +624,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     return parts.length > 0 ? parts.join(' · ') : '全部日期';
   }, [effectiveDateRange, dateRangeFrom, dateRangeTo, activeWeekdays]);
 
-  const hasActiveFilters =
-    statusFilter !== '所有訂單' ||
-    storeTypeFilter !== 'all' ||
-    storeLabelFilter !== 'all' ||
-    effectiveDateRange != null ||
-    activeWeekdays.length > 0;
-
   const filteredOrders = useMemo(() => {
     const byWeekday = ordersData.filter((order) => {
       const o = rawList.find((r) => r.id === order.id);
@@ -693,13 +686,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setActiveWeekdays([]);
     setDateQuickPreset(null);
   }, []);
-
-  const clearAllFilters = useCallback(() => {
-    setStatusFilter('所有訂單');
-    setStoreTypeFilter('all');
-    setStoreLabelFilter('all');
-    clearDateFilter();
-  }, [clearDateFilter]);
 
   const toggleOrder = (id: string) => {
     if (expandedOrderId === id) {
@@ -1149,28 +1135,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                 </select>
               </div>
             </>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-2 text-xs text-zinc-500">
-          <span>
-            共 <span className="font-medium text-zinc-300 tabular-nums">{filteredOrders.length}</span> 筆
-            {statusFilter !== '所有訂單' && (
-              <span className="text-zinc-600">
-                {' '}
-                · {statusFilter === '已完成' ? '已出貨' : statusFilter}
-              </span>
-            )}
-          </span>
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={clearAllFilters}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-zinc-400 transition-colors hover:bg-zinc-800/70 hover:text-zinc-200"
-            >
-              <X size={12} aria-hidden />
-              清除全部篩選
-            </button>
           )}
         </div>
       </section>
