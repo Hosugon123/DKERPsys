@@ -123,12 +123,15 @@ const EMPTY_SUB = '';
 /**
  * 新增／編輯表單日期：緊湊高度、取消多餘 padding，並壓制 WebKit 原生 date 欄位預設 min-height。
  */
+const formDateWrapClass =
+  'accounting-form-date-wrap grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] overflow-hidden';
+
 const formDateInputClass =
-  'accounting-form-date-input box-border block w-full min-w-0 max-w-full h-9 sm:h-10 min-h-0 rounded-lg sm:rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-2.5 sm:pl-9 sm:pr-2 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark] [&::-webkit-date-and-time-value]:min-w-0 [&::-webkit-date-and-time-value]:text-left [&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:p-0 [&::-webkit-calendar-picker-indicator]:opacity-90';
+  'accounting-form-date-input box-border w-full min-w-0 max-w-full h-9 sm:h-10 min-h-0 rounded-lg sm:rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-2.5 sm:pl-9 sm:pr-2 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]';
 
 /** 支出明細列內之日期範圍：手機全寬避免裁切；桌面維持精簡高度 */
 const rangeDateInputClass =
-  'h-10 md:h-9 w-full min-w-0 rounded-lg bg-zinc-950/90 border border-zinc-600/70 px-2.5 py-1.5 text-sm md:text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/35 focus:border-amber-500/50 [color-scheme:dark]';
+  'accounting-form-date-input h-10 md:h-9 w-full min-w-0 max-w-full rounded-lg bg-zinc-950/90 border border-zinc-600/70 px-2.5 py-1.5 text-sm md:text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/35 focus:border-amber-500/50 [color-scheme:dark]';
 
 export default function Accounting() {
   const { entries, add, update, remove } = useAccountingLedger();
@@ -435,13 +438,13 @@ export default function Accounting() {
       <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-3 sm:p-5 md:p-6 min-w-0 max-w-full overflow-x-hidden">
         <h3 className="text-lg font-semibold text-zinc-200 mb-2.5">新增紀錄</h3>
         <form onSubmit={onSubmit} className="space-y-3 min-w-0 max-w-full">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-w-0">
-            <label className="block space-y-1 min-w-0 max-w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-w-0 w-full max-w-full">
+            <label className="block space-y-1 min-w-0 max-w-full w-full">
               <span className="text-xs font-medium text-zinc-500">日期</span>
-              <div className="relative w-full min-w-0 max-w-full">
+              <div className={cn('relative', formDateWrapClass)}>
                 <CalendarDays
                   size={16}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block z-[1]"
                   aria-hidden
                 />
                 <input
@@ -452,9 +455,9 @@ export default function Accounting() {
                 />
               </div>
             </label>
-            <label className="block space-y-1 min-w-0 max-w-full">
+            <label className="block space-y-1 min-w-0 max-w-full w-full">
               <span className="text-xs font-medium text-zinc-500">收支類型</span>
-              <div className="flex min-w-0 max-w-full h-9 sm:h-10 rounded-lg sm:rounded-xl border border-zinc-700/80 overflow-hidden p-0.5 bg-zinc-950/60">
+              <div className="flex min-w-0 w-full max-w-full h-9 sm:h-10 rounded-lg sm:rounded-xl border border-zinc-700/80 overflow-hidden p-0.5 bg-zinc-950/60">
                 {(
                   [
                     { id: 'expense' as const, label: '支出' },
@@ -677,31 +680,35 @@ export default function Accounting() {
                 <div className="flex flex-col gap-2 w-full min-w-0">
                   <p className="text-xs text-zinc-500">自訂日期範圍</p>
                   <div className="grid grid-cols-1 gap-2 w-full min-w-0 sm:grid-cols-2">
-                    <label className="flex flex-col gap-1 min-w-0">
+                    <label className="flex flex-col gap-1 min-w-0 w-full max-w-full">
                       <span className="text-[0.6875rem] text-zinc-500 shrink-0">從</span>
-                      <input
-                        type="date"
-                        value={rangeStart}
-                        onChange={(ev) => {
-                          setRangeStart(ev.target.value);
-                          setQuickPreset(null);
-                        }}
-                        className={rangeDateInputClass}
-                        aria-label="起始日期"
-                      />
+                      <div className={formDateWrapClass}>
+                        <input
+                          type="date"
+                          value={rangeStart}
+                          onChange={(ev) => {
+                            setRangeStart(ev.target.value);
+                            setQuickPreset(null);
+                          }}
+                          className={rangeDateInputClass}
+                          aria-label="起始日期"
+                        />
+                      </div>
                     </label>
-                    <label className="flex flex-col gap-1 min-w-0">
+                    <label className="flex flex-col gap-1 min-w-0 w-full max-w-full">
                       <span className="text-[0.6875rem] text-zinc-500 shrink-0">至</span>
-                      <input
-                        type="date"
-                        value={rangeEnd}
-                        onChange={(ev) => {
-                          setRangeEnd(ev.target.value);
-                          setQuickPreset(null);
-                        }}
-                        className={rangeDateInputClass}
-                        aria-label="結束日期"
-                      />
+                      <div className={formDateWrapClass}>
+                        <input
+                          type="date"
+                          value={rangeEnd}
+                          onChange={(ev) => {
+                            setRangeEnd(ev.target.value);
+                            setQuickPreset(null);
+                          }}
+                          className={rangeDateInputClass}
+                          aria-label="結束日期"
+                        />
+                      </div>
                     </label>
                   </div>
                 </div>
@@ -902,10 +909,10 @@ export default function Accounting() {
             <form onSubmit={onEditSubmit} className="space-y-4">
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-zinc-500">日期</span>
-                <div className="relative w-full min-w-0 max-w-full">
+                <div className={cn('relative', formDateWrapClass)}>
                   <CalendarDays
                     size={16}
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block z-[1]"
                     aria-hidden
                   />
                   <input

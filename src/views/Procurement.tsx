@@ -62,10 +62,13 @@ import {
   formatSlashYmdWithWeekdayFromYmd,
 } from '../lib/dateDisplay';
 import {
-  computeProcurementLastWeekSameDaySold,
+  computeProcurementWeekdaySoldReference,
   defaultProcurementOrderDateYmd,
   defaultProcurementReferenceWeekdayIdx,
+  PROCUREMENT_REFERENCE_MODE_OPTIONS,
+  procurementReferenceSoldRowLabel,
   PROCUREMENT_WEEKDAY_LABELS,
+  type ProcurementReferenceMode,
   weekdayIdxMon0FromYmd,
   ymdOnOrAfterWeekday,
 } from '../lib/procurementWeekdayReference';
@@ -84,8 +87,11 @@ function parseQtyInput(raw: string): number {
   return roundProcurementQty(n);
 }
 
+const PROC_DOCK_SELECT_CLASS =
+  'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[3.25rem] max-w-[5.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1.5 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark]';
+
 const PROC_WEEKDAY_SELECT_CLASS =
-  'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[5rem] max-w-[9.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-2 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark]';
+  `${PROC_DOCK_SELECT_CLASS} min-w-[5rem] max-w-[9.5rem] px-2`;
 
 export default function Procurement({ userRole }: { userRole: UserRole }) {
   const isNarrow = useIsNarrowScreen();
@@ -123,10 +129,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   /** 訂單歸屬日（可預先下單）；下單時間為送出當下之 createdAt */
   const [newOrderDateYmd, setNewOrderDateYmd] = useState(() => defaultProcurementOrderDateYmd());
-  /** 預計叫貨落在星期幾；上週售出參考＝此歸屬日 −7 天 */
+  /** 預計叫貨落在星期幾；售出參考依 referenceMode 對照歷史同星期幾 */
   const [referenceWeekdayIdx, setReferenceWeekdayIdx] = useState(() =>
     defaultProcurementReferenceWeekdayIdx()
   );
+  /** 售出參考模式：最高／平均／上週／最低（預設上週） */
+  const [referenceMode, setReferenceMode] = useState<ProcurementReferenceMode>('lastWeek');
 
   const syncFavorites = useCallback(() => {
     setFavorites(listProcurementFavorites());
@@ -242,9 +250,20 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     return m;
   }, [stallBasisOrderId, catalogItems, stallTick]);
 
-  const lastWeekSameDayRef = useMemo(
-    () => computeProcurementLastWeekSameDaySold(newOrderDateYmd, basisOrdersList, supplyRetailView),
-    [newOrderDateYmd, basisOrdersList, supplyRetailView, stallTick],
+  const weekdaySoldRef = useMemo(
+    () =>
+      computeProcurementWeekdaySoldReference(
+        newOrderDateYmd,
+        basisOrdersList,
+        supplyRetailView,
+        referenceMode,
+      ),
+    [newOrderDateYmd, basisOrdersList, supplyRetailView, referenceMode, stallTick],
+  );
+
+  const referenceSoldRowLabel = useMemo(
+    () => procurementReferenceSoldRowLabel(referenceMode, referenceWeekdayIdx),
+    [referenceMode, referenceWeekdayIdx],
   );
 
   const selectReferenceWeekday = useCallback((idx: number) => {
@@ -1088,14 +1107,14 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 </div>
                 {!isConsumableItem(catalogItem) && (
                   <div className="flex items-center justify-between gap-2">
-                    <span>上周{PROCUREMENT_WEEKDAY_LABELS[referenceWeekdayIdx].slice(1)}</span>
+                    <span>{referenceSoldRowLabel}</span>
                     <span className="tabular-nums text-sky-300/90 shrink-0">
-                      {lastWeekSameDayRef.hasCompletedStallDay &&
-                      lastWeekSameDayRef.soldByProductId.has(catalogItem.id) ? (
+                      {weekdaySoldRef.hasCompletedStallDay &&
+                      weekdaySoldRef.soldByProductId.has(catalogItem.id) ? (
                         <>
-                          {lastWeekSameDayRef.soldByProductId.get(catalogItem.id)!.toLocaleString()}
+                          {weekdaySoldRef.soldByProductId.get(catalogItem.id)!.toLocaleString()}
                           <LiangJinQtyHint
-                            liangQty={lastWeekSameDayRef.soldByProductId.get(catalogItem.id)!}
+                            liangQty={weekdaySoldRef.soldByProductId.get(catalogItem.id)!}
                             pieceUnit={priceUnit}
                             className="text-[0.625rem]"
                           />{' '}
@@ -1241,9 +1260,20 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
               <span className="text-[10px] leading-none text-amber-200/90 tabular-nums truncate min-w-0 flex-1 basis-0">
                 {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
               </span>
-              <span className="text-[10px] leading-none text-zinc-500 shrink-0">參考</span>
               <select
-                aria-label="參考星期（上週同日售出參考）"
+                aria-label="售出參考模式（最高／平均／上週／最低）"
+                value={referenceMode}
+                onChange={(e) => setReferenceMode(e.target.value as ProcurementReferenceMode)}
+                className={PROC_DOCK_SELECT_CLASS}
+              >
+                {PROCUREMENT_REFERENCE_MODE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="參考星期（同名星期售出參考）"
                 value={String(referenceWeekdayIdx)}
                 onChange={(e) => selectReferenceWeekday(Number(e.target.value))}
                 className={PROC_WEEKDAY_SELECT_CLASS}
@@ -1264,9 +1294,24 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 </span>
               </div>
               <label className="mt-1.5 flex min-w-0 items-center gap-2">
+                <span className="text-xs text-zinc-500 shrink-0 whitespace-nowrap">參考模式</span>
+                <select
+                  aria-label="售出參考模式（最高／平均／上週／最低）"
+                  value={referenceMode}
+                  onChange={(e) => setReferenceMode(e.target.value as ProcurementReferenceMode)}
+                  className="accounting-form-date-input box-border h-9 min-h-0 min-w-0 flex-1 max-w-full rounded-lg border border-zinc-700/80 bg-zinc-950/80 px-2.5 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]"
+                >
+                  {PROCUREMENT_REFERENCE_MODE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mt-1.5 flex min-w-0 items-center gap-2">
                 <span className="text-xs text-zinc-500 shrink-0 whitespace-nowrap">對照星期</span>
                 <select
-                  aria-label="對照星期（上週同日售出參考）"
+                  aria-label="對照星期（同名星期售出參考）"
                   value={String(referenceWeekdayIdx)}
                   onChange={(e) => selectReferenceWeekday(Number(e.target.value))}
                   className="accounting-form-date-input box-border h-9 min-h-0 min-w-0 flex-1 max-w-full rounded-lg border border-zinc-700/80 bg-zinc-950/80 px-2.5 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]"

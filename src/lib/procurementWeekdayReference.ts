@@ -3,6 +3,7 @@ import { stallSalesBoardRowYmd } from './financeLib';
 import type { OrderHistoryEntry } from './orderHistoryStorage';
 import {
   getSalesRecord,
+  listSalesRecordMeta,
   mergeSalesRecordWithCatalog,
   type SalesRecordDaySnapshot,
 } from './salesRecordStorage';
@@ -33,52 +34,30 @@ function accumulateSoldQtyByProductFromSnapshot(
 }
 
 export type ProcurementLastWeekSameDayRef = {
-  /** 訂單歸屬日 − 7 天 */
+  /** 訂單歸屬日 − 7 天（或統計參考日） */
   referenceYmd: string;
   soldByProductId: ReadonlyMap<string, number>;
   /** 該日是否有已完成盤點訂單或銷售紀錄 */
   hasCompletedStallDay: boolean;
 };
 
-/** 依訂單歸屬日固定取上週同日（−7 天）各品項售出量，與儀表板銷售數據歸屬日一致。 */
-export function computeProcurementLastWeekSameDaySold(
-  orderDateYmd: string,
-  orders: OrderHistoryEntry[],
-  retailView: SupplyRetailView,
-): ProcurementLastWeekSameDayRef {
-  const referenceYmd = addDaysYmd(orderDateYmd, -7);
-  const soldByProductId = new Map<string, number>();
-  let fromOrders = false;
+export type ProcurementReferenceMode = 'max' | 'avg' | 'lastWeek' | 'min';
 
-  for (const o of orders) {
-    if (!o.stallCountCompletedAt) continue;
-    const rowYmd = stallSalesBoardRowYmd(o);
-    if (rowYmd !== referenceYmd) continue;
-    const snap = resolveStallSnapshotFromOrder(o);
-    if (!snap) continue;
-    fromOrders = true;
-    accumulateSoldQtyByProductFromSnapshot(soldByProductId, snap, retailView);
-  }
+export const PROCUREMENT_REFERENCE_MODE_OPTIONS: ReadonlyArray<{
+  value: ProcurementReferenceMode;
+  label: string;
+}> = [
+  { value: 'max', label: '最高' },
+  { value: 'avg', label: '平均' },
+  { value: 'lastWeek', label: '上週' },
+  { value: 'min', label: '最低' },
+];
 
-  if (!fromOrders) {
-    const raw = getSalesRecord(referenceYmd);
-    if (raw) {
-      accumulateSoldQtyByProductFromSnapshot(
-        soldByProductId,
-        mergeSalesRecordWithCatalog(raw),
-        retailView,
-      );
-    }
-  }
-
-  const hasCompletedStallDay = fromOrders || getSalesRecord(referenceYmd) !== null;
-
-  return { referenceYmd, soldByProductId, hasCompletedStallDay };
-}
-
-export function referenceWeekdayShortLabel(ymdDash: string): string {
-  return parseYmd(ymdDash).toLocaleDateString('zh-TW', { weekday: 'short' });
-}
+export type ProcurementWeekdaySoldRef = ProcurementLastWeekSameDayRef & {
+  mode: ProcurementReferenceMode;
+  /** 納入統計之曆日數（上週模式為 0 或 1） */
+  sampleDayCount: number;
+};
 
 /** 週一＝0 … 週日＝6（與儀表板同名星期對照一致） */
 export const PROCUREMENT_WEEKDAY_LABELS = [
@@ -90,6 +69,147 @@ export const PROCUREMENT_WEEKDAY_LABELS = [
   '週六',
   '週日',
 ] as const;
+
+export function procurementReferenceSoldRowLabel(
+  mode: ProcurementReferenceMode,
+  weekdayIdx: number,
+): string {
+  const wd = PROCUREMENT_WEEKDAY_LABELS[weekdayIdx]?.slice(1) ?? '';
+  if (mode === 'lastWeek') return `上周${wd}`;
+  const modeLabel = PROCUREMENT_REFERENCE_MODE_OPTIONS.find((o) => o.value === mode)?.label ?? '';
+  return `${wd}${modeLabel}`;
+}
+
+function soldMapForYmd(
+  ymdDash: string,
+  orders: OrderHistoryEntry[],
+  retailView: SupplyRetailView,
+): { map: Map<string, number>; hasData: boolean } {
+  const soldByProductId = new Map<string, number>();
+  let fromOrders = false;
+
+  for (const o of orders) {
+    if (!o.stallCountCompletedAt) continue;
+    const rowYmd = stallSalesBoardRowYmd(o);
+    if (rowYmd !== ymdDash) continue;
+    const snap = resolveStallSnapshotFromOrder(o);
+    if (!snap) continue;
+    fromOrders = true;
+    accumulateSoldQtyByProductFromSnapshot(soldByProductId, snap, retailView);
+  }
+
+  if (!fromOrders) {
+    const raw = getSalesRecord(ymdDash);
+    if (raw) {
+      accumulateSoldQtyByProductFromSnapshot(
+        soldByProductId,
+        mergeSalesRecordWithCatalog(raw),
+        retailView,
+      );
+    }
+  }
+
+  const hasData = fromOrders || getSalesRecord(ymdDash) !== null;
+  return { map: soldByProductId, hasData };
+}
+
+function listSameWeekdayYmdsBefore(orderDateYmd: string, orders: OrderHistoryEntry[]): string[] {
+  const targetWd = weekdayIdxMon0FromYmd(orderDateYmd);
+  const ymdSet = new Set<string>();
+
+  for (const o of orders) {
+    if (!o.stallCountCompletedAt) continue;
+    const rowYmd = stallSalesBoardRowYmd(o);
+    if (!rowYmd || rowYmd >= orderDateYmd) continue;
+    if (weekdayIdxMon0FromYmd(rowYmd) !== targetWd) continue;
+    ymdSet.add(rowYmd);
+  }
+
+  for (const { ymd: recordYmd } of listSalesRecordMeta()) {
+    if (recordYmd >= orderDateYmd) continue;
+    if (weekdayIdxMon0FromYmd(recordYmd) !== targetWd) continue;
+    ymdSet.add(recordYmd);
+  }
+
+  return Array.from(ymdSet).sort();
+}
+
+/** 依訂單歸屬日固定取上週同日（−7 天）各品項售出量，與儀表板銷售數據歸屬日一致。 */
+export function computeProcurementLastWeekSameDaySold(
+  orderDateYmd: string,
+  orders: OrderHistoryEntry[],
+  retailView: SupplyRetailView,
+): ProcurementLastWeekSameDayRef {
+  const referenceYmd = addDaysYmd(orderDateYmd, -7);
+  const { map, hasData } = soldMapForYmd(referenceYmd, orders, retailView);
+  return { referenceYmd, soldByProductId: map, hasCompletedStallDay: hasData };
+}
+
+/**
+ * 依對照星期與參考模式（最高／平均／上週／最低）計算各品項售出參考量。
+ * 最高／平均／最低：與儀表板「同名星期」相同，取訂單歸屬日以前、同星期幾之歷史盤點日。
+ */
+export function computeProcurementWeekdaySoldReference(
+  orderDateYmd: string,
+  orders: OrderHistoryEntry[],
+  retailView: SupplyRetailView,
+  mode: ProcurementReferenceMode = 'lastWeek',
+): ProcurementWeekdaySoldRef {
+  if (mode === 'lastWeek') {
+    const base = computeProcurementLastWeekSameDaySold(orderDateYmd, orders, retailView);
+    return {
+      ...base,
+      mode,
+      sampleDayCount: base.hasCompletedStallDay ? 1 : 0,
+    };
+  }
+
+  const qualifyingYmds = listSameWeekdayYmdsBefore(orderDateYmd, orders);
+  const perDay = new Map<string, Map<string, number>>();
+  const activeYmds: string[] = [];
+
+  for (const ymdDash of qualifyingYmds) {
+    const { map, hasData } = soldMapForYmd(ymdDash, orders, retailView);
+    if (!hasData) continue;
+    perDay.set(ymdDash, map);
+    activeYmds.push(ymdDash);
+  }
+
+  const allIds = new Set<string>();
+  for (const dayMap of perDay.values()) {
+    for (const id of dayMap.keys()) allIds.add(id);
+  }
+
+  const soldByProductId = new Map<string, number>();
+  for (const id of allIds) {
+    const series = activeYmds.map((ymdDash) => perDay.get(ymdDash)?.get(id) ?? 0);
+    if (series.every((v) => v === 0)) continue;
+    let value: number;
+    if (mode === 'avg') {
+      value = series.reduce((s, v) => s + v, 0) / series.length;
+    } else if (mode === 'max') {
+      value = Math.max(...series);
+    } else {
+      value = Math.min(...series);
+    }
+    soldByProductId.set(id, Math.round(value * 1000) / 1000);
+  }
+
+  const referenceYmd =
+    activeYmds[activeYmds.length - 1] ?? addDaysYmd(orderDateYmd, -7);
+
+  return {
+    referenceYmd,
+    soldByProductId,
+    hasCompletedStallDay: activeYmds.length > 0,
+    mode,
+    sampleDayCount: activeYmds.length,
+  };
+}
+
+export function referenceWeekdayShortLabel(ymdDash: string): string {
+  return parseYmd(ymdDash).toLocaleDateString('zh-TW', { weekday: 'short' });
+}
 
 export function weekdayIdxMon0FromYmd(ymdDash: string): number {
   return (parseYmd(ymdDash).getDay() + 6) % 7;
