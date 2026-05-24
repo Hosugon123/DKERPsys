@@ -3,7 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import PullToRefresh from './components/PullToRefresh';
+import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
+import {
+  APP_PAGE_REFRESH_EVENT,
+  PULL_RELOAD_QUERY_KEY,
+  refreshAppPageData,
+} from './lib/appRefresh';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import Dashboard, { type DashboardViewAsTarget } from './views/Dashboard';
@@ -40,9 +47,20 @@ export default function App() {
   /** 總部以加盟主視角檢視（view-as）的目標；非 dashboard 頁時自動清除 */
   const [viewAsFranchisee, setViewAsFranchisee] = useState<DashboardViewAsTarget | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [pageRefreshKey, setPageRefreshKey] = useState(0);
+  const isNarrow = useIsNarrowScreen();
   const scrollLockYRef = useRef(0);
 
   const isSuperAdmin = session ? isSuperAdminSession(session.loginId) : false;
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has(PULL_RELOAD_QUERY_KEY)) {
+      url.searchParams.delete(PULL_RELOAD_QUERY_KEY);
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState(null, '', next);
+    }
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -94,6 +112,16 @@ export default function App() {
   useEffect(() => {
     setSupplyCatalogRetailView(userRoleToSupplyRetailView(userRole));
   }, [userRole]);
+
+  useEffect(() => {
+    const onPageRefresh = () => setPageRefreshKey((k) => k + 1);
+    window.addEventListener(APP_PAGE_REFRESH_EVENT, onPageRefresh);
+    return () => window.removeEventListener(APP_PAGE_REFRESH_EVENT, onPageRefresh);
+  }, []);
+
+  const handlePullRefresh = useCallback(async () => {
+    await refreshAppPageData({ reloadShell: true });
+  }, []);
 
   useEffect(() => {
     if (userRole !== 'admin' && currentView === 'permissions') {
@@ -233,9 +261,13 @@ export default function App() {
           userRole={userRole}
           onLogout={handleLogout}
         />
-        <main className="uio-touch-host min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pt-4 md:px-6 md:pb-6 md:pt-6 lg:px-8 lg:pb-8 lg:pt-8">
-          {renderView()}
-        </main>
+        <PullToRefresh
+          enabled={isNarrow}
+          onRefresh={handlePullRefresh}
+          className="uio-touch-host min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pt-4 md:px-6 md:pb-6 md:pt-6 lg:px-8 lg:pb-8 lg:pt-8"
+        >
+          <div key={`${currentView}-${pageRefreshKey}`}>{renderView()}</div>
+        </PullToRefresh>
       </div>
     </div>
   );

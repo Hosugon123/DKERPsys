@@ -68,6 +68,7 @@ import {
   PROCUREMENT_REFERENCE_MODE_OPTIONS,
   procurementReferenceSoldRowLabel,
   PROCUREMENT_WEEKDAY_LABELS,
+  shouldShowProcurementReferenceDate,
   type ProcurementReferenceMode,
   weekdayIdxMon0FromYmd,
   ymdOnOrAfterWeekday,
@@ -260,6 +261,10 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       ),
     [newOrderDateYmd, basisOrdersList, supplyRetailView, referenceMode, stallTick],
   );
+
+  /** 底部「參考」列：上週／最高／最低顯示資料曆日；平均不顯示 */
+  const showReferenceDataDate = shouldShowProcurementReferenceDate(referenceMode);
+  const referenceDataDisplayYmd = weekdaySoldRef.referenceYmd;
 
   const referenceSoldRowLabel = useMemo(
     () => procurementReferenceSoldRowLabel(referenceMode, referenceWeekdayIdx),
@@ -1257,9 +1262,13 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
           {dockCompact ? (
             <div className="flex items-center gap-x-1.5 gap-y-1 min-w-0">
               <span className="text-[10px] leading-none text-zinc-500 shrink-0">參考</span>
-              <span className="text-[10px] leading-none text-amber-200/90 tabular-nums truncate min-w-0 flex-1 basis-0">
-                {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
-              </span>
+              {showReferenceDataDate ? (
+                <span className="text-[10px] leading-none text-amber-200/90 tabular-nums truncate min-w-0 flex-1 basis-0">
+                  {formatSlashYmdWithWeekdayFromYmd(referenceDataDisplayYmd)}
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1 basis-0" aria-hidden />
+              )}
               <select
                 aria-label="售出參考模式（最高／平均／上週／最低）"
                 value={referenceMode}
@@ -1287,12 +1296,14 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
             </div>
           ) : (
             <div className="rounded-lg border border-zinc-800/90 bg-zinc-900/50 px-2.5 py-2">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-                <span className="text-xs text-zinc-500 shrink-0">參考時間</span>
-                <span className="text-xs text-amber-200/90 tabular-nums shrink-0">
-                  {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
-                </span>
-              </div>
+              {showReferenceDataDate ? (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                  <span className="text-xs text-zinc-500 shrink-0">參考時間</span>
+                  <span className="text-xs text-amber-200/90 tabular-nums shrink-0">
+                    {formatSlashYmdWithWeekdayFromYmd(referenceDataDisplayYmd)}
+                  </span>
+                </div>
+              ) : null}
               <label className="mt-1.5 flex min-w-0 items-center gap-2">
                 <span className="text-xs text-zinc-500 shrink-0 whitespace-nowrap">參考模式</span>
                 <select

@@ -70,6 +70,30 @@ export const PROCUREMENT_WEEKDAY_LABELS = [
   '週日',
 ] as const;
 
+/** 批貨底部「參考」列是否顯示資料曆日：上週／最高／最低顯示；平均不顯示 */
+export function shouldShowProcurementReferenceDate(mode: ProcurementReferenceMode): boolean {
+  return mode === 'lastWeek' || mode === 'max' || mode === 'min';
+}
+
+function totalSoldQtyOnDay(dayMap: Map<string, number>): number {
+  let n = 0;
+  for (const v of dayMap.values()) n += v;
+  return n;
+}
+
+function pickReferenceYmdByDayTotalSold(
+  activeYmds: string[],
+  perDay: Map<string, Map<string, number>>,
+  pick: 'max' | 'min',
+): string | undefined {
+  if (activeYmds.length === 0) return undefined;
+  return activeYmds.reduce((best, ymd) => {
+    const cur = totalSoldQtyOnDay(perDay.get(ymd) ?? new Map());
+    const prev = totalSoldQtyOnDay(perDay.get(best) ?? new Map());
+    return pick === 'max' ? (cur > prev ? ymd : best) : cur < prev ? ymd : best;
+  });
+}
+
 export function procurementReferenceSoldRowLabel(
   mode: ProcurementReferenceMode,
   weekdayIdx: number,
@@ -195,8 +219,13 @@ export function computeProcurementWeekdaySoldReference(
     soldByProductId.set(id, Math.round(value * 1000) / 1000);
   }
 
+  const fallbackYmd = activeYmds[activeYmds.length - 1] ?? addDaysYmd(orderDateYmd, -7);
   const referenceYmd =
-    activeYmds[activeYmds.length - 1] ?? addDaysYmd(orderDateYmd, -7);
+    mode === 'max'
+      ? pickReferenceYmdByDayTotalSold(activeYmds, perDay, 'max') ?? fallbackYmd
+      : mode === 'min'
+        ? pickReferenceYmdByDayTotalSold(activeYmds, perDay, 'min') ?? fallbackYmd
+        : fallbackYmd;
 
   return {
     referenceYmd,

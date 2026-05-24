@@ -283,7 +283,9 @@ export default function Permissions({
         parentFranchiseeUserId:
           editRole === 'employee' && editEmployeeOrgType === 'franchisee' ? editParentFranchiseeUserId : undefined,
         storeLabel: editStoreLabel,
-        ...(editRole === 'franchisee' ? { orderStoreCode: editOrderStoreCode } : {}),
+        ...(editRole === 'franchisee'
+          ? { orderStoreCode: editOrderStoreCode.trim() || '' }
+          : {}),
       });
       closeEditModal();
       await refreshUsers();
@@ -338,7 +340,11 @@ export default function Permissions({
     }
   };
 
-  const onSaveStoreCode = () => void storeSettings.setStoreCode3(storeDraft);
+  const onSaveStoreCode = async () => {
+    await storeSettings.setStoreCode3(storeDraft);
+    const saved = await storeSettings.getStoreCode3();
+    setStoreDraft(saved);
+  };
 
   const submitPwdReset = async () => {
     if (!pwdResetFor?.loginId) {
