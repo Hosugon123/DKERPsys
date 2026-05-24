@@ -45,7 +45,18 @@ import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 export type UserRole = 'admin' | 'franchisee' | 'employee';
 
 const STATUS_TABS = ['所有訂單', '待出貨', '已完成', '已取消'] as const;
-type StatusFilter = (typeof STATUS_TABS)[number];
+const STALL_REVIEW_TAB = '已盤點' as const;
+type StatusFilter = (typeof STATUS_TABS)[number] | typeof STALL_REVIEW_TAB;
+
+const ORDERS_PAGE_SIZE = 5;
+
+const ORDER_STATUS_TAB_LABELS: Record<(typeof STATUS_TABS)[number] | typeof STALL_REVIEW_TAB, string> = {
+  所有訂單: '所有訂單',
+  待出貨: '待出貨',
+  已完成: '已出貨',
+  已取消: '已取消',
+  已盤點: '已盤點',
+};
 
 const HQ_STORE_LABEL = '直營店';
 type StoreTypeFilter = 'all' | 'hq' | 'franchise';
@@ -471,6 +482,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [historyOrders, setHistoryOrders] = useState<OrderHistoryEntry[]>([]);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('所有訂單');
+  const [page, setPage] = useState(1);
   /** 店家類型篩選：全部 / 直營 / 加盟 */
   const [storeTypeFilter, setStoreTypeFilter] = useState<StoreTypeFilter>('all');
   /** 指定店家篩選；'all' 表示不指定，其他為已解析後的店名（與列表顯示一致） */
@@ -640,10 +652,15 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       return order.franchisee === storeLabelFilter;
     });
     const byStatus = byStoreLabel.filter((order) => {
-      if (statusFilter === '所有訂單') return true;
+      if (statusFilter === '已盤點' || statusFilter === '所有訂單') return true;
       return order.status === statusFilter;
     });
-    return byStatus.filter((order) => {
+    const byStallCount = byStatus.filter((order) => {
+      if (statusFilter === '已盤點') return true;
+      const o = rawList.find((r) => r.id === order.id);
+      return o ? !orderHasStallCountCompleted(o) : false;
+    });
+    return byStallCount.filter((order) => {
       if (!effectiveDateRange) return true;
       const o = rawList.find((r) => r.id === order.id);
       if (!o) return false;
@@ -652,6 +669,21 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       return key >= effectiveDateRange.from && key <= effectiveDateRange.to;
     });
   }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, effectiveDateRange, ordersData, rawList]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PAGE_SIZE));
+
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, activeWeekdays, storeTypeFilter, storeLabelFilter, effectiveDateRange]);
+
+  useEffect(() => {
+    setPage((p) => Math.min(Math.max(1, p), totalPages));
+  }, [totalPages]);
+
+  const paginatedOrders = useMemo(() => {
+    const start = (page - 1) * ORDERS_PAGE_SIZE;
+    return filteredOrders.slice(start, start + ORDERS_PAGE_SIZE);
+  }, [filteredOrders, page]);
 
   useEffect(() => {
     if (expandedOrderId && !filteredOrders.some((o) => o.id === expandedOrderId)) {
@@ -948,7 +980,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           role="tablist"
           aria-label="訂單狀態"
         >
-          {STATUS_TABS.map((tab) => {
+          {([...STATUS_TABS, STALL_REVIEW_TAB] as const).map((tab) => {
             const isActive = statusFilter === tab;
             return (
               <button
@@ -964,7 +996,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                     : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800',
                 )}
               >
-                {tab === '已完成' ? '已出貨' : tab}
+                {ORDER_STATUS_TAB_LABELS[tab]}
               </button>
             );
           })}
@@ -1142,10 +1174,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       <div className="space-y-4">
         {filteredOrders.length === 0 && (
           <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/30 px-6 py-12 text-center text-sm text-zinc-500">
-            沒有符合目前篩選條件的訂單，請調整狀態、日期、建單星期或店家條件。
+            {statusFilter === '已盤點'
+              ? '沒有符合目前篩選條件的訂單，請調整日期、建單星期或店家條件。'
+              : '沒有符合條件的未盤點訂單，請調整狀態、日期、建單星期或店家條件；若要查看含已盤點在內的全部訂單，請點「已盤點」。'}
           </div>
         )}
-        {filteredOrders.map((order) => {
+        {paginatedOrders.map((order) => {
           const raw = rawList.find((r) => r.id === order.id);
           const stallSnap = raw ? mergeOrderStallSnapshot(raw) : null;
           const carrySnapForDisplay = raw ? loadRemainSnapshotForOrderManagementDisplay(raw) : null;
@@ -1837,6 +1871,37 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           );
         })}
       </div>
+
+      {filteredOrders.length > 0 && totalPages > 1 ? (
+        <nav
+          className="flex flex-wrap items-center justify-center gap-2 sm:gap-3"
+          aria-label="訂單列表分頁"
+        >
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="min-h-10 px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed hover:border-zinc-600 hover:bg-zinc-800/90"
+          >
+            上一頁
+          </button>
+          <span className="text-sm text-zinc-400 tabular-nums px-1">
+            第 {page} / {totalPages} 頁
+            <span className="text-zinc-600 mx-1">·</span>
+            共 {filteredOrders.length} 筆
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="min-h-10 px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed hover:border-zinc-600 hover:bg-zinc-800/90"
+          >
+            下一頁
+          </button>
+        </nav>
+      ) : filteredOrders.length > 0 ? (
+        <p className="text-center text-xs text-zinc-600 tabular-nums">共 {filteredOrders.length} 筆</p>
+      ) : null}
 
       {pickingOrderId && pickingDockSummary && (
         <OrderEditActionBar

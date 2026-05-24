@@ -62,7 +62,7 @@ function orderSalesOutletChannel(o: OrderHistoryEntry): 'franchise' | 'direct' {
 
 type OutletFilter = 'all' | 'direct' | 'franchise';
 const STALL_MAX_Q = 99_999;
-const SALES_RECORD_MAX_VISIBLE = 5;
+const SALES_RECORD_PAGE_SIZE = 5;
 
 /** 輸入欄僅保留數字與單一小數點，小數至多三位（與叫貨量 roundProcurementQty 一致）；允許打字中末尾「.」。 */
 function sanitizeStallQtyTyping(raw: string): string {
@@ -123,6 +123,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
   const [stallEditDraft, setStallEditDraft] = useState<SalesRecordDaySnapshot | null>(null);
   const [stallEditError, setStallEditError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const refreshOrders = useCallback(() => {
     void ordersApi.listOrdersWithStallCountCompleted().then(setOrders);
@@ -209,10 +210,21 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
       );
     });
   }, [orders, searchQuery, activeWeekdays, isSuperAdmin, outletFilter]);
-  const visibleOrders = useMemo(
-    () => filtered.slice(0, SALES_RECORD_MAX_VISIBLE),
-    [filtered]
-  );
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / SALES_RECORD_PAGE_SIZE));
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, activeWeekdays, outletFilter]);
+
+  useEffect(() => {
+    setPage((p) => Math.min(Math.max(1, p), totalPages));
+  }, [totalPages]);
+
+  const paginatedOrders = useMemo(() => {
+    const start = (page - 1) * SALES_RECORD_PAGE_SIZE;
+    return filtered.slice(start, start + SALES_RECORD_PAGE_SIZE);
+  }, [filtered, page]);
 
   /** 與攤上盤點一致：消耗品不納入帳上明細與帶出彙總 */
   const stallDisplayItems = useMemo(
@@ -379,7 +391,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
       )}
 
       <div className="space-y-3">
-        {visibleOrders.map((order) => {
+        {paginatedOrders.map((order) => {
           const listStallRetail = getStallDisplaySoldAtRetail(order, supplyRetailView);
           const listAmount =
             listStallRetail != null
@@ -1017,11 +1029,36 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           );
         })}
       </div>
-      {filtered.length > SALES_RECORD_MAX_VISIBLE && (
-        <p className="text-xs text-zinc-500">
-          僅顯示最新 {SALES_RECORD_MAX_VISIBLE} 筆已盤點訂單（目前符合條件共 {filtered.length} 筆）。
-        </p>
-      )}
+      {filtered.length > 0 && totalPages > 1 ? (
+        <nav
+          className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 pt-1"
+          aria-label="銷售紀錄分頁"
+        >
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="min-h-10 px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed hover:border-zinc-600 hover:bg-zinc-800/90"
+          >
+            上一頁
+          </button>
+          <span className="text-sm text-zinc-400 tabular-nums px-1">
+            第 {page} / {totalPages} 頁
+            <span className="text-zinc-600 mx-1">·</span>
+            共 {filtered.length} 筆
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="min-h-10 px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed hover:border-zinc-600 hover:bg-zinc-800/90"
+          >
+            下一頁
+          </button>
+        </nav>
+      ) : filtered.length > 0 ? (
+        <p className="text-center text-xs text-zinc-600 tabular-nums">共 {filtered.length} 筆</p>
+      ) : null}
 
       {deleteModalId && (
         <div
