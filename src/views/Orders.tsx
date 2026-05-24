@@ -44,7 +44,8 @@ import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 
 export type UserRole = 'admin' | 'franchisee' | 'employee';
 
-const STATUS_TABS = ['所有訂單', '待出貨', '已完成', '已取消'] as const;
+/** 列表分頁：預設「所有訂單」＝待出貨＋已出貨（未盤點）；不含單獨的待出貨／已出貨分頁 */
+const STATUS_TABS = ['所有訂單', '已取消'] as const;
 const STALL_REVIEW_TAB = '已盤點' as const;
 type StatusFilter = (typeof STATUS_TABS)[number] | typeof STALL_REVIEW_TAB;
 
@@ -52,11 +53,12 @@ const ORDERS_PAGE_SIZE = 5;
 
 const ORDER_STATUS_TAB_LABELS: Record<(typeof STATUS_TABS)[number] | typeof STALL_REVIEW_TAB, string> = {
   所有訂單: '所有訂單',
-  待出貨: '待出貨',
-  已完成: '已出貨',
   已取消: '已取消',
   已盤點: '已盤點',
 };
+
+/** 分頁列顯示順序（已盤點在已取消之前） */
+const ORDER_FILTER_TAB_ORDER: readonly StatusFilter[] = ['所有訂單', STALL_REVIEW_TAB, '已取消'];
 
 const HQ_STORE_LABEL = '直營店';
 type StoreTypeFilter = 'all' | 'hq' | 'franchise';
@@ -654,8 +656,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     const byStatus = byStoreLabel.filter((order) => {
       if (statusFilter === '已取消') return order.status === '已取消';
       if (order.status === '已取消') return false;
-      if (statusFilter === '已盤點' || statusFilter === '所有訂單') return true;
-      return order.status === statusFilter;
+      if (statusFilter === '已盤點') return true;
+      return order.status === '待出貨' || order.status === '已完成';
     });
     const byStallCount = byStatus.filter((order) => {
       if (statusFilter === '已盤點' || statusFilter === '已取消') return true;
@@ -982,7 +984,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           role="tablist"
           aria-label="訂單狀態"
         >
-          {([...STATUS_TABS, STALL_REVIEW_TAB] as const).map((tab) => {
+          {ORDER_FILTER_TAB_ORDER.map((tab) => {
             const isActive = statusFilter === tab;
             return (
               <button
@@ -1178,7 +1180,9 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/30 px-6 py-12 text-center text-sm text-zinc-500">
             {statusFilter === '已盤點'
               ? '沒有符合目前篩選條件的訂單，請調整日期、建單星期或店家條件。'
-              : '沒有符合條件的未盤點訂單，請調整狀態、日期、建單星期或店家條件；若要查看含已盤點在內的全部訂單，請點「已盤點」。'}
+              : statusFilter === '已取消'
+                ? '沒有符合條件的已取消訂單。'
+                : '沒有符合條件的待出貨或已出貨（未盤點）訂單；若要查看含已盤點在內的全部訂單，請點「已盤點」。'}
           </div>
         )}
         {paginatedOrders.map((order) => {
