@@ -133,7 +133,7 @@ const formDateWrapClass = cn(
 
 /** 邊框在 wrap；input 預留右側給原生日曆圖示，避免手機上凸出裁切 */
 const formDateInputClass =
-  'accounting-form-date-input box-border w-full min-w-0 max-w-full h-9 sm:h-10 min-h-0 border-0 bg-transparent shadow-none pl-2.5 pr-9 sm:pl-9 sm:pr-10 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
+  'accounting-form-date-input box-border flex w-full min-w-0 max-w-full h-11 sm:h-10 min-h-0 items-center border-0 bg-transparent shadow-none px-3 pr-10 sm:pl-9 sm:pr-10 py-0 text-base sm:text-sm leading-normal sm:leading-tight text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
 
 const rangeDateShellClass =
   'rounded-lg border border-zinc-600/70 bg-zinc-950/90 focus-within:ring-2 focus-within:ring-amber-500/35 focus-within:border-amber-500/50';
@@ -145,7 +145,7 @@ const rangeDateWrapClass = cn(
 
 /** 支出明細列內之日期範圍：手機全寬避免裁切；桌面維持精簡高度 */
 const rangeDateInputClass =
-  'accounting-form-date-input h-10 md:h-9 w-full min-w-0 max-w-full border-0 bg-transparent shadow-none pl-2.5 pr-9 py-0 md:py-1.5 text-sm md:text-xs text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
+  'accounting-form-date-input flex h-11 md:h-9 w-full min-w-0 max-w-full items-center border-0 bg-transparent shadow-none px-3 pr-10 py-0 md:py-1.5 text-base md:text-xs leading-normal text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
 
 export default function Accounting() {
   const { entries, add, update, remove } = useAccountingLedger();
