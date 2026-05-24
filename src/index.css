@@ -62,11 +62,42 @@
  * 掛在 main 容器（見 App.tsx）；排除 checkbox/radio 等小控制項。
  */
 @media (max-width: 639px) {
-  .uio-touch-host input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not([type="color"]),
+  .uio-touch-host
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(
+      [type="hidden"]
+    ):not([type="color"]):not([type="date"]):not([type="time"]):not([type="datetime-local"]),
   .uio-touch-host select,
   .uio-touch-host textarea {
     font-size: max(1rem, 100%);
     min-height: 2.75rem;
+  }
+
+  /* 收支表單日期：緊湊列高；右側保留原生日曆圖示，不套用 44px 觸控基線 */
+  .uio-touch-host .accounting-form-date-input {
+    min-height: 2.25rem;
+    height: 2.25rem;
+    max-width: 100%;
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: 1.25rem;
+  }
+
+  .uio-touch-host .accounting-form-date-input::-webkit-date-and-time-value {
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: 1.25rem;
+  }
+
+  /* 批貨底部「對照星期」：橫向長條、與參考日期列同高對齊（不套用 44px 觸控基線） */
+  .uio-touch-host .procurement-dock-weekday-select {
+    min-height: 1.5rem;
+    height: 1.5rem;
+    max-height: 1.5rem;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 0.625rem;
+    line-height: 1rem;
   }
 }
 

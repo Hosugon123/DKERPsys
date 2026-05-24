@@ -168,17 +168,17 @@ export default function Topbar({
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-zinc-800 bg-[#111111] pt-[env(safe-area-inset-top)]">
-        <div className="flex h-16 items-center justify-between px-4 lg:px-8">
-          <div className="flex min-w-0 items-center gap-4">
+        <div className="flex h-12 sm:h-14 lg:h-16 items-center justify-between px-3 sm:px-4 lg:px-8">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(true)}
               aria-label="開啟選單"
               aria-expanded={isMobileMenuOpen}
               aria-controls="app-sidebar-drawer"
-              className="-ml-2 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 md:hidden"
+              className="-ml-1 flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 md:hidden"
             >
-              <Menu size={24} />
+              <Menu size={22} />
             </button>
             <div className="hidden min-w-0 truncate text-lg font-black tracking-tighter text-[#f5f2ed] sm:block">
               達客東山鴨頭管理系統
@@ -211,10 +211,10 @@ export default function Topbar({
             <button
               type="button"
               onClick={openPwd}
-              className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-zinc-800"
+              className="rounded-full p-1.5 sm:p-2 text-zinc-400 transition-colors hover:bg-zinc-800"
               aria-label="變更密碼"
             >
-              <Settings size={20} />
+              <Settings size={18} className="sm:w-5 sm:h-5" />
             </button>
 
             <div className="relative ml-0 flex shrink-0 items-center sm:ml-1" ref={accountRef}>
@@ -228,20 +228,20 @@ export default function Topbar({
               <button
                 type="button"
                 onClick={() => setAccountOpen((v) => !v)}
-                className="flex h-11 max-w-[min(56vw,12rem)] items-center gap-1.5 rounded-xl border border-zinc-800/80 bg-zinc-900/50 px-2.5 py-0 text-left transition-colors hover:bg-zinc-800/80 sm:h-11 sm:max-w-[14rem] sm:gap-2 sm:px-3"
+                className="flex h-9 max-w-[min(52vw,11rem)] items-center gap-1 rounded-lg border border-zinc-800/80 bg-zinc-900/50 px-2 py-0 text-left transition-colors hover:bg-zinc-800/80 sm:h-11 sm:max-w-[14rem] sm:gap-2 sm:rounded-xl sm:px-3"
                 aria-expanded={accountOpen}
                 aria-haspopup="menu"
                 title={`已登入 ${actorDisplayName || loginId}`}
               >
-                <div className="min-w-0 flex-1 leading-tight">
-                  <p className="truncate text-xs font-semibold text-amber-500 sm:text-sm">
+                <div className="min-w-0 flex-1 leading-none py-1 sm:py-0 sm:leading-tight">
+                  <p className="truncate text-[11px] font-semibold text-amber-500 sm:text-sm">
                     {actorDisplayName || loginId}
                   </p>
-                  <p className="truncate text-[0.65rem] text-zinc-500">
+                  <p className="truncate text-[0.6rem] sm:text-[0.65rem] text-zinc-500">
                     {actorDisplayName ? `${loginId} · ${roleDisplayNames[userRole]}` : roleDisplayNames[userRole]}
                   </p>
                 </div>
-                <ChevronDown size={16} className="shrink-0 text-amber-500/90" />
+                <ChevronDown size={14} className="shrink-0 text-amber-500/90 sm:w-4 sm:h-4" />
               </button>
               {accountOpen && (
                 <div

@@ -71,6 +71,13 @@ function formatStallBumpedValue(n: number): string {
   return t === '' ? '0' : t;
 }
 
+/** 盤點表數量步進：固定高度，避免 table 列等高把輸入框垂直拉長變形 */
+const STALL_QTY_STEP_BTN =
+  'inline-flex shrink-0 items-center justify-center h-9 w-9 rounded border border-zinc-600 text-amber-500 leading-normal hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed';
+const STALL_QTY_STEP_INPUT =
+  'shrink-0 h-9 w-10 sm:w-12 box-border rounded border border-zinc-700 bg-zinc-900/80 px-1 text-center text-sm font-mono tabular-nums leading-normal';
+const STALL_QTY_ROW = 'inline-flex items-center justify-center gap-0.5 flex-nowrap';
+
 export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
@@ -668,10 +675,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950/40 -mx-1 px-1">
-        <table className="w-full min-w-[860px] text-left text-[14px] sm:text-sm">
+        <table className="w-full min-w-[860px] text-left text-sm border-collapse">
           <thead>
-            <tr className="text-zinc-500 text-[14px] sm:text-xs border-b border-zinc-800 bg-zinc-900/50">
-              <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center">品項</th>
+            <tr className="text-zinc-500 text-xs border-b border-zinc-800 bg-zinc-900/50">
+              <th className="sticky left-0 z-20 bg-zinc-900/95 px-2 sm:px-2.5 py-2.5 sm:py-3 font-medium text-left whitespace-nowrap shadow-[4px_0_8px_-4px_rgba(0,0,0,0.5)]">
+                品項
+              </th>
               <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">帶出貨量</th>
               <th className="pl-0 pr-1.5 sm:pl-0.5 sm:pr-2.5 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">剩餘貨量</th>
               <th className="px-1 sm:px-2 py-2.5 sm:py-3 font-medium text-center whitespace-nowrap">售出數量</th>
@@ -686,14 +695,14 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             {rows.map(({ item, c }) => (
               <tr
                 key={item.id}
-                className="border-b border-zinc-800/70 hover:bg-white/[0.02] text-zinc-200"
+                className="border-b border-zinc-800/70 hover:bg-white/[0.02] text-zinc-200 align-top"
               >
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-rose-300 font-medium whitespace-nowrap text-[14px] sm:text-sm">
+                <td className="sticky left-0 z-10 bg-zinc-950/95 px-2 sm:px-2.5 py-2 sm:py-2.5 text-rose-300 font-medium whitespace-nowrap text-sm align-top shadow-[4px_0_8px_-4px_rgba(0,0,0,0.45)]">
                   {item.name}
                 </td>
-                <td className="pl-0 pr-1.5 sm:pl-0.5 sm:pr-2.5 py-2 sm:py-2.5 p-0">
-                  <div className="flex flex-col items-stretch gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
-                    <div className="flex items-center justify-end gap-0.5 max-w-[7.2rem] sm:max-w-[10.5rem]">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 align-top">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <div className={STALL_QTY_ROW}>
                       <button
                         type="button"
                         tabIndex={-1}
@@ -701,7 +710,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'out', -1)}
                         disabled={num(snap.lines[item.id]?.out ?? '') <= 0}
-                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+                        className={STALL_QTY_STEP_BTN}
                         aria-label={`${item.name} 帶出減一`}
                       >
                         <Minus size={14} className="mx-auto" />
@@ -709,7 +718,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       <input
                         value={snap.lines[item.id]?.out ?? ''}
                         onChange={(e) => setLine(item.id, 'out', e.target.value)}
-                        className="w-8 sm:w-20 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border border-zinc-700 rounded px-0.5 sm:px-1 text-amber-100 font-mono text-[14px] sm:text-sm leading-none text-center"
+                        className={cn(STALL_QTY_STEP_INPUT, 'text-amber-100 border-zinc-700')}
                         inputMode="decimal"
                         aria-label={`${item.name} 帶出`}
                       />
@@ -719,7 +728,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'out', 1)}
-                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
+                        className={STALL_QTY_STEP_BTN}
                         aria-label={`${item.name} 帶出加一`}
                       >
                         <Plus size={14} className="mx-auto" />
@@ -728,13 +737,13 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     <LiangJinQtyHint
                       liangQty={c.out}
                       pieceUnit={item.pieceUnit}
-                      className="text-[10px] text-zinc-500 text-center"
+                      className="text-[10px] text-zinc-500 text-center leading-snug"
                     />
                   </div>
                 </td>
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 p-0">
-                  <div className="flex flex-col items-stretch gap-0.5 min-w-0">
-                    <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap min-w-0">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 align-top">
+                  <div className="flex flex-col items-center gap-0.5 min-w-0">
+                    <div className={cn(STALL_QTY_ROW, 'max-w-[11.5rem]')}>
                       <button
                         type="button"
                         tabIndex={-1}
@@ -742,7 +751,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'remain', -1)}
                         disabled={c.remainUnfilled || num(snap.lines[item.id]?.remain ?? '') <= 0}
-                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+                        className={STALL_QTY_STEP_BTN}
                         aria-label={`${item.name} 剩餘減一`}
                       >
                         <Minus size={14} className="mx-auto" />
@@ -752,7 +761,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         onChange={(e) => setLine(item.id, 'remain', e.target.value)}
                         placeholder="必填"
                         className={cn(
-                          'w-8 sm:w-16 min-w-0 h-8 sm:min-h-9 box-border bg-zinc-900/80 border rounded px-0.5 sm:px-1 font-mono text-[11px] sm:text-[19px] leading-none text-center placeholder:text-[10px] sm:placeholder:text-[13px]',
+                          STALL_QTY_STEP_INPUT,
+                          'w-11 sm:w-12 placeholder:text-[11px] placeholder:leading-normal',
                           c.remainUnfilled
                             ? 'border-amber-800/50 border-dashed text-zinc-400 placeholder:text-zinc-600'
                             : c.remain > 0
@@ -768,7 +778,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => bumpLine(item.id, 'remain', 1)}
-                        className="inline-flex items-center justify-center h-8 w-8 sm:h-auto sm:w-auto sm:p-1.5 rounded border border-zinc-600 text-amber-500 leading-none hover:bg-zinc-800 shrink-0"
+                        className={STALL_QTY_STEP_BTN}
                         aria-label={`${item.name} 剩餘加一`}
                       >
                         <Plus size={14} className="mx-auto" />
@@ -779,7 +789,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => setLine(item.id, 'remain', '0')}
-                        className="shrink-0 h-8 rounded border border-zinc-600 bg-zinc-800/60 px-1 sm:px-1.5 py-0 sm:py-1 text-[14px] sm:text-xs leading-none text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
+                        className="inline-flex shrink-0 h-9 items-center justify-center whitespace-nowrap rounded border border-zinc-600 bg-zinc-800/60 px-1.5 text-xs leading-normal text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
                       >
                         已售完
                       </button>
@@ -788,12 +798,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                       <LiangJinQtyHint
                         liangQty={c.remain}
                         pieceUnit={item.pieceUnit}
-                        className="text-[10px] text-zinc-500 text-center w-full"
+                        className="text-[10px] text-zinc-500 text-center w-full leading-snug"
                       />
                     )}
                   </div>
                 </td>
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-300 text-[14px] sm:text-sm">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-300 text-sm align-top leading-normal">
                   {c.remainUnfilled ? (
                     <span className="text-zinc-600">—</span>
                   ) : (
@@ -803,17 +813,19 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     </span>
                   )}
                 </td>
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-400 text-[14px] sm:text-sm">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono tabular-nums text-zinc-400 text-sm align-top leading-normal">
                   {c.remainUnfilled ? <span className="text-zinc-600">—</span> : <>$ {money(c.remValue)}</>}
                 </td>
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono text-zinc-400 text-[14px] sm:text-sm">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono text-zinc-400 text-sm align-top leading-normal">
                   {estimatedRetailPerPackage(item).toLocaleString()}
                 </td>
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono text-emerald-300/90 text-[14px] sm:text-sm">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center font-mono text-emerald-300/90 text-sm align-top leading-normal">
                   $ {Math.round(c.estPrice).toLocaleString()}
                 </td>
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-zinc-500 whitespace-nowrap text-[14px] sm:text-sm">{item.pieceUnit}</td>
-                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-amber-200/80 font-mono text-[14px] sm:text-sm">
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-zinc-500 whitespace-nowrap text-sm align-top leading-normal">
+                  {item.pieceUnit}
+                </td>
+                <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-amber-200/80 font-mono text-sm align-top leading-normal">
                   {c.remainUnfilled || c.out <= 0 ? (
                     '—'
                   ) : (

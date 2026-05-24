@@ -40,9 +40,11 @@ import {
   isFranchiseeSelfSuppliedItem,
   isConsumableItem,
   userRoleToSupplyRetailView,
+  supplyItemPriceUnitLabel,
   type ItemCategory,
 } from '../lib/supplyCatalog';
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
+import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { cn } from '../lib/utils';
 import {
   loadDayForProcurementFromOrder,
@@ -82,7 +84,11 @@ function parseQtyInput(raw: string): number {
   return roundProcurementQty(n);
 }
 
+const PROC_WEEKDAY_SELECT_CLASS =
+  'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[5rem] max-w-[9.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-2 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark]';
+
 export default function Procurement({ userRole }: { userRole: UserRole }) {
+  const isNarrow = useIsNarrowScreen();
   /** 僅超級管理員可編輯品項、批價、零售；加盟主可編輯本店零售參考價。 */
   const isSuperAdmin = userRole === 'admin';
   const isFranchisee = userRole === 'franchisee';
@@ -369,6 +375,9 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     setCheckoutBarCompact(mobile && (qtyFieldFocused || keyboardLikely));
   }, []);
 
+  /** 手機一律用精簡結帳列；鍵盤彈出時維持同版型並貼齊 visualViewport */
+  const dockCompact = isNarrow || checkoutBarCompact;
+
   useEffect(() => {
     syncCheckoutDock();
     const vv = window.visualViewport;
@@ -574,7 +583,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     <div
       className={cn(
         'space-y-3 max-w-3xl mx-auto lg:max-w-none',
-        checkoutBarCompact ? 'pb-28' : 'pb-36'
+        dockCompact ? 'pb-[6.75rem]' : 'pb-36'
       )}
     >
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -980,7 +989,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
               type="button"
               onClick={() => setActiveCategory(c.id as 'all' | ItemCategory)}
               className={cn(
-                'flex-shrink-0 min-h-[44px] min-w-[2.75rem] px-4 rounded-full text-sm sm:text-sm font-medium border-2 transition-colors',
+                'flex-shrink-0 min-h-9 px-3 rounded-full text-xs sm:min-h-10 sm:px-4 sm:text-sm font-medium border transition-colors',
                 activeCategory === c.id
                   ? 'bg-amber-600/20 text-amber-400 border-amber-600/50'
                   : 'bg-zinc-900/80 border-zinc-700 text-zinc-400 active:bg-zinc-800'
@@ -998,36 +1007,38 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
 
       <ul className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-2.5">
         {visibleItems.map((item) => {
+          const catalogItem = getSupplyItem(item.id, supplyRetailView) ?? item;
+          const priceUnit = supplyItemPriceUnitLabel(catalogItem);
           const q = cart[item.id] || 0;
           const effectiveOrderQty =
             item.id in qtyInputDraft ? parseQtyInput(qtyInputDraft[item.id]) : roundProcurementQty(q);
-          const hqPkg = hqCostPerPackage(item);
-          const directStoreBatchPrice = procurementCheckoutUnitPrice(item, userRole);
+          const hqPkg = hqCostPerPackage(catalogItem);
+          const directStoreBatchPrice = procurementCheckoutUnitPrice(catalogItem, userRole);
           return (
             <li
-              key={item.id}
+              key={catalogItem.id}
               className={cn(
                 'flex flex-col rounded-xl border p-2.5 sm:p-3',
                 q > 0
                   ? 'border-amber-500/50 bg-amber-600/10 ring-1 ring-amber-600/20'
-                  : isConsumableItem(item)
+                  : isConsumableItem(catalogItem)
                     ? 'border-amber-900/50 bg-amber-950/20'
                     : 'border-zinc-800/90 bg-zinc-900/40'
               )}
             >
               <div className="flex items-start justify-between gap-1.5 gap-y-0">
                 <h3 className="text-[0.95rem] sm:text-base font-semibold text-zinc-100 leading-snug line-clamp-2 min-w-0 flex-1 pr-0.5">
-                  {item.name}
+                  {catalogItem.name}
                 </h3>
                 <div className="flex flex-col items-end gap-0.5 shrink-0">
-                  {isConsumableItem(item) && (
+                  {isConsumableItem(catalogItem) && (
                     <span className="text-[0.5rem] sm:text-[0.5625rem] font-bold bg-amber-800/50 text-amber-200 border border-amber-600/50 px-1 py-0.5 rounded leading-none">
                       消耗品
                     </span>
                   )}
-                  {item.tag && (
+                  {catalogItem.tag && (
                     <span className="text-[0.5625rem] sm:text-[0.625rem] font-bold bg-amber-600 text-zinc-950 px-1.5 py-0.5 rounded leading-none">
-                      {item.tag}
+                      {catalogItem.tag}
                     </span>
                   )}
                 </div>
@@ -1036,12 +1047,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 {isFranchisee ? (
                   <>
                     <span className="text-amber-400 font-semibold tabular-nums text-[0.8125rem] sm:text-sm">
-                      批貨 ${pricePerPackage(item).toLocaleString()}
-                      <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
+                      批貨 ${pricePerPackage(catalogItem).toLocaleString()}
+                      <span className="text-zinc-500 font-normal">／{priceUnit}</span>
                     </span>
                     <span className="text-emerald-400/95 font-semibold tabular-nums text-[0.75rem] sm:text-[0.8125rem]">
-                      零售 ${estimatedRetailPerPackage(item).toLocaleString()}
-                      <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
+                      零售 ${estimatedRetailPerPackage(catalogItem).toLocaleString()}
+                      <span className="text-zinc-500 font-normal">／{priceUnit}</span>
                     </span>
                   </>
                 ) : (
@@ -1053,11 +1064,11 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       )}
                     >
                       批價 ${directStoreBatchPrice.toLocaleString()}
-                      <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
+                      <span className="text-zinc-500 font-normal">／{priceUnit}</span>
                     </span>
                     <span className="text-emerald-400 font-semibold tabular-nums text-[0.8125rem] sm:text-sm text-right max-w-full">
-                      零售 ${estimatedRetailPerPackage(item).toLocaleString()}
-                      <span className="text-zinc-500 font-normal">／{item.pieceUnit}</span>
+                      零售 ${estimatedRetailPerPackage(catalogItem).toLocaleString()}
+                      <span className="text-zinc-500 font-normal">／{priceUnit}</span>
                     </span>
                   </>
                 )}
@@ -1066,29 +1077,29 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <div className="flex items-center justify-between gap-2">
                   <span>昨日剩貨</span>
                   <span className="tabular-nums text-zinc-300">
-                    {(carryoverRemainByItem[item.id] ?? 0).toLocaleString()}
+                    {(carryoverRemainByItem[catalogItem.id] ?? 0).toLocaleString()}
                     <LiangJinQtyHint
-                      liangQty={carryoverRemainByItem[item.id] ?? 0}
-                      pieceUnit={item.pieceUnit}
+                      liangQty={carryoverRemainByItem[catalogItem.id] ?? 0}
+                      pieceUnit={priceUnit}
                       className="text-[0.625rem]"
                     />{' '}
-                    {item.pieceUnit}
+                    {priceUnit}
                   </span>
                 </div>
-                {!isConsumableItem(item) && (
+                {!isConsumableItem(catalogItem) && (
                   <div className="flex items-center justify-between gap-2">
-                    <span>上週{PROCUREMENT_WEEKDAY_LABELS[referenceWeekdayIdx].slice(1)}售出</span>
+                    <span>上周{PROCUREMENT_WEEKDAY_LABELS[referenceWeekdayIdx].slice(1)}</span>
                     <span className="tabular-nums text-sky-300/90 shrink-0">
                       {lastWeekSameDayRef.hasCompletedStallDay &&
-                      lastWeekSameDayRef.soldByProductId.has(item.id) ? (
+                      lastWeekSameDayRef.soldByProductId.has(catalogItem.id) ? (
                         <>
-                          {lastWeekSameDayRef.soldByProductId.get(item.id)!.toLocaleString()}
+                          {lastWeekSameDayRef.soldByProductId.get(catalogItem.id)!.toLocaleString()}
                           <LiangJinQtyHint
-                            liangQty={lastWeekSameDayRef.soldByProductId.get(item.id)!}
-                            pieceUnit={item.pieceUnit}
+                            liangQty={lastWeekSameDayRef.soldByProductId.get(catalogItem.id)!}
+                            pieceUnit={priceUnit}
                             className="text-[0.625rem]"
                           />{' '}
-                          {item.pieceUnit}
+                          {priceUnit}
                         </>
                       ) : (
                         '—'
@@ -1100,19 +1111,19 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   <span>下單數量</span>
                   <span className="tabular-nums text-amber-300">
                     {q.toLocaleString()}
-                    <LiangJinQtyHint liangQty={q} pieceUnit={item.pieceUnit} className="text-[0.625rem]" /> {item.pieceUnit}
+                    <LiangJinQtyHint liangQty={q} pieceUnit={priceUnit} className="text-[0.625rem]" /> {priceUnit}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span>明日預計帶出</span>
+                  <span>預計帶出</span>
                   <span className="tabular-nums text-emerald-300">
-                    {roundProcurementQty((carryoverRemainByItem[item.id] ?? 0) + q).toLocaleString()}
+                    {roundProcurementQty((carryoverRemainByItem[catalogItem.id] ?? 0) + q).toLocaleString()}
                     <LiangJinQtyHint
-                      liangQty={roundProcurementQty((carryoverRemainByItem[item.id] ?? 0) + q)}
-                      pieceUnit={item.pieceUnit}
+                      liangQty={roundProcurementQty((carryoverRemainByItem[catalogItem.id] ?? 0) + q)}
+                      pieceUnit={priceUnit}
                       className="text-[0.625rem]"
                     />{' '}
-                    {item.pieceUnit}
+                    {priceUnit}
                   </span>
                 </div>
               </div>
@@ -1121,8 +1132,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <button
                   type="button"
                   tabIndex={-1}
-                  aria-label={`${item.name} 減一`}
-                  onClick={() => bumpQty(item.id, -1)}
+                  aria-label={`${catalogItem.name} 減一`}
+                  onClick={() => bumpQty(catalogItem.id, -1)}
                   className="w-9 min-w-9 sm:w-10 min-h-[2.75rem] sm:min-h-12 flex items-center justify-center text-zinc-400 active:bg-zinc-800/90 sm:active:bg-zinc-800/80"
                 >
                   <Minus size={20} strokeWidth={2.5} />
@@ -1130,14 +1141,14 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <div className="flex-1 min-w-[2.5rem] flex flex-col items-stretch justify-center border-x border-zinc-800/80 px-0.5 py-0.5">
                   <input
                     type="text"
-                    name={`qty-${item.id}`}
+                    name={`qty-${catalogItem.id}`}
                     inputMode="decimal"
                     enterKeyHint="done"
                     autoComplete="off"
-                    id={`proc-qty-${item.id}`}
+                    id={`proc-qty-${catalogItem.id}`}
                     value={
-                      item.id in qtyInputDraft
-                        ? qtyInputDraft[item.id]
+                      catalogItem.id in qtyInputDraft
+                        ? qtyInputDraft[catalogItem.id]
                         : q > 0
                           ? String(roundProcurementQty(q))
                           : ''
@@ -1155,24 +1166,24 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                         t = `${segs[0]}.${segs[1].slice(0, 3)}`;
                       }
                       if (t.length > 20) t = t.slice(0, 20);
-                      setQtyInputDraft((p) => ({ ...p, [item.id]: t }));
+                      setQtyInputDraft((p) => ({ ...p, [catalogItem.id]: t }));
                     }}
                     onFocus={(e) => {
                       setQtyInputDraft((p) => {
-                        if (p[item.id] !== undefined) return p;
+                        if (p[catalogItem.id] !== undefined) return p;
                         return {
                           ...p,
-                          [item.id]: q > 0 ? String(roundProcurementQty(q)) : '',
+                          [catalogItem.id]: q > 0 ? String(roundProcurementQty(q)) : '',
                         };
                       });
                       e.currentTarget.select();
                     }}
                     onBlur={() => {
-                      const cur = qtyInputDraft[item.id];
+                      const cur = qtyInputDraft[catalogItem.id];
                       if (cur === undefined) return;
                       const n = parseQtyInput(cur);
-                      setItemQty(item.id, n);
-                      clearQtyDraft(item.id);
+                      setItemQty(catalogItem.id, n);
+                      clearQtyDraft(catalogItem.id);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -1181,13 +1192,13 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     }}
                     placeholder="0"
                     className="w-full min-h-0 flex-1 bg-zinc-900/30 text-center text-base sm:text-lg font-bold tabular-nums text-amber-400 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:ring-inset rounded-sm"
-                    aria-label={`${item.name} 數量（單位：${item.pieceUnit}），可小數、最多三位小數，0–${PROCUREMENT_QTY_MAX.toLocaleString()}`}
+                    aria-label={`${catalogItem.name} 數量（單位：${priceUnit}），可小數、最多三位小數，0–${PROCUREMENT_QTY_MAX.toLocaleString()}`}
                   />
                   <span className="text-[0.5625rem] sm:text-[0.625rem] text-zinc-500 text-center leading-none pb-0.5 pointer-events-none truncate max-w-full px-0.5">
-                    {item.pieceUnit}
+                    {priceUnit}
                     <LiangJinQtyHint
                       liangQty={effectiveOrderQty}
-                      pieceUnit={item.pieceUnit}
+                      pieceUnit={priceUnit}
                       className="text-[0.5rem] sm:text-[0.5625rem] block mt-0.5"
                     />
                   </span>
@@ -1195,8 +1206,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <button
                   type="button"
                   tabIndex={-1}
-                  aria-label={`${item.name} 加一`}
-                  onClick={() => bumpQty(item.id, 1)}
+                  aria-label={`${catalogItem.name} 加一`}
+                  onClick={() => bumpQty(catalogItem.id, 1)}
                   className="w-9 min-w-9 sm:w-10 min-h-[2.75rem] sm:min-h-12 flex items-center justify-center text-amber-500 active:bg-amber-600/20"
                 >
                   <Plus size={20} strokeWidth={2.5} />
@@ -1211,63 +1222,78 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         ref={checkoutDockRef}
         className={cn(
           'fixed left-0 right-0 lg:left-64 z-40 pointer-events-none bg-gradient-to-t from-[#0a0a0a] to-transparent',
-          checkoutBarCompact
-            ? 'px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1'
+          dockCompact
+            ? 'px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-0.5'
             : 'px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2'
         )}
       >
         <div
           className={cn(
             'max-w-3xl mx-auto pointer-events-auto border border-zinc-700/90 bg-zinc-950/95 backdrop-blur-md shadow-2xl',
-            checkoutBarCompact
-              ? 'rounded-xl p-2 flex flex-col gap-2'
-              : 'rounded-2xl p-3.5 sm:p-4 flex flex-col gap-3'
+            dockCompact
+              ? 'rounded-xl p-2 flex flex-col gap-1.5'
+              : 'rounded-2xl p-3 sm:p-4 flex flex-col gap-2.5'
           )}
         >
-          <div
-            className={cn(
-              'rounded-lg border border-zinc-800/90 bg-zinc-900/50 px-2 py-2',
-              checkoutBarCompact ? 'order-first' : '',
-            )}
-          >
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-              <span className="text-[10px] sm:text-xs text-zinc-500 shrink-0">參考時間</span>
-              <span className="text-[10px] sm:text-xs text-amber-200/90 tabular-nums shrink-0">
+          {dockCompact ? (
+            <div className="flex items-center gap-x-1.5 gap-y-1 min-w-0">
+              <span className="text-[10px] leading-none text-zinc-500 shrink-0">參考</span>
+              <span className="text-[10px] leading-none text-amber-200/90 tabular-nums truncate min-w-0 flex-1 basis-0">
                 {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
               </span>
+              <span className="text-[10px] leading-none text-zinc-500 shrink-0">參考</span>
+              <select
+                aria-label="參考星期（上週同日售出參考）"
+                value={String(referenceWeekdayIdx)}
+                onChange={(e) => selectReferenceWeekday(Number(e.target.value))}
+                className={PROC_WEEKDAY_SELECT_CLASS}
+              >
+                {PROCUREMENT_WEEKDAY_LABELS.map((label, idx) => (
+                  <option key={label} value={idx}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {PROCUREMENT_WEEKDAY_LABELS.map((label, idx) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => selectReferenceWeekday(idx)}
-                  className={cn(
-                    'min-w-[2.35rem] px-2 py-1 rounded-lg text-[11px] sm:text-xs font-medium border transition-colors',
-                    referenceWeekdayIdx === idx
-                      ? 'bg-amber-600/25 border-amber-500/55 text-amber-100'
-                      : 'bg-zinc-950/60 border-zinc-700 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300',
-                  )}
+          ) : (
+            <div className="rounded-lg border border-zinc-800/90 bg-zinc-900/50 px-2.5 py-2">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                <span className="text-xs text-zinc-500 shrink-0">參考時間</span>
+                <span className="text-xs text-amber-200/90 tabular-nums shrink-0">
+                  {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
+                </span>
+              </div>
+              <label className="mt-1.5 flex min-w-0 items-center gap-2">
+                <span className="text-xs text-zinc-500 shrink-0 whitespace-nowrap">對照星期</span>
+                <select
+                  aria-label="對照星期（上週同日售出參考）"
+                  value={String(referenceWeekdayIdx)}
+                  onChange={(e) => selectReferenceWeekday(Number(e.target.value))}
+                  className="accounting-form-date-input box-border h-9 min-h-0 min-w-0 flex-1 max-w-full rounded-lg border border-zinc-700/80 bg-zinc-950/80 px-2.5 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]"
                 >
-                  {label}
-                </button>
-              ))}
+                  {PROCUREMENT_WEEKDAY_LABELS.map((label, idx) => (
+                    <option key={label} value={idx}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-          </div>
+          )}
 
           <div
             className={cn(
-              checkoutBarCompact
-                ? 'flex flex-row flex-nowrap items-stretch gap-2'
-                : 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3',
+              dockCompact
+                ? 'flex flex-row flex-nowrap items-center gap-1.5'
+                : 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5',
             )}
           >
-            {checkoutBarCompact ? (
+            {dockCompact ? (
               <>
-                <ShoppingBasket className="text-amber-500 shrink-0 self-center" size={22} aria-hidden />
-                <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                <ShoppingBasket className="text-amber-500 shrink-0 self-center" size={18} aria-hidden />
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
                   <div
-                    className="flex flex-wrap items-baseline gap-x-1 gap-y-0 text-[11px] leading-snug tabular-nums"
+                    className="flex flex-wrap items-baseline gap-x-1 gap-y-0 text-[10px] leading-tight tabular-nums"
                     aria-label="訂單金額摘要"
                   >
                     <span className="text-zinc-500 shrink-0">批貨</span>
@@ -1286,7 +1312,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     </span>
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-1.5 items-stretch">
+                <div className="flex shrink-0 gap-1 items-stretch">
                   <button
                     type="button"
                     onClick={() => {
@@ -1294,7 +1320,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       setQtyInputDraft({});
                       setSubmitModalOpen(false);
                     }}
-                    className="min-w-0 min-h-0 h-10 px-3 rounded-lg border-2 border-zinc-600 bg-zinc-900/80 text-zinc-200 text-sm font-semibold hover:bg-zinc-800 active:scale-[0.98]"
+                    className="min-w-0 h-9 px-2.5 rounded-lg border border-zinc-600 bg-zinc-900/80 text-zinc-200 text-xs font-semibold hover:bg-zinc-800 active:scale-[0.98]"
                   >
                     清空
                   </button>
@@ -1302,25 +1328,25 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     type="button"
                     onClick={openSubmitConfirm}
                     disabled={totalCount <= 0}
-                    className="min-w-0 min-h-0 h-10 px-3.5 rounded-lg bg-amber-500 text-zinc-950 text-sm font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="min-w-0 h-9 px-3 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     aria-label="送出訂單"
                   >
-                    <ListOrdered size={17} className="shrink-0" aria-hidden />
+                    <ListOrdered size={15} className="shrink-0" aria-hidden />
                     送出
                   </button>
                 </div>
               </>
             ) : (
               <>
-                <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
                   <div className="relative shrink-0">
-                    <ShoppingBasket className="text-amber-500" size={28} />
+                    <ShoppingBasket className="text-amber-500" size={24} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="grid grid-cols-2 w-full items-start gap-3 sm:gap-5 min-w-0">
+                    <div className="grid grid-cols-2 w-full items-start gap-2 sm:gap-4 min-w-0">
                       <div className="min-w-0">
                         <p className="text-xs text-zinc-500 whitespace-nowrap">批貨金額</p>
-                        <p className="text-base sm:text-lg font-semibold text-amber-400 tabular-nums leading-tight">
+                        <p className="text-sm sm:text-lg font-semibold text-amber-400 tabular-nums leading-tight">
                           $ {totalPayablePrice.toLocaleString()}
                         </p>
                         {showProcurementCost && userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
@@ -1340,7 +1366,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                           售完金額
                           <span className="ml-0.5 text-[10px] text-zinc-600 font-normal">（批貨+剩餘）</span>
                         </p>
-                        <p className="text-base sm:text-lg font-semibold text-emerald-400 tabular-nums leading-tight mt-0.5">
+                        <p className="text-sm sm:text-lg font-semibold text-emerald-400 tabular-nums leading-tight mt-0.5">
                           $ {soldOutRetailEstimate.toLocaleString()}
                         </p>
                       </div>
@@ -1355,7 +1381,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                       setQtyInputDraft({});
                       setSubmitModalOpen(false);
                     }}
-                    className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-5 rounded-xl border-2 border-zinc-600 bg-zinc-900/80 text-zinc-200 text-base font-semibold hover:bg-zinc-800 active:scale-[0.98]"
+                    className="flex-1 sm:flex-initial min-w-0 min-h-10 px-4 sm:px-5 rounded-xl border border-zinc-600 bg-zinc-900/80 text-zinc-200 text-sm font-semibold hover:bg-zinc-800 active:scale-[0.98]"
                   >
                     清空
                   </button>
@@ -1363,9 +1389,9 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                     type="button"
                     onClick={openSubmitConfirm}
                     disabled={totalCount <= 0}
-                    className="flex-1 sm:flex-initial min-w-0 min-h-[48px] px-4 sm:px-6 rounded-xl bg-amber-500 text-zinc-950 text-base font-bold active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex-1 sm:flex-initial min-w-0 min-h-10 px-4 sm:px-6 rounded-xl bg-amber-500 text-zinc-950 text-sm font-bold active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <ListOrdered size={20} />
+                    <ListOrdered size={18} />
                     送出訂單
                   </button>
                 </div>

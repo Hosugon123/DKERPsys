@@ -120,9 +120,11 @@ function MainIngredientSubcategorySelect({
 const EMPTY_CATEGORY = '' as const;
 const EMPTY_SUB = '';
 
-/** 新增／編輯表單日期：全寬 + min-w-0，手機不加左側圖示留白（標題已有圖示） */
+/**
+ * 新增／編輯表單日期：緊湊高度、取消多餘 padding，並壓制 WebKit 原生 date 欄位預設 min-height。
+ */
 const formDateInputClass =
-  'box-border block w-full min-w-0 max-w-full h-11 sm:h-auto rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-3 sm:pl-10 sm:pr-3 py-2.5 text-base sm:text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]';
+  'accounting-form-date-input box-border block w-full min-w-0 max-w-full h-9 sm:h-10 min-h-0 rounded-lg sm:rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-2.5 sm:pl-9 sm:pr-2 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark] [&::-webkit-date-and-time-value]:min-w-0 [&::-webkit-date-and-time-value]:text-left [&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:p-0 [&::-webkit-calendar-picker-indicator]:opacity-90';
 
 /** 支出明細列內之日期範圍：手機全寬避免裁切；桌面維持精簡高度 */
 const rangeDateInputClass =
@@ -430,19 +432,16 @@ export default function Accounting() {
         </h2>
       </div>
 
-      <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-4 sm:p-5 md:p-6 min-w-0 max-w-full overflow-x-hidden">
-        <h3 className="text-lg font-semibold text-zinc-200 mb-4">新增紀錄</h3>
-        <form onSubmit={onSubmit} className="space-y-4 min-w-0 max-w-full">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
-            <label className="block space-y-1.5 min-w-0 max-w-full">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
-                <CalendarDays size={14} className="text-amber-600/80 shrink-0" />
-                日期
-              </span>
-              <div className="relative min-w-0 max-w-full overflow-hidden">
+      <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 backdrop-blur-sm shadow-xl shadow-black/20 p-3 sm:p-5 md:p-6 min-w-0 max-w-full overflow-x-hidden">
+        <h3 className="text-lg font-semibold text-zinc-200 mb-2.5">新增紀錄</h3>
+        <form onSubmit={onSubmit} className="space-y-3 min-w-0 max-w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-w-0">
+            <label className="block space-y-1 min-w-0 max-w-full">
+              <span className="text-xs font-medium text-zinc-500">日期</span>
+              <div className="relative w-full min-w-0 max-w-full">
                 <CalendarDays
-                  size={18}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
+                  size={16}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
                   aria-hidden
                 />
                 <input
@@ -453,9 +452,9 @@ export default function Accounting() {
                 />
               </div>
             </label>
-            <label className="block space-y-1.5 min-w-0 max-w-full">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">收支類型</span>
-              <div className="flex min-w-0 max-w-full rounded-xl border border-zinc-700/80 overflow-hidden p-0.5 bg-zinc-950/60">
+            <label className="block space-y-1 min-w-0 max-w-full">
+              <span className="text-xs font-medium text-zinc-500">收支類型</span>
+              <div className="flex min-w-0 max-w-full h-9 sm:h-10 rounded-lg sm:rounded-xl border border-zinc-700/80 overflow-hidden p-0.5 bg-zinc-950/60">
                 {(
                   [
                     { id: 'expense' as const, label: '支出' },
@@ -476,7 +475,7 @@ export default function Accounting() {
                       }
                     }}
                     className={cn(
-                      'flex-1 py-2 text-sm font-medium rounded-lg transition-colors',
+                      'flex-1 min-h-0 py-1.5 sm:py-2 text-sm font-medium rounded-md sm:rounded-lg transition-colors',
                       flowType === opt.id
                         ? 'bg-amber-600/25 text-amber-200 border border-amber-600/40'
                         : 'text-zinc-400 hover:text-zinc-200'
@@ -901,15 +900,12 @@ export default function Accounting() {
             </div>
 
             <form onSubmit={onEditSubmit} className="space-y-4">
-              <label className="block space-y-1.5">
-                <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <CalendarDays size={14} className="text-amber-600/80" />
-                  日期
-                </span>
-                <div className="relative min-w-0 max-w-full overflow-hidden">
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-zinc-500">日期</span>
+                <div className="relative w-full min-w-0 max-w-full">
                   <CalendarDays
-                    size={18}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
+                    size={16}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-600/70 pointer-events-none hidden sm:block"
                     aria-hidden
                   />
                   <input

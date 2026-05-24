@@ -586,51 +586,28 @@ function StallGapQuickPresetRow(props: {
 function WeekdayChainPicker({
   focusIdx,
   onChange,
-  isNarrow,
 }: {
   focusIdx: number | null;
   onChange: (idx: number | null) => void;
-  isNarrow: boolean;
+  isNarrow?: boolean;
 }) {
-  if (isNarrow) {
-    return (
-      <select
-        aria-label="對照星期"
-        value={focusIdx === null ? '' : String(focusIdx)}
-        onChange={(e) => {
-          const v = e.target.value;
-          onChange(v === '' ? null : Number(v));
-        }}
-        className={SUMMARY_RANGE_SELECT_CLASS}
-      >
-        <option value="">全部（逐日）</option>
-        {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
-          <option key={label} value={idx}>
-            {label}
-          </option>
-        ))}
-      </select>
-    );
-  }
   return (
-    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+    <select
+      aria-label="對照星期"
+      value={focusIdx === null ? '' : String(focusIdx)}
+      onChange={(e) => {
+        const v = e.target.value;
+        onChange(v === '' ? null : Number(v));
+      }}
+      className={cn(SUMMARY_RANGE_SELECT_CLASS, 'h-9 min-h-0 max-w-full')}
+    >
+      <option value="">全部（逐日）</option>
       {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
-        <button
-          key={label}
-          type="button"
-          aria-pressed={focusIdx === idx}
-          onClick={() => onChange(focusIdx === idx ? null : idx)}
-          className={cn(
-            'px-2.5 py-1 rounded-md text-xs border transition-colors min-h-[32px]',
-            focusIdx === idx
-              ? 'bg-amber-600/25 border-amber-500/45 text-amber-200'
-              : 'bg-zinc-950 border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600',
-          )}
-        >
+        <option key={label} value={idx}>
           {label}
-        </button>
+        </option>
       ))}
-    </div>
+    </select>
   );
 }
 
@@ -2025,22 +2002,16 @@ export default function Dashboard({
               ) : null}
               </div>
 
-              <div className="border-t border-zinc-700/80 pt-3 flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-col gap-2 min-w-0 flex-1">
-                  <span className="text-sm font-medium text-zinc-100 shrink-0">對照星期</span>
-                  <p className="text-[11px] text-zinc-500 leading-snug">
-                    {weekdayChainFocusIdx === null
-                      ? stallSalesBoardRange.kind === 'none'
-                        ? '未選取：表格為全部已建檔營業日（逐日）'
-                        : '未選取：下方表格為區間內逐日列表'
-                      : `已選 ${WEEKDAY_TOGGLE_LABELS[weekdayChainFocusIdx]}：再點一次可取消`}
-                  </p>
+              <div className="border-t border-zinc-700/80 pt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <label className="flex min-w-0 flex-1 items-center gap-2">
+                  <span className="text-xs sm:text-sm font-medium text-zinc-400 shrink-0 whitespace-nowrap">
+                    對照星期
+                  </span>
                   <WeekdayChainPicker
                     focusIdx={weekdayChainFocusIdx}
                     onChange={setWeekdayChainFocusIdx}
-                    isNarrow={isNarrow}
                   />
-                </div>
+                </label>
                 <p className="text-xs sm:text-sm text-zinc-500 shrink-0 lg:text-right">
                   選取日期：
                   <span className="tabular-nums text-amber-200/90 font-medium">

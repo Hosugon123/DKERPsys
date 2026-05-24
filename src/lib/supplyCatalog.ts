@@ -327,6 +327,12 @@ export function orderPackageSpecText(item: SupplyItem) {
   return `${item.orderUnit} ${item.piecesPerPackage} ${item.pieceUnit}`;
 }
 
+/** 批價／零售與數量顯示用計價單位（與品項庫「單位」欄 pieceUnit 一致） */
+export function supplyItemPriceUnitLabel(item: SupplyItem): string {
+  const u = String(item.pieceUnit ?? '').trim();
+  return u || '份';
+}
+
 export function totalPiecesInPackages(item: SupplyItem, packages: number) {
   return Math.round(packages * item.piecesPerPackage);
 }

@@ -89,6 +89,17 @@ function isDraftCatalogRowId(id: string): boolean {
   return id.startsWith('__draft__');
 }
 
+/** 延遲儲存模式下：單位欄失焦即寫入，叫貨卡批價／零售「／單位」才能即時同步 */
+async function persistPieceUnitOnly(item: SupplyItem, unitValue: string, isCustom: boolean) {
+  const trimmed = unitValue.trim() || '份';
+  if (trimmed === item.pieceUnit) return;
+  if (isCustom) {
+    await products.catalog.updateCustomItem(item.id, { pieceUnit: trimmed });
+    return;
+  }
+  await products.catalog.setSupplyItemOverride(item.id, { pieceUnit: trimmed });
+}
+
 async function persistCatalogRowFromSnapshot(
   id: string,
   item: SupplyItem | null,
@@ -808,7 +819,14 @@ function ItemRow({
             setUnit(e.target.value);
             if (deferSave) touchDirty();
           }}
-          onBlur={blurCommit}
+          onBlur={() => {
+            if (deferSave && !draftRow) {
+              touchDirty();
+              void persistPieceUnitOnly(item, unit, isCustom);
+              return;
+            }
+            blurCommit();
+          }}
           onFocus={onOtherAction}
           placeholder="份、兩、條…"
           className="w-full min-h-9 rounded-lg border border-zinc-700 bg-zinc-900/50 px-1.5 text-sm"
