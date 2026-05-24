@@ -58,13 +58,19 @@ import {
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
 } from '../lib/orderHistoryStorage';
-import { getWeekdayBaselineTarget, setWeekdayBaselineTarget } from '../lib/dashboardWeekdayBaselineStorage';
 import {
   buildDirectStallEconomicsByYmd,
   buildFranchiseStallEconomicsByYmd,
   type DirectStallDayEconomics,
 } from '../lib/directStallDayEconomics';
 import { getDataScopeContext } from '../lib/dataScope';
+import {
+  clearRevenueBaselineTarget,
+  getRevenueBaselineTarget,
+  REVENUE_BASELINE_UPDATED_EVENT,
+  resolveStallRevenueBaselineScopeId,
+  setRevenueBaselineTarget,
+} from '../lib/dashboardRevenueBaselineStorage';
 import { computeLine } from '../lib/stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog, patchSalesRecordRevenueGapReason } from '../lib/salesRecordStorage';
 
@@ -583,6 +589,76 @@ function StallGapQuickPresetRow(props: {
   );
 }
 
+function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [loadTick, setLoadTick] = useState(0);
+
+  useEffect(() => {
+    const onUpdate = () => setLoadTick((t) => t + 1);
+    window.addEventListener(REVENUE_BASELINE_UPDATED_EVENT, onUpdate);
+    return () => window.removeEventListener(REVENUE_BASELINE_UPDATED_EVENT, onUpdate);
+  }, []);
+
+  useEffect(() => {
+    const next: Record<number, string> = {};
+    for (let i = 0; i < 7; i++) {
+      const v = getRevenueBaselineTarget(scopeId, i);
+      next[i] = v !== undefined ? String(v) : '';
+    }
+    setDrafts(next);
+  }, [scopeId, loadTick]);
+
+  const commit = (idx: number) => {
+    const raw = String(drafts[idx] ?? '')
+      .replace(/,/g, '')
+      .trim();
+    if (raw === '') {
+      clearRevenueBaselineTarget(scopeId, idx);
+      setLoadTick((t) => t + 1);
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      setLoadTick((t) => t + 1);
+      return;
+    }
+    setRevenueBaselineTarget(scopeId, idx, n);
+    setDrafts((d) => ({ ...d, [idx]: String(Math.round(n)) }));
+  };
+
+  return (
+    <div className="rounded-xl border border-amber-900/40 bg-amber-950/10 p-3 sm:p-4 space-y-3">
+      <div>
+        <p className="text-sm font-medium text-amber-200/95">營業額打底</p>
+        <p className="text-[11px] text-zinc-500 mt-1 leading-snug">
+          設定各星期目標金額；當日登錄實收超過打底即有獎金資格，可隨時修改。
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
+          <label key={label} className="flex items-center gap-2 min-w-0">
+            <span className="text-xs text-zinc-400 w-9 shrink-0">{label}</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={drafts[idx] ?? ''}
+              onChange={(e) => setDrafts((d) => ({ ...d, [idx]: e.target.value }))}
+              onBlur={() => commit(idx)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur();
+              }}
+              placeholder="未設定"
+              aria-label={`${label}營業額打底`}
+              className="min-w-0 flex-1 rounded-lg border border-zinc-700/80 bg-zinc-950/90 px-2 py-2 text-sm text-zinc-100 tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-600/45"
+            />
+            <span className="text-[10px] text-zinc-600 shrink-0">元</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function WeekdayChainPicker({
   focusIdx,
   onChange,
@@ -889,9 +965,6 @@ export default function Dashboard({
   const [weekdayChainFocusIdx, setWeekdayChainFocusIdx] = useState<number | null>(null);
   /** 銷售數據表列點選之聚焦日（null 時取區間內最近一筆同名星期） */
   const [stallBoardFocusYmd, setStallBoardFocusYmd] = useState<string | null>(null);
-  /** 同名星期「業績打底」編輯草稿（localStorage 鍵為 weekdayChainFocusIdx） */
-  const [weekdayBaselineDraft, setWeekdayBaselineDraft] = useState('');
-
   useEffect(() => {
     if (!isAdmin && franchisePickerOpen) {
       setFranchisePickerOpen(false);
@@ -906,15 +979,6 @@ export default function Dashboard({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [franchisePickerOpen]);
-
-  useEffect(() => {
-    if (weekdayChainFocusIdx === null) {
-      setWeekdayBaselineDraft('');
-      return;
-    }
-    const v = getWeekdayBaselineTarget(weekdayChainFocusIdx);
-    setWeekdayBaselineDraft(v !== undefined ? String(v) : '');
-  }, [weekdayChainFocusIdx]);
 
   useEffect(() => {
     setStallBoardFocusYmd(null);
@@ -1183,7 +1247,7 @@ export default function Dashboard({
     stallSalesBoardResolvedYmd,
   ]);
 
-  /** 與「同名星期・歷史實收統計」相同之曆日集合：各品項當日售出量加總後，再算平均／最高／最低 */
+  /** 與「銷售統計」相同之曆日集合：各品項當日售出量加總後，再算平均／最高／最低 */
   const sameWeekdayProductSoldStats = useMemo(() => {
     const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
@@ -1285,13 +1349,30 @@ export default function Dashboard({
   const showStallSalesBoard =
     (realIsAdmin && !viewAsFranchisee) || showFranchiseStallSalesBoard;
 
-  const saveWeekdayBaseline = useCallback(() => {
-    if (weekdayChainFocusIdx === null) return;
-    const n = Number(String(weekdayBaselineDraft).replace(/,/g, '').trim());
-    if (!Number.isFinite(n) || n < 0) return;
-    setWeekdayBaselineTarget(weekdayChainFocusIdx, n);
-    setWeekdayBaselineDraft(String(Math.round(n)));
-  }, [weekdayBaselineDraft, weekdayChainFocusIdx]);
+  const stallRevenueBaselineScopeId = useMemo(
+    () => resolveStallRevenueBaselineScopeId(franchiseStallSalesBoardOwnerUserId),
+    [franchiseStallSalesBoardOwnerUserId],
+  );
+  const [revenueBaselineTick, setRevenueBaselineTick] = useState(0);
+  useEffect(() => {
+    const onUpdate = () => setRevenueBaselineTick((t) => t + 1);
+    window.addEventListener(REVENUE_BASELINE_UPDATED_EVENT, onUpdate);
+    return () => window.removeEventListener(REVENUE_BASELINE_UPDATED_EVENT, onUpdate);
+  }, []);
+
+  const focusDayRevenueBaseline = useMemo(() => {
+    if (!calendarWeekFocusYmd) return undefined;
+    return getRevenueBaselineTarget(
+      stallRevenueBaselineScopeId,
+      mondayFirstWeekdayIndexFromYmd(calendarWeekFocusYmd),
+    );
+  }, [calendarWeekFocusYmd, stallRevenueBaselineScopeId, revenueBaselineTick]);
+
+  const focusDayMeetsRevenueBaseline = useMemo(() => {
+    if (focusDayRevenueBaseline === undefined) return false;
+    const actual = focusDayEconomics?.actual;
+    return actual !== null && actual !== undefined && actual >= focusDayRevenueBaseline;
+  }, [focusDayRevenueBaseline, focusDayEconomics]);
 
   const nonAdminSummary = useMemo(() => {
     if (isAdmin) return null;
@@ -1933,6 +2014,7 @@ export default function Dashboard({
             />
           </summary>
           <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
+            <StallRevenueBaselinePanel scopeId={stallRevenueBaselineScopeId} />
             <div className="rounded-xl border border-zinc-600/80 bg-zinc-900/70 p-3 sm:p-4 space-y-3 ring-1 ring-amber-600/10">
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -2038,6 +2120,16 @@ export default function Dashboard({
                         ? moneyTW(focusDayEconomics.actual)
                         : '—'}
                     </p>
+                    {focusDayRevenueBaseline !== undefined ? (
+                      <p className="text-[10px] text-zinc-500 mt-1 tabular-nums">
+                        打底 {moneyTW(focusDayRevenueBaseline)}
+                        {focusDayMeetsRevenueBaseline ? (
+                          <span className="ml-1.5 text-emerald-400 font-medium">已達標</span>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-zinc-600 mt-1">尚未設定當日打底</p>
+                    )}
                   </div>
                   <div className="rounded-xl border border-zinc-700 bg-zinc-900/80 p-3">
                     <p className="text-[11px] text-zinc-400">落差金額</p>
@@ -2144,11 +2236,7 @@ export default function Dashboard({
               </div>
 
               <div className="xl:col-span-4 rounded-xl border border-sky-900/35 bg-sky-950/15 p-4 sm:p-5 space-y-3 text-base">
-                <p className="text-base sm:text-lg font-medium text-sky-200/90">
-                  {weekdayChainFocusIdx === null
-                    ? '區間・歷史實收統計'
-                    : '同名星期・歷史實收統計'}
-                </p>
+                <p className="text-base sm:text-lg font-medium text-sky-200/90">銷售統計</p>
                 <div className="space-y-2.5 text-base sm:text-[1.0625rem]">
                   <div className="flex justify-between gap-2 border-b border-zinc-800/70 pb-2">
                     <span className="text-zinc-500">總營收（實收合計）</span>
@@ -2183,9 +2271,7 @@ export default function Dashboard({
                   {sameWeekdayActualStats.dayCount > 0 && (
                     <div className="space-y-2.5 pt-1 border-b border-zinc-800/70 pb-2">
                       <p className="text-base font-medium text-sky-200/85">
-                        {weekdayChainFocusIdx === null
-                          ? '各品項售出量（區間逐日）'
-                          : '各品項售出量（同名星期）'}
+                        售出量統計
                       </p>
                       {sameWeekdayProductSoldStats.rows.length > 0 ? (
                         <div className="overflow-x-auto rounded-lg border border-zinc-800/80 max-h-52 sm:max-h-64 overflow-y-auto -mx-0.5 px-0.5">
@@ -2221,36 +2307,6 @@ export default function Dashboard({
                       )}
                     </div>
                   )}
-                  {weekdayChainFocusIdx !== null ? (
-                  <div className="pt-1 space-y-2">
-                    <div className="flex justify-between gap-2 items-baseline">
-                      <span className="text-zinc-500 shrink-0">業績打底</span>
-                      <span className="tabular-nums text-amber-200/90 text-sm sm:text-base">
-                        已存：
-                        {getWeekdayBaselineTarget(weekdayChainFocusIdx) !== undefined
-                          ? moneyTW(getWeekdayBaselineTarget(weekdayChainFocusIdx)!)
-                          : '未設定'}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-end gap-2">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={weekdayBaselineDraft}
-                        onChange={(e) => setWeekdayBaselineDraft(e.target.value)}
-                        placeholder="目標金額"
-                        className="min-w-[8rem] flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2.5 text-base sm:text-[1.0625rem] text-zinc-200 tabular-nums focus:outline-none focus:border-sky-600/50"
-                      />
-                      <button
-                        type="button"
-                        onClick={saveWeekdayBaseline}
-                        className="px-3 py-2.5 rounded-lg border border-sky-700/80 bg-sky-950/40 text-sky-200 text-sm sm:text-base hover:bg-sky-900/40"
-                      >
-                        儲存打底
-                      </button>
-                    </div>
-                  </div>
-                  ) : null}
                 </div>
               </div>
             </div>
