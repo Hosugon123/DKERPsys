@@ -652,11 +652,13 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       return order.franchisee === storeLabelFilter;
     });
     const byStatus = byStoreLabel.filter((order) => {
+      if (statusFilter === '已取消') return order.status === '已取消';
+      if (order.status === '已取消') return false;
       if (statusFilter === '已盤點' || statusFilter === '所有訂單') return true;
       return order.status === statusFilter;
     });
     const byStallCount = byStatus.filter((order) => {
-      if (statusFilter === '已盤點') return true;
+      if (statusFilter === '已盤點' || statusFilter === '已取消') return true;
       const o = rawList.find((r) => r.id === order.id);
       return o ? !orderHasStallCountCompleted(o) : false;
     });

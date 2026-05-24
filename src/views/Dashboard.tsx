@@ -596,8 +596,20 @@ function StallGapQuickPresetRow(props: {
   );
 }
 
+function commitRevenueBaselineDraft(scopeId: string, idx: number, rawInput: string): void {
+  const raw = String(rawInput).replace(/,/g, '').trim();
+  if (raw === '') {
+    clearRevenueBaselineTarget(scopeId, idx);
+    return;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return;
+  setRevenueBaselineTarget(scopeId, idx, n);
+}
+
 function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [editing, setEditing] = useState(false);
+  const [editDrafts, setEditDrafts] = useState<Record<number, string>>({});
   const [loadTick, setLoadTick] = useState(0);
 
   useEffect(() => {
@@ -606,63 +618,84 @@ function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
     return () => window.removeEventListener(REVENUE_BASELINE_UPDATED_EVENT, onUpdate);
   }, []);
 
-  useEffect(() => {
-    const next: Record<number, string> = {};
-    for (let i = 0; i < 7; i++) {
-      const v = getRevenueBaselineTarget(scopeId, i);
-      next[i] = v !== undefined ? String(v) : '';
+  const savedByWeekday = useMemo(() => {
+    const next: Record<number, number | undefined> = {};
+    for (const { idx } of REVENUE_BASELINE_WEEKDAYS) {
+      next[idx] = getRevenueBaselineTarget(scopeId, idx);
     }
-    setDrafts(next);
+    return next;
   }, [scopeId, loadTick]);
 
-  const commit = (idx: number) => {
-    const raw = String(drafts[idx] ?? '')
-      .replace(/,/g, '')
-      .trim();
-    if (raw === '') {
-      clearRevenueBaselineTarget(scopeId, idx);
-      setLoadTick((t) => t + 1);
-      return;
+  const startEdit = () => {
+    const next: Record<number, string> = {};
+    for (const { idx } of REVENUE_BASELINE_WEEKDAYS) {
+      const v = savedByWeekday[idx];
+      next[idx] = v !== undefined ? String(v) : '';
     }
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) {
-      setLoadTick((t) => t + 1);
-      return;
+    setEditDrafts(next);
+    setEditing(true);
+  };
+
+  const finishEdit = () => {
+    for (const { idx } of REVENUE_BASELINE_WEEKDAYS) {
+      commitRevenueBaselineDraft(scopeId, idx, editDrafts[idx] ?? '');
     }
-    setRevenueBaselineTarget(scopeId, idx, n);
-    setDrafts((d) => ({ ...d, [idx]: String(Math.round(n)) }));
+    setEditing(false);
+    setLoadTick((t) => t + 1);
   };
 
   return (
-    <div className="rounded-xl border border-amber-900/40 bg-amber-950/10 px-2.5 py-2 sm:px-3 sm:py-2.5 min-w-0">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-xs font-medium text-amber-200/95 shrink-0 whitespace-nowrap">
-          營業額打底
-        </span>
-        <div className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain">
-          <div className="grid grid-cols-6 gap-1 min-w-[15rem] sm:min-w-0 sm:w-full">
-            {REVENUE_BASELINE_WEEKDAYS.map(({ label, idx }) => (
-              <label key={label} className="flex flex-col items-stretch gap-0.5 min-w-0">
-                <span className="text-[10px] leading-none text-zinc-500 text-center truncate">
-                  {label.slice(1)}
-                </span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={drafts[idx] ?? ''}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [idx]: e.target.value }))}
-                  onBlur={() => commit(idx)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.currentTarget.blur();
-                  }}
-                  placeholder="—"
-                  aria-label={`${label}營業額打底`}
-                  className="w-full min-w-0 h-8 sm:h-9 box-border rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1 py-0 text-center text-xs sm:text-sm text-zinc-100 tabular-nums focus:outline-none focus:ring-1 focus:ring-amber-600/45"
-                />
-              </label>
-            ))}
+    <div className="rounded-xl border border-amber-900/40 bg-amber-950/10 p-3 sm:p-4 min-w-0">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <span className="text-sm font-medium text-amber-200/95">營業額打底</span>
+        {editing ? (
+          <button
+            type="button"
+            onClick={finishEdit}
+            className="shrink-0 min-h-9 px-3 py-1.5 rounded-lg border border-amber-600/50 bg-amber-600/20 text-xs sm:text-sm font-medium text-amber-100 hover:bg-amber-600/30"
+          >
+            完成
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={startEdit}
+            className="shrink-0 min-h-9 px-3 py-1.5 rounded-lg border border-zinc-600/80 bg-zinc-900/80 text-xs sm:text-sm font-medium text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800/90"
+          >
+            編輯
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-1.5">
+        {REVENUE_BASELINE_WEEKDAYS.map(({ label, idx }) => (
+          <div
+            key={label}
+            className="flex flex-col items-center gap-1 min-w-0 rounded-lg border border-zinc-800/60 bg-zinc-950/40 px-1.5 py-2 sm:py-1.5"
+          >
+            <span className="text-[11px] sm:text-xs text-zinc-500 leading-none">{label}</span>
+            {editing ? (
+              <input
+                type="text"
+                inputMode="numeric"
+                value={editDrafts[idx] ?? ''}
+                onChange={(e) => setEditDrafts((d) => ({ ...d, [idx]: e.target.value }))}
+                placeholder="未設定"
+                aria-label={`${label}營業額打底`}
+                className="w-full min-w-0 h-10 sm:h-9 box-border rounded-md border border-zinc-600/80 bg-zinc-950 px-2 py-0 text-center text-sm sm:text-base font-medium tabular-nums text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/45"
+              />
+            ) : (
+              <span
+                className={cn(
+                  'w-full text-center text-sm sm:text-base font-medium tabular-nums leading-snug break-all',
+                  savedByWeekday[idx] !== undefined ? 'text-amber-100/95' : 'text-zinc-600',
+                )}
+              >
+                {savedByWeekday[idx] !== undefined ? moneyTW(savedByWeekday[idx]!) : '—'}
+              </span>
+            )}
           </div>
-        </div>
+        ))}
       </div>
     </div>
   );
