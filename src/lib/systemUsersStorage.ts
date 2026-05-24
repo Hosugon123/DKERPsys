@@ -164,6 +164,7 @@ function coerceUser(raw: unknown): SystemUser | null {
   const employeeOrgType = o.employeeOrgType;
   const parentFranchiseeUserId = o.parentFranchiseeUserId;
   const storeLabel = o.storeLabel;
+  const orderStoreCodeRaw = o.orderStoreCode;
   const createdAt = typeof o.createdAt === 'string' ? o.createdAt : '';
   const updatedAt = typeof o.updatedAt === 'string' ? o.updatedAt : '';
   if (!id || !name || !email) return null;
@@ -190,6 +191,13 @@ function coerceUser(raw: unknown): SystemUser | null {
     }
   }
   if (typeof storeLabel === 'string' && storeLabel.trim()) u.storeLabel = storeLabel.trim();
+  if (
+    role === 'franchisee' &&
+    typeof orderStoreCodeRaw === 'string' &&
+    orderStoreCodeRaw.trim()
+  ) {
+    u.orderStoreCode = normalizeStoreCode3Digits(orderStoreCodeRaw);
+  }
   if (typeof loginIdRaw === 'string' && loginIdRaw.trim()) {
     u.loginId = normalizeLoginId(loginIdRaw);
   }

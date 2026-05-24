@@ -123,15 +123,29 @@ const EMPTY_SUB = '';
 /**
  * 新增／編輯表單日期：緊湊高度、取消多餘 padding，並壓制 WebKit 原生 date 欄位預設 min-height。
  */
-const formDateWrapClass =
-  'accounting-form-date-wrap grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] overflow-hidden';
+const formDateShellClass =
+  'rounded-lg sm:rounded-xl border border-zinc-700/80 bg-zinc-950/80 focus-within:ring-2 focus-within:ring-amber-600/50 focus-within:border-amber-600/40';
 
+const formDateWrapClass = cn(
+  'accounting-form-date-wrap grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] overflow-hidden',
+  formDateShellClass,
+);
+
+/** 邊框在 wrap；input 預留右側給原生日曆圖示，避免手機上凸出裁切 */
 const formDateInputClass =
-  'accounting-form-date-input box-border w-full min-w-0 max-w-full h-9 sm:h-10 min-h-0 rounded-lg sm:rounded-xl bg-zinc-950/80 border border-zinc-700/80 px-2.5 sm:pl-9 sm:pr-2 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]';
+  'accounting-form-date-input box-border w-full min-w-0 max-w-full h-9 sm:h-10 min-h-0 border-0 bg-transparent shadow-none pl-2.5 pr-9 sm:pl-9 sm:pr-10 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
+
+const rangeDateShellClass =
+  'rounded-lg border border-zinc-600/70 bg-zinc-950/90 focus-within:ring-2 focus-within:ring-amber-500/35 focus-within:border-amber-500/50';
+
+const rangeDateWrapClass = cn(
+  'accounting-form-date-wrap grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] overflow-hidden',
+  rangeDateShellClass,
+);
 
 /** 支出明細列內之日期範圍：手機全寬避免裁切；桌面維持精簡高度 */
 const rangeDateInputClass =
-  'accounting-form-date-input h-10 md:h-9 w-full min-w-0 max-w-full rounded-lg bg-zinc-950/90 border border-zinc-600/70 px-2.5 py-1.5 text-sm md:text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/35 focus:border-amber-500/50 [color-scheme:dark]';
+  'accounting-form-date-input h-10 md:h-9 w-full min-w-0 max-w-full border-0 bg-transparent shadow-none pl-2.5 pr-9 py-0 md:py-1.5 text-sm md:text-xs text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
 
 export default function Accounting() {
   const { entries, add, update, remove } = useAccountingLedger();
@@ -682,7 +696,7 @@ export default function Accounting() {
                   <div className="grid grid-cols-1 gap-2 w-full min-w-0 sm:grid-cols-2">
                     <label className="flex flex-col gap-1 min-w-0 w-full max-w-full">
                       <span className="text-[0.6875rem] text-zinc-500 shrink-0">從</span>
-                      <div className={formDateWrapClass}>
+                      <div className={rangeDateWrapClass}>
                         <input
                           type="date"
                           value={rangeStart}
@@ -697,7 +711,7 @@ export default function Accounting() {
                     </label>
                     <label className="flex flex-col gap-1 min-w-0 w-full max-w-full">
                       <span className="text-[0.6875rem] text-zinc-500 shrink-0">至</span>
-                      <div className={formDateWrapClass}>
+                      <div className={rangeDateWrapClass}>
                         <input
                           type="date"
                           value={rangeEnd}

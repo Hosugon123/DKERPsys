@@ -261,6 +261,9 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     [newOrderDateYmd, basisOrdersList, supplyRetailView, referenceMode, stallTick],
   );
 
+  /** 底部「參考」列：顯示售出參考資料所屬曆日（非叫貨歸屬日） */
+  const referenceDataDisplayYmd = weekdaySoldRef.referenceYmd;
+
   const referenceSoldRowLabel = useMemo(
     () => procurementReferenceSoldRowLabel(referenceMode, referenceWeekdayIdx),
     [referenceMode, referenceWeekdayIdx],
@@ -1258,7 +1261,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
             <div className="flex items-center gap-x-1.5 gap-y-1 min-w-0">
               <span className="text-[10px] leading-none text-zinc-500 shrink-0">參考</span>
               <span className="text-[10px] leading-none text-amber-200/90 tabular-nums truncate min-w-0 flex-1 basis-0">
-                {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
+                {formatSlashYmdWithWeekdayFromYmd(referenceDataDisplayYmd)}
               </span>
               <select
                 aria-label="售出參考模式（最高／平均／上週／最低）"
@@ -1290,7 +1293,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
                 <span className="text-xs text-zinc-500 shrink-0">參考時間</span>
                 <span className="text-xs text-amber-200/90 tabular-nums shrink-0">
-                  {formatSlashYmdWithWeekdayFromYmd(newOrderDateYmd)}
+                  {formatSlashYmdWithWeekdayFromYmd(referenceDataDisplayYmd)}
                 </span>
               </div>
               <label className="mt-1.5 flex min-w-0 items-center gap-2">
