@@ -57,14 +57,24 @@
   }
 
   /**
-   * 品項明細表：單一 overflow 捲動區 + thead sticky。
-   * 勿在外層再加 overflow-x-auto（會使 sticky 失效）；表格用 border-separate。
+   * 品項明細表：垂直／橫向分層捲動，避免斜滑時左右晃動；thead sticky 綁在垂直層。
+   * 表格用 border-separate（collapse 會使 sticky 失效）。
    */
-  .sticky-detail-table-scroll {
+  .sticky-detail-table-scroll-y {
     max-height: min(70dvh, 36rem);
-    overflow: auto;
-    overscroll-behavior: contain;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  .sticky-detail-table-scroll-x {
+    overflow-x: auto;
+    overflow-y: visible;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
   }
 }
 

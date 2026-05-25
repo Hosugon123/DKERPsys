@@ -736,7 +736,8 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         <div className="px-3 py-2 bg-zinc-900/80 border-b border-zinc-800 text-[0.975rem] text-zinc-500">
                           盤點明細
                         </div>
-                        <div className="sticky-detail-table-scroll touch-[pan-x_pan-y]">
+                        <div className="sticky-detail-table-scroll-y">
+                          <div className="sticky-detail-table-scroll-x min-w-0">
                           {isStallEditThis && stallEditDraft ? (
                             <table className="w-full border-separate border-spacing-0 text-[14.3px] sm:text-[1.1375rem] min-w-[56rem]">
                               <thead>
@@ -1118,6 +1119,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                           {!isStallEditThis && tableRows.length === 0 && (
                             <p className="p-4 text-[1.1375rem] text-zinc-500">無明細。</p>
                           )}
+                          </div>
                         </div>
                       </div>
                     </>
