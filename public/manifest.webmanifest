@@ -1,0 +1,24 @@
+{
+  "name": "達客東山鴨頭",
+  "short_name": "達客鴨頭",
+  "description": "DKERPsys 達客東山鴨頭門市管理",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#facc15",
+  "theme_color": "#0d0d0d",
+  "lang": "zh-Hant",
+  "icons": [
+    {
+      "src": "/brand-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

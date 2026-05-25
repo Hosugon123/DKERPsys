@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import DeployUpdateBanner from './components/DeployUpdateBanner';
 import PullToRefresh from './components/PullToRefresh';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
 import {
@@ -225,20 +226,26 @@ export default function App() {
 
   if (!authReady) {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-[#0d0d0d] text-zinc-500">
-        載入中…
-      </div>
+      <>
+        <div className="flex min-h-[100dvh] items-center justify-center bg-[#0d0d0d] text-zinc-500">
+          載入中…
+        </div>
+        <DeployUpdateBanner />
+      </>
     );
   }
 
   if (!session) {
     return (
-      <LoginScreen
-        onSuccess={() => {
-          const s = readSession();
-          if (s && validateSession(s)) setSession(s);
-        }}
-      />
+      <>
+        <LoginScreen
+          onSuccess={() => {
+            const s = readSession();
+            if (s && validateSession(s)) setSession(s);
+          }}
+        />
+        <DeployUpdateBanner />
+      </>
     );
   }
 
@@ -269,6 +276,7 @@ export default function App() {
           <div key={`${currentView}-${pageRefreshKey}`}>{renderView()}</div>
         </PullToRefresh>
       </div>
+      <DeployUpdateBanner />
     </div>
   );
 }

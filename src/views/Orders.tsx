@@ -384,25 +384,19 @@ function OrderEditActionBar({
   );
 }
 
+/** 展開明細／調整貨量：供應目錄全品項皆列出，未下單者 qty 為 0。 */
 function buildOrderExpandedDetailLines(
   order: OrderRow,
   raw: RawOrder | undefined,
   catalogItems: SupplyItem[],
   supplyRetailView: SupplyRetailView,
 ): OrderHistoryLine[] {
-  if (!raw) {
-    return order.itemLines.map((it, i) => ({
-      productId: `legacy-${i}`,
-      name: it.name,
-      unitPrice: it.qty > 0 ? it.price / it.qty : 0,
-      qty: it.qty,
-      unit: it.unit,
-    }));
-  }
   const qtyByProductId: Record<string, number> = {};
-  for (const l of raw.lines) {
-    const q = roundProcurementQty(Number(l.qty) || 0);
-    qtyByProductId[l.productId] = roundProcurementQty((qtyByProductId[l.productId] ?? 0) + q);
+  if (raw) {
+    for (const l of raw.lines) {
+      const q = roundProcurementQty(Number(l.qty) || 0);
+      qtyByProductId[l.productId] = roundProcurementQty((qtyByProductId[l.productId] ?? 0) + q);
+    }
   }
   const detailLines: OrderHistoryLine[] = [];
   const seen = new Set<string>();
@@ -411,8 +405,7 @@ function buildOrderExpandedDetailLines(
     const item = getSupplyItem(pid, supplyRetailView);
     if (!item) continue;
     const orderQtyRounded = qtyByProductId[pid] ?? 0;
-    if (isConsumableItem(item) && orderQtyRounded <= 0) continue;
-    const existingLine = raw.lines.find((l) => l.productId === pid);
+    const existingLine = raw?.lines.find((l) => l.productId === pid);
     const line: OrderHistoryLine = existingLine
       ? { ...existingLine, qty: orderQtyRounded }
       : {
@@ -425,14 +418,23 @@ function buildOrderExpandedDetailLines(
     detailLines.push(line);
     seen.add(pid);
   }
-  for (const l of raw.lines) {
-    if (seen.has(l.productId)) continue;
-    const q = roundProcurementQty(Number(l.qty) || 0);
-    if (q <= 0) continue;
-    detailLines.push(l);
-    seen.add(l.productId);
+  if (raw) {
+    for (const l of raw.lines) {
+      if (seen.has(l.productId)) continue;
+      const q = roundProcurementQty(Number(l.qty) || 0);
+      if (q <= 0) continue;
+      detailLines.push(l);
+      seen.add(l.productId);
+    }
   }
-  return detailLines;
+  if (detailLines.length > 0) return detailLines;
+  return order.itemLines.map((it, i) => ({
+    productId: `legacy-${i}`,
+    name: it.name,
+    unitPrice: it.qty > 0 ? it.price / it.qty : 0,
+    qty: it.qty,
+    unit: it.unit,
+  }));
 }
 
 function mergeRawOrdersForDisplay(
@@ -787,11 +789,18 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setPickingError(null);
     exitPriceAdjust();
     const raw = rawList.find((r) => r.id === orderId);
-    if (!raw || raw.status === '已取消' || !canEditOrderInList(raw, userRole)) return;
+    const orderRow = ordersData.find((o) => o.id === orderId);
+    if (!raw || !orderRow || raw.status === '已取消' || !canEditOrderInList(raw, userRole)) return;
     if (orderHasStallCountCompleted(raw)) return;
     setPickingOrderId(orderId);
-    setPickingLines(raw.lines.map((l) => ({ ...l })));
-    setPickingOriginal(raw.lines.map((l) => ({ ...l })));
+    const lines = buildOrderExpandedDetailLines(
+      orderRow,
+      raw,
+      catalogItemsForOrderDetail,
+      supplyRetailView,
+    );
+    setPickingLines(lines.map((l) => ({ ...l })));
+    setPickingOriginal(lines.map((l) => ({ ...l })));
   };
 
   const savePickingEdit = (orderId: string) => {
