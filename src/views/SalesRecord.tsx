@@ -51,6 +51,12 @@ function fmtLineQty(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 4 });
 }
 
+/** 盤點明細表頭：垂直捲動時固定（品項欄另 sticky left） */
+const STALL_DETAIL_TH_TOP =
+  'sticky top-0 z-[1] bg-zinc-900 shadow-[0_1px_0_0_rgb(39,39,42)]';
+const STALL_DETAIL_TH_TOP_LEFT =
+  'sticky top-0 left-0 z-[3] bg-zinc-900 shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85),0_1px_0_0_rgb(39,39,42)]';
+
 function procurementStatusDisplay(s: '待出貨' | '已完成' | '已取消') {
   return s === '已完成' ? '已出貨' : s;
 }
@@ -455,7 +461,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           return (
             <div
               key={order.id}
-              className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
+              className={cn(
+                'bg-zinc-900 border border-zinc-800 rounded-2xl',
+                open ? 'overflow-visible' : 'overflow-hidden',
+              )}
             >
               <div className="relative min-w-0 w-full flex flex-col lg:flex-row">
                 <button
@@ -727,36 +736,81 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                         <div className="px-3 py-2 bg-zinc-900/80 border-b border-zinc-800 text-[0.975rem] text-zinc-500">
                           盤點明細
                         </div>
-                        <div className="overflow-x-auto">
+                        <div className="sticky-detail-table-scroll touch-[pan-x_pan-y]">
                           {isStallEditThis && stallEditDraft ? (
-                            <table className="w-full text-[14.3px] sm:text-[1.1375rem] min-w-[56rem]">
+                            <table className="w-full border-separate border-spacing-0 text-[14.3px] sm:text-[1.1375rem] min-w-[56rem]">
                               <thead>
                                 <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[13px] sm:text-[0.975rem] uppercase">
-                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
+                                  <th
+                                    className={cn(
+                                      'px-2 sm:px-3 py-2 font-medium',
+                                      STALL_DETAIL_TH_TOP_LEFT,
+                                    )}
+                                  >
                                     品項
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     帶出數量
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     售出數量
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     剩餘數量
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     預估金額
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     售出金額
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     剩餘金額
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     單價
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     餘貨率
                                   </th>
                                 </tr>
@@ -916,34 +970,79 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                               </tbody>
                             </table>
                           ) : (
-                            <table className="w-full text-[14.3px] sm:text-[1.1375rem] min-w-[56rem]">
+                            <table className="w-full border-separate border-spacing-0 text-[14.3px] sm:text-[1.1375rem] min-w-[56rem]">
                               <thead>
                                 <tr className="text-left text-zinc-500 border-b border-zinc-800 text-[13px] sm:text-[0.975rem] uppercase">
-                                  <th className="px-2 sm:px-3 py-2 font-medium sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
+                                  <th
+                                    className={cn(
+                                      'px-2 sm:px-3 py-2 font-medium',
+                                      STALL_DETAIL_TH_TOP_LEFT,
+                                    )}
+                                  >
                                     品項
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     帶出數量
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     售出數量
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     剩餘數量
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     預估金額
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     售出金額
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-right whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     剩餘金額
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     單價
                                   </th>
-                                  <th className="px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap">
+                                  <th
+                                    className={cn(
+                                      'px-1.5 sm:px-2 py-2 font-medium text-center whitespace-nowrap',
+                                      STALL_DETAIL_TH_TOP,
+                                    )}
+                                  >
                                     餘貨率
                                   </th>
                                 </tr>

@@ -55,6 +55,17 @@
   .cost-table-scroll::-webkit-scrollbar-thumb:hover {
     background: #ca8a04;
   }
+
+  /**
+   * 品項明細表：單一 overflow 捲動區 + thead sticky。
+   * 勿在外層再加 overflow-x-auto（會使 sticky 失效）；表格用 border-separate。
+   */
+  .sticky-detail-table-scroll {
+    max-height: min(70dvh, 36rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 /**

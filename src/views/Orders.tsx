@@ -230,6 +230,12 @@ function fmtLineQty(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 4 });
 }
 
+/** 訂單品項明細表頭：垂直捲動時固定（品項欄另 sticky left） */
+const ORDER_DETAIL_TH_TOP =
+  'sticky top-0 z-[1] bg-zinc-900 shadow-[0_1px_0_0_rgb(39,39,42)]';
+const ORDER_DETAIL_TH_TOP_LEFT =
+  'sticky top-0 left-0 z-[3] bg-zinc-900 shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85),0_1px_0_0_rgb(39,39,42)]';
+
 type MergedStallSnapForOrderDetail = ReturnType<typeof mergeSalesRecordWithCatalog>;
 type CarrySnapForOrderDetail = ReturnType<typeof loadRemainSnapshotForOrderManagementDisplay> | null;
 
@@ -1396,7 +1402,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
               {/* Order Details (Expanded) */}
               {isExpanded && (
-                <div className="border-t border-zinc-800 bg-zinc-950 p-4 sm:p-6 animate-in slide-in-from-top-2">
+                <div className="border-t border-zinc-800 bg-zinc-950 p-4 sm:p-6">
                   <div className="min-w-0 w-full max-w-full">
                     <div className="mb-3 w-full min-w-0 space-y-2.5">
                       <h4 className="text-sm font-medium text-zinc-500 uppercase tracking-widest">
@@ -1503,10 +1509,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       <div className="h-[5.75rem] shrink-0" aria-hidden />
                     )}
 
-                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 overflow-x-auto overscroll-x-contain touch-[pan-x_pan-y] w-full min-w-0 pb-px">
+                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 sticky-detail-table-scroll touch-[pan-x_pan-y] w-full min-w-0">
                       <table
                         className={cn(
-                          'w-full border-collapse text-left',
+                          'w-full border-separate border-spacing-0 text-left',
                           isPickingThis
                             ? 'table-auto min-w-[22rem] sm:min-w-[24rem]'
                             : isPriceAdjustThis
@@ -1523,39 +1529,105 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                           <tr>
                             {isPickingThis ? (
                               <>
-                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium">品項</th>
-                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[11rem] w-[1%]">
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-3 px-3 sm:px-4 font-medium',
+                                    ORDER_DETAIL_TH_TOP_LEFT,
+                                  )}
+                                >
+                                  品項
+                                </th>
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[11rem] w-[1%]',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
                                   實出數量
                                 </th>
-                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium text-right">小計</th>
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-3 px-3 sm:px-4 font-medium text-right',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
+                                  小計
+                                </th>
                               </>
                             ) : isPriceAdjustThis ? (
                               <>
-                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium">品項</th>
-                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap">
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-3 px-3 sm:px-4 font-medium',
+                                    ORDER_DETAIL_TH_TOP_LEFT,
+                                  )}
+                                >
+                                  品項
+                                </th>
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
                                   數量
                                 </th>
-                                <th className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[7.5rem]">
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[7.5rem]',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
                                   批價（每份）
                                 </th>
-                                <th className="py-2 sm:py-3 px-3 sm:px-4 font-medium text-right">小計</th>
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-3 px-3 sm:px-4 font-medium text-right',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
+                                  小計
+                                </th>
                               </>
                             ) : (
                               <>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium max-md:relative max-md:left-auto md:sticky md:left-0 bg-zinc-800/95 md:bg-zinc-800/50 z-[1] w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]">
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]',
+                                    ORDER_DETAIL_TH_TOP_LEFT,
+                                  )}
+                                >
                                   品項
                                 </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
                                   叫貨數量
                                 </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
                                   昨剩餘帶出
                                 </th>
-                                <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap">
+                                <th
+                                  className={cn(
+                                    'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
+                                >
                                   帶出數量
                                 </th>
                                 <th
-                                  className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap"
+                                  className={cn(
+                                    'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap',
+                                    ORDER_DETAIL_TH_TOP,
+                                  )}
                                   title={
                                     hideOrderBatchPriceFromEmployee
                                       ? '帶出量（昨剩餘＋叫貨）若全以零售售完之預估金額'
@@ -1566,10 +1638,20 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 </th>
                                 {showOrderProcurementSubtotalCol && (
                                   <>
-                                    <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                    <th
+                                      className={cn(
+                                        'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap',
+                                        ORDER_DETAIL_TH_TOP,
+                                      )}
+                                    >
                                       零售預估
                                     </th>
-                                    <th className="py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap">
+                                    <th
+                                      className={cn(
+                                        'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-right whitespace-nowrap',
+                                        ORDER_DETAIL_TH_TOP,
+                                      )}
+                                    >
                                       叫貨金額小計
                                     </th>
                                   </>
