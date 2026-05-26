@@ -44,6 +44,12 @@ export default function PullToRefresh({
     return Boolean(el && el.scrollTop <= 0);
   }, []);
 
+  /** 觸控在巢狀捲動區（品項明細表等）時不啟動下拉重整 */
+  const isNestedScrollTarget = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest('[data-nested-scroll]'));
+  }, []);
+
   const resetPull = useCallback(() => {
     pullingRef.current = false;
     pullYRef.current = 0;
@@ -69,12 +75,17 @@ export default function PullToRefresh({
   const onTouchStart = (e: ReactTouchEvent<HTMLElement>) => {
     if (!enabled || refreshing) return;
     if (!canPull()) return;
+    if (isNestedScrollTarget(e.target)) return;
     touchStartY.current = e.touches[0]?.clientY ?? 0;
     pullingRef.current = true;
   };
 
   const onTouchMove = (e: ReactTouchEvent<HTMLElement>) => {
     if (!enabled || !pullingRef.current || refreshing) return;
+    if (isNestedScrollTarget(e.target)) {
+      resetPull();
+      return;
+    }
     if (!canPull()) {
       resetPull();
       return;
