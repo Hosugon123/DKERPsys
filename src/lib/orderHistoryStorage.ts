@@ -980,6 +980,10 @@ export function setOrderStallCountStamp(
 
 export type UpdateStallSnapshotResult = { ok: true } | { ok: false; reason: 'not_found' | 'no_stamp' };
 
+export type UpdateOrderDateYmdResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'invalid_date' };
+
 /**
  * 已盤點訂單之盤點帳上快照事後修訂（不變盤點完成時間，僅更新快照內容）。
  */
@@ -1009,6 +1013,42 @@ export function updateStallCountSnapshotByOrderId(
     const patched = patchOrderHistoryById(orderId, (row) => ({
       ...row,
       stallCountSnapshot: nextSnap,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
+  }
+  return { ok: false, reason: 'not_found' };
+}
+
+/**
+ * 變更訂單業務曆法日（與下單時間 createdAt 分開）；訂單管理與歷史訂單庫皆可更新。
+ */
+export function updateOrderDateYmdByOrderId(
+  orderId: string,
+  orderDateYmd: string,
+): UpdateOrderDateYmdResult {
+  const raw = String(orderDateYmd).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { ok: false, reason: 'invalid_date' };
+  }
+  const bookYmd = normalizeOrderDateYmdInput(raw);
+  const now = new Date().toISOString();
+  const who = persistableActorDisplayName();
+
+  if (loadFranchiseManagementOrdersAll().some((o) => o.id === orderId)) {
+    const patched = patchFranchiseManagementOrderById(orderId, (row) => ({
+      ...row,
+      orderDateYmd: bookYmd,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    }));
+    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
+  }
+  if (loadOrderHistoryAllEntries().some((o) => o.id === orderId)) {
+    const patched = patchOrderHistoryById(orderId, (row) => ({
+      ...row,
+      orderDateYmd: bookYmd,
       updatedAt: now,
       ...(who ? { lastUpdatedByName: who } : {}),
     }));

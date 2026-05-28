@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Receipt, Search, Package, ChevronDown, ChevronUp, Store, Minus, Plus } from 'lucide-react';
+import { Receipt, Search, Package, ChevronDown, ChevronUp, Store, Minus, Plus, CalendarDays } from 'lucide-react';
 import type { UserRole } from './Orders';
 import {
   estimatedRetailPerPackage,
@@ -129,6 +129,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
   const [stallEditDraft, setStallEditDraft] = useState<SalesRecordDaySnapshot | null>(null);
   const [stallEditError, setStallEditError] = useState<string | null>(null);
+  const [orderDatePickerOpen, setOrderDatePickerOpen] = useState(false);
+  const [orderDateDraftYmd, setOrderDateDraftYmd] = useState('');
+  const [orderDateError, setOrderDateError] = useState<string | null>(null);
+  const [orderDateSaving, setOrderDateSaving] = useState(false);
   const [page, setPage] = useState(1);
 
   const refreshOrders = useCallback(() => {
@@ -155,6 +159,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     setStallEditId(null);
     setStallEditDraft(null);
     setStallEditError(null);
+    setOrderDatePickerOpen(false);
+    setOrderDateDraftYmd('');
+    setOrderDateError(null);
+    setOrderDateSaving(false);
   }, []);
 
   useEffect(() => {
@@ -243,10 +251,33 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     const snap = resolveRecordSnapshot(order);
     if (!snap) return;
     setStallEditError(null);
+    setOrderDateError(null);
+    setOrderDatePickerOpen(false);
+    setOrderDateDraftYmd(effectiveOrderDateYmd(order));
     setStallEditId(order.id);
     setStallEditDraft(
       mergeSalesRecordWithCatalog(JSON.parse(JSON.stringify(snap)) as SalesRecordDaySnapshot)
     );
+  };
+
+  const applyOrderDateEdit = (orderId: string) => {
+    if (!orderDateDraftYmd.trim()) {
+      setOrderDateError('請選擇訂單日期。');
+      return;
+    }
+    setOrderDateError(null);
+    setOrderDateSaving(true);
+    void (async () => {
+      const res = await ordersApi.updateOrderDateYmdByOrderId(orderId, orderDateDraftYmd);
+      setOrderDateSaving(false);
+      if (res.ok) {
+        setOrderDatePickerOpen(false);
+        refreshOrders();
+        return;
+      }
+      if (res.reason === 'invalid_date') setOrderDateError('日期格式不正確。');
+      else setOrderDateError('找不到此訂單，無法變更日期。');
+    })();
   };
 
   const saveStallEdit = (orderId: string) => {
@@ -714,6 +745,85 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                               {stallEditError}
                             </p>
                           )}
+                          <div className="rounded-xl border border-zinc-700/80 bg-zinc-900/60 p-3 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs text-zinc-400">
+                                訂單日期（業務歸屬日）：
+                                <span className="ml-1 text-zinc-200 tabular-nums">
+                                  {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(order))}
+                                </span>
+                              </p>
+                              {!orderDatePickerOpen ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOrderDateError(null);
+                                    setOrderDateDraftYmd(effectiveOrderDateYmd(order));
+                                    setOrderDatePickerOpen(true);
+                                  }}
+                                  className="py-1.5 px-3 rounded-lg border border-amber-600/40 bg-amber-950/30 text-amber-200 text-sm font-medium hover:bg-amber-900/40"
+                                >
+                                  更改訂單日期
+                                </button>
+                              ) : null}
+                            </div>
+                            {orderDatePickerOpen ? (
+                              <div className="space-y-2">
+                                <label
+                                  htmlFor={`order-date-${order.id}`}
+                                  className="block cursor-pointer rounded-lg border border-zinc-600 bg-zinc-950/80 p-2.5"
+                                >
+                                  <span className="block text-xs text-zinc-500 mb-1.5">新訂單日期</span>
+                                  <div className="relative">
+                                    <input
+                                      id={`order-date-${order.id}`}
+                                      type="date"
+                                      value={orderDateDraftYmd}
+                                      disabled={orderDateSaving}
+                                      onChange={(e) => {
+                                        setOrderDateDraftYmd(e.target.value);
+                                        setOrderDateError(null);
+                                      }}
+                                      className="w-full min-h-10 cursor-pointer rounded-md border border-zinc-600 bg-zinc-900 pl-3 pr-10 py-2 text-sm text-zinc-100 [color-scheme:dark] focus:outline-none focus:border-amber-500/60 disabled:opacity-50"
+                                    />
+                                    <CalendarDays
+                                      className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-500/80"
+                                      size={18}
+                                      aria-hidden
+                                    />
+                                  </div>
+                                </label>
+                                {orderDateError ? (
+                                  <p className="text-xs text-rose-400">{orderDateError}</p>
+                                ) : null}
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={orderDateSaving}
+                                    onClick={() => applyOrderDateEdit(order.id)}
+                                    className="py-1.5 px-3 rounded-lg bg-zinc-100 text-zinc-900 text-sm font-medium hover:bg-white disabled:opacity-50"
+                                  >
+                                    {orderDateSaving ? '套用中…' : '套用訂單日期'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={orderDateSaving}
+                                    onClick={() => {
+                                      setOrderDatePickerOpen(false);
+                                      setOrderDateError(null);
+                                      setOrderDateDraftYmd(effectiveOrderDateYmd(order));
+                                    }}
+                                    className="py-1.5 px-3 rounded-lg border border-zinc-600 text-zinc-400 text-sm hover:bg-zinc-800 disabled:opacity-50"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                                <p className="text-[11px] text-zinc-600 leading-snug">
+                                  變更後立即寫入訂單（與訂單管理、營運概況歸屬日一致），無需一併儲存盤點。
+                                </p>
+                              </div>
+                            ) : null}
+                          </div>
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"

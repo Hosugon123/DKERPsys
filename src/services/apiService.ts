@@ -151,6 +151,12 @@ export const orders = {
   ): Promise<orderHistory.UpdateStallSnapshotResult> {
     return withRemoteStorageWrite(() => orderHistory.updateStallCountSnapshotByOrderId(orderId, snapshot));
   },
+  async updateOrderDateYmdByOrderId(
+    orderId: string,
+    orderDateYmd: string,
+  ): Promise<orderHistory.UpdateOrderDateYmdResult> {
+    return withRemoteStorageWrite(() => orderHistory.updateOrderDateYmdByOrderId(orderId, orderDateYmd));
+  },
   async listOrdersWithStallCountCompleted(): Promise<orderHistory.OrderHistoryEntry[]> {
     return withRemoteStorageRead(() => orderHistory.listOrdersWithStallCountCompleted());
   },
