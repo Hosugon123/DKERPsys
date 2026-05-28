@@ -1509,8 +1509,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                       <div className="h-[5.75rem] shrink-0" aria-hidden />
                     )}
 
-                    <div className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 sticky-detail-table-scroll-y w-full min-w-0">
-                      <div className="sticky-detail-table-scroll-x min-w-0">
+                    <div
+                      className="bg-zinc-800/30 rounded-xl border border-zinc-800/50 sticky-detail-table-scroll-y w-full min-w-0"
+                      data-nested-scroll="y"
+                    >
+                      <div className="sticky-detail-table-scroll-x min-w-0" data-nested-scroll="xy">
                       <table
                         className={cn(
                           'w-full border-separate border-spacing-0 text-left',

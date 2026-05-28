@@ -74,7 +74,17 @@
     overflow-y: visible;
     overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
+    /* pan-x 會阻擋直向捲動傳到外層 scroll-y（手機明細表無法上下滑） */
+    touch-action: pan-x pan-y;
+  }
+
+  /* 手機：明細表改由主畫面捲動，避免巢狀捲動與下拉重整衝突 */
+  @media (max-width: 639px) {
+    .sticky-detail-table-scroll-y {
+      max-height: none;
+      overflow-y: visible;
+      touch-action: auto;
+    }
   }
 }
 
