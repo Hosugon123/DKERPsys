@@ -35,7 +35,11 @@ import {
   listAccountingLedgerEntries,
   listAccountingLedgerEntriesForScopeId,
 } from '../lib/accountingLedgerStorage';
-import { usesFranchiseeOperatingExpenseModel } from '../lib/operatingExpenseModel';
+import { computeDirectStoreOperatingExpense } from '../lib/directStoreOperatingExpense';
+import {
+  usesDirectStoreOperatingExpenseModel,
+  usesFranchiseeOperatingExpenseModel,
+} from '../lib/operatingExpenseModel';
 import {
   getAllSupplyItems,
   getSupplyItem,
@@ -1240,29 +1244,34 @@ export default function Dashboard({
     return all;
   }, [userRole, orderTick]);
 
-  /**
-   * 與本店營運摘要「營收毛利」一致：直營盤點零售 − 同期直營已完成盤點訂單叫貨合計（訂單 totalAmount）。
-   * 總覽淨利旁之毛利：營收總計 − 上述直營叫貨合計（加盟批貨收入不另扣進貨）；毛利率皆以對應營收為分母。
-   */
+  /** 總部營運總覽 KPI：直營店實際營收、加盟批貨、總支出、淨利（淨利＝前三項營收減總支出） */
+  const adminHqOverviewMetrics = useMemo(() => {
+    if (!isAdmin || !adminFinance) return null;
+    const directStoreRevenue = adminFinance.directStoreActualRevenueTotal;
+    const franchiseRevenue = adminFinance.franchiseeOrderTotal;
+    const expenseTotal = adminFinance.expenseTotal;
+    const netProfit = directStoreRevenue + franchiseRevenue - expenseTotal;
+    return {
+      directStoreRevenue,
+      franchiseRevenue,
+      expenseTotal,
+      netProfit,
+    };
+  }, [isAdmin, adminFinance]);
+
+  /** 直營店營運摘要分頁：毛利與毛利率 */
   const adminFinanceGrossMetrics = useMemo(() => {
     if (!isAdmin || !adminFinance) return null;
-    const { startYmd, endYmd } = resolveRange(adminFinanceSummaryRange);
-    let directProcurement = 0;
-    for (const o of dashboardOrders) {
-      if (!orderIsHeadquartersDirectScoped(o)) continue;
-      if (!orderCountsTowardStallEconomics(o)) continue;
-      const stallYmd = stallCountAttributeYmd(o);
-      if (!stallYmd || stallYmd < startYmd || stallYmd > endYmd) continue;
-      directProcurement += o.totalAmount;
-    }
+    const directOperating = adminFinance.directStoreOperatingExpenseTotal;
     const directRev = adminFinance.directStoreStallRetailTotal;
-    const directGross = directRev - directProcurement;
+    const directGross = directRev - directOperating;
     const directGrossRate = pct(directGross, directRev);
-    const revTotal = adminFinance.revenueTotal;
-    const overviewGross = revTotal - directProcurement;
-    const overviewGrossRate = pct(overviewGross, revTotal);
-    return { directProcurement, directGross, directGrossRate, overviewGross, overviewGrossRate };
-  }, [isAdmin, adminFinance, adminFinanceSummaryRange, dashboardOrders]);
+    return {
+      directOperating,
+      directGross,
+      directGrossRate,
+    };
+  }, [isAdmin, adminFinance]);
 
   /**
    * 「實際渲染」用的訂單清單：view-as 時限縮為該加盟主之單，其他情境同 dashboardOrders。
@@ -1292,12 +1301,16 @@ export default function Dashboard({
     [viewAsFranchisee, userRole],
   );
 
-  /** 加盟主視角：支出＝批貨＋流水；直營等非加盟視角：支出僅流水帳 */
+  /** 加盟主視角：支出＝批貨＋流水；直營店：僅「直營店營業支出」等收支（不含批貨） */
   const franchiseOperatingExpenseModel = useMemo(
     () =>
       franchiseStallSalesBoardOwnerUserId != null ||
       usesFranchiseeOperatingExpenseModel({ userRole, viewAsFranchisee }),
     [franchiseStallSalesBoardOwnerUserId, userRole, viewAsFranchisee],
+  );
+  const directStoreOperatingExpenseModel = useMemo(
+    () => usesDirectStoreOperatingExpenseModel({ userRole, viewAsFranchisee }),
+    [userRole, viewAsFranchisee],
   );
 
   /** 總部直營：每日經濟指標（加盟視角略過以降低不必要計算） */
@@ -1579,12 +1592,32 @@ export default function Dashboard({
       (s, o) => s + (getStallDisplaySoldAtRetail(o, stallRetailView) ?? 0),
       0,
     );
-    const procurementCost = stallCompleted.reduce((s, o) => s + o.totalAmount, 0);
-    const gross = revenue - procurementCost;
-    const ledgerExpense = ledgerForView
-      .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
-      .reduce((s, e) => s + e.amount, 0);
-    const expense = franchiseOperatingExpenseModel ? procurementCost + ledgerExpense : ledgerExpense;
+    let procurementCost = 0;
+    let ledgerExpense = 0;
+    let expense = 0;
+    if (franchiseOperatingExpenseModel) {
+      procurementCost = stallCompleted.reduce((s, o) => s + o.totalAmount, 0);
+      ledgerExpense = ledgerForView
+        .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
+        .reduce((s, e) => s + e.amount, 0);
+      expense = procurementCost + ledgerExpense;
+    } else if (directStoreOperatingExpenseModel) {
+      const parts = computeDirectStoreOperatingExpense(
+        effectiveOrders,
+        startYmd,
+        endYmd,
+        undefined,
+        userRole === 'employee' ? { includePayroll: false } : undefined,
+      );
+      ledgerExpense = parts.ledgerExpenseTotal;
+      expense = parts.total;
+    } else {
+      ledgerExpense = ledgerForView
+        .filter((e) => e.flowType === 'expense' && e.dateYmd >= startYmd && e.dateYmd <= endYmd)
+        .reduce((s, e) => s + e.amount, 0);
+      expense = ledgerExpense;
+    }
+    const gross = revenue - expense;
     const net = revenue - expense;
     return {
       rangeLabel: summaryRangeLabel(summaryRange),
@@ -1598,7 +1631,17 @@ export default function Dashboard({
       netRate: pct(net, revenue),
       completed: stallCompleted,
     };
-  }, [effectiveOrders, franchiseOperatingExpenseModel, franchiseStallSalesBoardOwnerUserId, ledgerForView, isAdmin, summaryRange, userRole, viewAsFranchisee]);
+  }, [
+    effectiveOrders,
+    directStoreOperatingExpenseModel,
+    franchiseOperatingExpenseModel,
+    franchiseStallSalesBoardOwnerUserId,
+    ledgerForView,
+    isAdmin,
+    summaryRange,
+    userRole,
+    viewAsFranchisee,
+  ]);
 
   /** 本店／view-as：與總部相同，依「建單日」落在區間內之已完成訂單（僅 effectiveOrders） */
   const nonAdminProductChartOrders = useMemo(() => {
@@ -1641,19 +1684,45 @@ export default function Dashboard({
     if (franchiseOperatingExpenseModel) {
       const procurementCost = nonAdminProductChartOrders.reduce((s, o) => s + o.totalAmount, 0);
       if (procurementCost > 0) byName.set('批貨與自備成本', procurementCost);
-    }
-    for (const e of ledgerForView) {
-      if (e.flowType !== 'expense') continue;
-      if (e.dateYmd < startYmd || e.dateYmd > endYmd) continue;
-      const name = e.subCategory?.trim() ? `${e.category} / ${e.subCategory.trim()}` : e.category;
-      byName.set(name, (byName.get(name) ?? 0) + e.amount);
+      for (const e of ledgerForView) {
+        if (e.flowType !== 'expense') continue;
+        if (e.dateYmd < startYmd || e.dateYmd > endYmd) continue;
+        const name = e.subCategory?.trim() ? `${e.category} / ${e.subCategory.trim()}` : e.category;
+        byName.set(name, (byName.get(name) ?? 0) + e.amount);
+      }
+    } else if (directStoreOperatingExpenseModel) {
+      const parts = computeDirectStoreOperatingExpense(
+        effectiveOrders,
+        startYmd,
+        endYmd,
+        undefined,
+        userRole === 'employee' ? { includePayroll: false } : undefined,
+      );
+      if (parts.ledgerOperatingExpenseTotal > 0) {
+        byName.set('直營店營業支出', parts.ledgerOperatingExpenseTotal);
+      }
+    } else {
+      for (const e of ledgerForView) {
+        if (e.flowType !== 'expense') continue;
+        if (e.dateYmd < startYmd || e.dateYmd > endYmd) continue;
+        const name = e.subCategory?.trim() ? `${e.category} / ${e.subCategory.trim()}` : e.category;
+        byName.set(name, (byName.get(name) ?? 0) + e.amount);
+      }
     }
     const rows = Array.from(byName.entries())
       .map(([name, amount]) => ({ name, amount }))
       .sort((a, b) => b.amount - a.amount);
     const total = rows.reduce((s, r) => s + r.amount, 0);
     return rows.map((r, i) => ({ id: i + 1, name: r.name, amount: r.amount, pct: pct(r.amount, total) }));
-  }, [franchiseOperatingExpenseModel, isAdmin, productChartsRange, ledgerForView, nonAdminProductChartOrders]);
+  }, [
+    directStoreOperatingExpenseModel,
+    effectiveOrders,
+    franchiseOperatingExpenseModel,
+    isAdmin,
+    productChartsRange,
+    ledgerForView,
+    nonAdminProductChartOrders,
+  ]);
 
   const adminProductChartOrders = useMemo(() => {
     if (!isAdmin) return [];
@@ -1963,17 +2032,17 @@ export default function Dashboard({
                       <Store size={16} className="shrink-0 text-amber-400" aria-hidden />
                       <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">直營店營收</p>
                     </div>
-                    <h2 className="mt-2.5 text-xl font-light text-amber-400 tabular-nums sm:text-[2.1rem]">
-                      {moneyTW(adminFinance.directStoreStallRetailTotal)}
+                    <h2 className="mt-2.5 text-xl font-light text-amber-300 tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminHqOverviewMetrics?.directStoreRevenue ?? 0)}
                     </h2>
                   </div>
                   <div className="min-w-0 lg:px-4">
                     <div className="flex items-center gap-1.5 text-zinc-500">
                       <Package size={16} className="shrink-0 text-amber-500/90" aria-hidden />
-                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">加盟店批貨收入</p>
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">加盟主批貨收入</p>
                     </div>
                     <h2 className="mt-2.5 text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
-                      {moneyTW(adminFinance.franchiseeOrderTotal)}
+                      {moneyTW(adminHqOverviewMetrics?.franchiseRevenue ?? 0)}
                     </h2>
                   </div>
                   <div className="min-w-0 lg:px-4">
@@ -1981,8 +2050,8 @@ export default function Dashboard({
                       <Target size={16} className="shrink-0 text-rose-300/90" aria-hidden />
                       <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">總支出</p>
                     </div>
-                    <h2 className="mt-2.5 text-xl font-light text-[#f5f2ed] tabular-nums sm:text-[2.1rem]">
-                      {moneyTW(adminFinance.expenseTotal)}
+                    <h2 className="mt-2.5 text-xl font-light text-rose-300/90 tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminHqOverviewMetrics?.expenseTotal ?? 0)}
                     </h2>
                   </div>
                   <div className="min-w-0 lg:px-4 lg:last:pr-0">
@@ -1993,26 +2062,13 @@ export default function Dashboard({
                     <h2
                       className={cn(
                         'mt-2.5 text-xl font-light tabular-nums sm:text-[2.1rem]',
-                        adminFinance.netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300',
+                        (adminHqOverviewMetrics?.netProfit ?? 0) >= 0
+                          ? 'text-emerald-300'
+                          : 'text-rose-300',
                       )}
                     >
-                      {moneyTW(adminFinance.netProfit)}
+                      {moneyTW(adminHqOverviewMetrics?.netProfit ?? 0)}
                     </h2>
-                    {adminFinanceGrossMetrics && (
-                      <>
-                        <p
-                          className={cn(
-                            'mt-1.5 text-[11px] sm:text-sm tabular-nums',
-                            adminFinanceGrossMetrics.overviewGross >= 0 ? 'text-emerald-300/90' : 'text-rose-300/90',
-                          )}
-                        >
-                          毛利 {moneyTW(adminFinanceGrossMetrics.overviewGross)}
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-zinc-500 sm:text-sm tabular-nums">
-                          毛利率 {adminFinanceGrossMetrics.overviewGrossRate.toFixed(1)}%
-                        </p>
-                      </>
-                    )}
                   </div>
                 </div>
               ) : (
@@ -2047,7 +2103,7 @@ export default function Dashboard({
                       <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">直營店營運支出</p>
                     </div>
                     <p className="mt-2.5 text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
-                      {moneyTW(adminFinance.expenseTotal)}
+                      {moneyTW(adminFinance.directStoreOperatingExpenseTotal)}
                     </p>
                   </div>
                 </div>
@@ -2133,11 +2189,15 @@ export default function Dashboard({
                   <div className="flex items-center gap-1.5 text-zinc-500">
                     <Target size={16} className="shrink-0 text-rose-300" aria-hidden />
                     <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">
-                      {franchiseOperatingExpenseModel ? '總支出' : '收支支出'}
+                      {directStoreOperatingExpenseModel
+                        ? '直營店營運支出'
+                        : franchiseOperatingExpenseModel
+                          ? '總支出'
+                          : '收支支出'}
                     </p>
                   </div>
                   <p className="mt-2.5 text-xl font-light text-rose-300 tabular-nums sm:text-[2.1rem]">
-                    {moneyTW(franchiseOperatingExpenseModel ? (nonAdminSummary?.expense ?? 0) : (nonAdminSummary?.ledgerExpense ?? 0))}
+                    {moneyTW(nonAdminSummary?.expense ?? 0)}
                   </p>
                   <p
                     className={cn(

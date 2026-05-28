@@ -7,7 +7,7 @@ export type DashboardViewAsFranchiseeTarget = { userId: string; label: string };
  * 是否採「加盟主視角」的營運支出公式：**批貨與自備成本 + 流水帳支出**。
  * - 加盟主本人、加盟體系員工：是。
  * - 總部以 view-as 進入某加盟主 Dashboard：是（與該加盟主自己看到的摘要一致）。
- * - 總部直營門市等非加盟視角：否（營運支出僅認列流水帳）。
+ * - 總部直營門市等非加盟視角：否（見 {@link usesDirectStoreOperatingExpenseModel}）。
  */
 export function usesFranchiseeOperatingExpenseModel(opts: {
   userRole: 'admin' | 'franchisee' | 'employee';
@@ -20,4 +20,14 @@ export function usesFranchiseeOperatingExpenseModel(opts: {
   if (!s || s.role !== 'employee') return false;
   const u = listSystemUsers().find((x) => x.id === s.userId);
   return (u?.employeeOrgType ?? 'hq') === 'franchisee';
+}
+
+/**
+ * 直營店營運支出：僅「直營店營業支出」收支（不含批貨；薪資另列「直營店薪資」不計入 KPI）。
+ */
+export function usesDirectStoreOperatingExpenseModel(opts: {
+  userRole: 'admin' | 'franchisee' | 'employee';
+  viewAsFranchisee: DashboardViewAsFranchiseeTarget | null | undefined;
+}): boolean {
+  return !usesFranchiseeOperatingExpenseModel(opts);
 }

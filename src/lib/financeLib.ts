@@ -13,16 +13,23 @@ import {
   orderIsHeadquartersDirectScoped,
   type OrderHistoryEntry,
 } from './orderHistoryStorage';
-import { getStallDisplaySoldAtRetail } from './orderStallDisplayRevenue';
+import {
+  getStallDisplayActualRevenueIfEntered,
+  getStallDisplaySoldAtRetail,
+} from './orderStallDisplayRevenue';
 import type { SupplyRetailView } from './supplyCatalog';
 import { getSalesRecord, mergeSalesRecordWithCatalog } from './salesRecordStorage';
 import { num } from './stallMath';
 import { resolveOrderStoreLabel } from './orderStoreLabel';
+import { HQ_SCOPE_ID } from './dataScope';
+import { computeDirectStoreOperatingExpense } from './directStoreOperatingExpense';
 import {
   listAccountingLedgerEntriesForMonth,
   ingredientSubSpendBreakdownForMonth,
   sumFoodExpenseCOGSAndSeasoningForMonth,
-  listAccountingLedgerEntriesInDateRange,
+  listAccountingLedgerEntriesForScopeId,
+  isHeadquartersOperatingLedgerExpense,
+  normalizeLedgerCategory,
 } from './accountingLedgerStorage';
 
 /** 總部儀表板盤點營收／KPI 使用之零售檢視（與超管預設一致） */
@@ -154,17 +161,27 @@ export type AdminDashboardFinance = {
   ym: string;
   /** 本月盤點歸屬之直營／總部單：零售參考 × 售出量（與銷售紀錄「盤點金額」一致） */
   directStoreStallRetailTotal: number;
+  /** 本月盤點歸屬之直營／總部單：盤點頁登錄之「實際收入金額」合計（未登錄略過） */
+  directStoreActualRevenueTotal: number;
   /** 本月已完成之加盟叫貨中，計入總部營收之金額（已排除「消耗品」代訂列；訂單 totalAmount 仍含該列） */
   franchiseeOrderTotal: number;
   /** 本月流水帳「收入」合計（營收總計以外另列） */
   ledgerIncomeTotal: number;
-  /** 營收總計 = 直營店盤點營收 + 加盟批貨（營運食材，不含消耗品代訂） */
+  /** 營收總計 = 直營店實際營收 + 加盟批貨（供淨利計算） */
   revenueTotal: number;
   /** 本月直營進貨成本（改以流水帳支出認列；不再由叫貨/帶出推估） */
   procurementCostTotal: number;
-  /** 本月流水帳「支出」合計 */
+  /** 直營店：區間內已完成叫貨之批貨金額（依建單日） */
+  directStoreProcurementTotal: number;
+  /** 直營店：區間內「直營店營業支出」類別合計（不含批貨、不含薪資） */
+  directStoreLedgerExpenseTotal: number;
+  /** 直營店營運支出＝「直營店營業支出」類別（不含批貨；與總部帳分開） */
+  directStoreOperatingExpenseTotal: number;
+  /** 總部營運：區間內總部 scope 一般收支支出（不含直營店／加盟專屬類別與批貨） */
+  headquartersLedgerExpenseTotal: number;
+  /** 總部 scope 流水帳「支出」合計（含直營店營業支出／薪資等） */
   ledgerExpenseTotal: number;
-  /** 支出總計＝流水帳支出（不含叫貨／批貨進貨成本） */
+  /** 與 ledgerExpenseTotal 相同；總部營運總覽「總支出」 */
   expenseTotal: number;
   netProfit: number;
   /** 僅含金額 &gt; 0 之支出項，供圖表用 */
@@ -270,7 +287,8 @@ export function computeStallGapSummary(
 /**
  * 超級管理員儀表板：依日期區間（含端點）。
  * 營收：直營＝盤點歸屬日落於區間；加盟＝建單日落於區間且已完成叫貨（不含「消耗品」代訂列：不視為總部營收）。
- * 支出：同期流水帳支出（不含叫貨／批貨進貨成本）。
+ * 支出：總部營運總覽「總支出」＝總部 scope 流水帳所有支出（含直營店營業支出／薪資）；
+ * headquartersLedgerExpenseTotal 仍僅一般總部類別（不含直營／加盟專屬類別）。
  */
 export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd: string): AdminDashboardFinance {
   const a = startYmd <= endYmd ? startYmd : endYmd;
@@ -282,6 +300,7 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
   const stallGap = computeStallGapSummary(stallGapOrders, { type: 'ymd', startYmd: a, endYmd: b });
 
   let directStoreStallRetailTotal = 0;
+  let directStoreActualRevenueTotal = 0;
   let franchiseeOrderTotal = 0;
   const procurementCostTotal = 0;
 
@@ -300,24 +319,38 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
       if (!stallYmd || stallYmd < a || stallYmd > b) continue;
       const stallRev = getStallDisplaySoldAtRetail(o, HQ_STALL_RETAIL_VIEW);
       if (stallRev != null) directStoreStallRetailTotal += stallRev;
+      const actualRev = getStallDisplayActualRevenueIfEntered(o);
+      if (actualRev != null) directStoreActualRevenueTotal += actualRev;
     }
   }
 
-  const ledgerRows = listAccountingLedgerEntriesInDateRange(a, b);
-  let ledgerIncomeTotal = 0;
+  const directStoreExpense = computeDirectStoreOperatingExpense(merged, a, b);
+  const directStoreProcurementTotal = directStoreExpense.procurementTotal;
+  const directStoreLedgerExpenseTotal = directStoreExpense.ledgerExpenseTotal;
+
+  let headquartersLedgerExpenseTotal = 0;
   let ledgerExpenseTotal = 0;
+  let ledgerIncomeTotal = 0;
   const ledgerExpenseByCategory = new Map<string, number>();
 
-  for (const e of ledgerRows) {
+  for (const e of listAccountingLedgerEntriesForScopeId(HQ_SCOPE_ID)) {
+    if (e.dateYmd < a || e.dateYmd > b) continue;
     if (e.flowType === 'income') {
       ledgerIncomeTotal += e.amount;
-    } else {
-      ledgerExpenseTotal += e.amount;
-      ledgerExpenseByCategory.set(e.category, (ledgerExpenseByCategory.get(e.category) ?? 0) + e.amount);
+      continue;
+    }
+    ledgerExpenseTotal += e.amount;
+    const cat = normalizeLedgerCategory(e.category);
+    ledgerExpenseByCategory.set(cat, (ledgerExpenseByCategory.get(cat) ?? 0) + e.amount);
+    if (isHeadquartersOperatingLedgerExpense(e)) {
+      headquartersLedgerExpenseTotal += e.amount;
     }
   }
 
-  const revenueTotal = directStoreStallRetailTotal + franchiseeOrderTotal;
+  const directStoreOperatingExpenseTotal = directStoreExpense.total;
+
+  /** 總部營運總覽淨利：直營店實際營收＋加盟批貨−流水帳總支出 */
+  const revenueTotal = directStoreActualRevenueTotal + franchiseeOrderTotal;
   const expenseTotal = ledgerExpenseTotal;
   const netProfit = revenueTotal - expenseTotal;
 
@@ -339,10 +372,15 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
   return {
     ym: ymMeta,
     directStoreStallRetailTotal,
+    directStoreActualRevenueTotal,
     franchiseeOrderTotal,
     ledgerIncomeTotal,
     revenueTotal,
     procurementCostTotal,
+    directStoreProcurementTotal,
+    directStoreLedgerExpenseTotal,
+    directStoreOperatingExpenseTotal,
+    headquartersLedgerExpenseTotal,
     ledgerExpenseTotal,
     expenseTotal,
     netProfit,

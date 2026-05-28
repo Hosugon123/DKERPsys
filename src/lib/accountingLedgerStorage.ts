@@ -21,6 +21,7 @@ export const ACCOUNTING_CATEGORIES = [
   '滷料',
   '食材支出',
   '直營店營業支出',
+  '直營店薪資',
   '加盟店營業支出',
   '店外收入',
 ] as const;
@@ -130,9 +131,71 @@ export function deriveLedgerSqlFields(
 
 const LEGACY_DIRECT_STORE_EXPENSE_LABEL = '總店營業支出';
 
-function normalizeLedgerCategory(category: string): AccountingCategory {
-  if (category === LEGACY_DIRECT_STORE_EXPENSE_LABEL) return '直營店營業支出';
+/** 收支紀錄中歸屬直營店營運之支出類別（與總部營運支出分帳） */
+export const DIRECT_STORE_LEDGER_EXPENSE_CATEGORY = '直營店營業支出' as const satisfies AccountingCategory;
+
+/** 直營店員工薪資；計入直營店營運支出，僅管理員可見／登記 */
+export const DIRECT_STORE_PAYROLL_LEDGER_CATEGORY = '直營店薪資' as const satisfies AccountingCategory;
+
+/** 收支紀錄中歸屬加盟店營運之支出類別 */
+export const FRANCHISE_LEDGER_EXPENSE_CATEGORY = '加盟店營業支出' as const satisfies AccountingCategory;
+
+export function normalizeLedgerCategory(category: string): AccountingCategory {
+  if (category === LEGACY_DIRECT_STORE_EXPENSE_LABEL) return DIRECT_STORE_LEDGER_EXPENSE_CATEGORY;
   return category as AccountingCategory;
+}
+
+/** 總部營運總覽「總支出」：總部 scope 之一般營運支出（不含直營店／加盟專屬類別） */
+export function isHeadquartersOperatingLedgerExpense(
+  e: Pick<AccountingLedgerEntry, 'flowType' | 'category'>,
+): boolean {
+  if (e.flowType !== 'expense') return false;
+  const c = normalizeLedgerCategory(e.category);
+  return (
+    c !== DIRECT_STORE_LEDGER_EXPENSE_CATEGORY &&
+    c !== DIRECT_STORE_PAYROLL_LEDGER_CATEGORY &&
+    c !== FRANCHISE_LEDGER_EXPENSE_CATEGORY
+  );
+}
+
+/** 直營店一般營業支出（類別「直營店營業支出」；員工可登記／可見自己登記之項目） */
+export function isDirectStoreOperatingLedgerExpense(
+  e: Pick<AccountingLedgerEntry, 'flowType' | 'category'>,
+): boolean {
+  return e.flowType === 'expense' && normalizeLedgerCategory(e.category) === DIRECT_STORE_LEDGER_EXPENSE_CATEGORY;
+}
+
+/** 直營店薪資支出（僅管理員登記；員工列表與儀表板不顯示明細） */
+export function isDirectStorePayrollLedgerExpense(
+  e: Pick<AccountingLedgerEntry, 'flowType' | 'category'>,
+): boolean {
+  return e.flowType === 'expense' && normalizeLedgerCategory(e.category) === DIRECT_STORE_PAYROLL_LEDGER_CATEGORY;
+}
+
+/** 計入直營店營運支出之收支（營業支出＋薪資） */
+export function countsTowardDirectStoreOperatingExpense(
+  e: Pick<AccountingLedgerEntry, 'flowType' | 'category'>,
+): boolean {
+  return isDirectStoreOperatingLedgerExpense(e) || isDirectStorePayrollLedgerExpense(e);
+}
+
+/** 員工於「收入與支出」可見之直營店支出（不含薪資） */
+export function isLedgerEntryVisibleToStoreEmployee(
+  e: Pick<AccountingLedgerEntry, 'flowType' | 'category'>,
+): boolean {
+  return !isDirectStorePayrollLedgerExpense(e);
+}
+
+/** 登記支出時可選類別：直營店員工僅能選「直營店營業支出」；加盟僅「加盟店營業支出」；總部管理員全部。 */
+export function expenseCategoriesForActorRole(
+  role: 'admin' | 'franchisee' | 'employee',
+  employeeOrgType: 'hq' | 'franchisee' | undefined,
+): AccountingCategory[] {
+  if (role === 'admin') return [...ACCOUNTING_CATEGORIES];
+  if (role === 'franchisee' || employeeOrgType === 'franchisee') {
+    return [FRANCHISE_LEDGER_EXPENSE_CATEGORY];
+  }
+  return [DIRECT_STORE_LEDGER_EXPENSE_CATEGORY];
 }
 
 function inferLedgerScopeIdFromCreator(createdByUserId: string | undefined): string | undefined {
@@ -471,7 +534,9 @@ function filterLedgerEntriesForRole(rows: AccountingLedgerEntry[]): AccountingLe
   if (ctx.role !== 'employee') return rows;
   const uid = ctx.userId.trim();
   if (!uid) return [];
-  return rows.filter((e) => e.createdByUserId === uid);
+  return rows.filter(
+    (e) => isLedgerEntryVisibleToStoreEmployee(e) && e.createdByUserId === uid,
+  );
 }
 
 /** 所有紀錄（新→舊）：僅目前身分對應之 scope；員工僅能看見自己登記之項目 */
@@ -508,6 +573,12 @@ export type NewAccountingLedgerInput = {
 export function appendAccountingLedgerEntry(input: NewAccountingLedgerInput): AccountingLedgerEntry {
   const s = loadStore();
   const ctx = getDataScopeContext();
+  if (
+    ctx.role === 'employee' &&
+    isDirectStorePayrollLedgerExpense({ flowType: input.flowType, category: input.category })
+  ) {
+    throw new Error('直營店員工無法登記薪資支出');
+  }
   const scopeId = resolveAccountingLedgerScopeId();
   const rows = s.byScope[scopeId] ?? [];
   const now = new Date().toISOString();
@@ -542,7 +613,14 @@ export function removeAccountingLedgerEntry(id: string): boolean {
   if (!hit) return false;
   if (ctx.role === 'employee') {
     const uid = ctx.userId.trim();
-    if (!uid || !hit.createdByUserId || hit.createdByUserId !== uid) return false;
+    if (
+      !uid ||
+      !hit.createdByUserId ||
+      hit.createdByUserId !== uid ||
+      !isLedgerEntryVisibleToStoreEmployee(hit)
+    ) {
+      return false;
+    }
   }
   const next = prev.filter((e) => e.id !== id);
   if (next.length === prev.length) return false;
@@ -569,7 +647,18 @@ export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerU
   const prev = s.byScope[scopeId]![i];
   if (ctx.role === 'employee') {
     const uid = ctx.userId.trim();
-    if (!uid || !prev.createdByUserId || prev.createdByUserId !== uid) return false;
+    if (
+      !uid ||
+      !prev.createdByUserId ||
+      prev.createdByUserId !== uid ||
+      !isLedgerEntryVisibleToStoreEmployee(prev) ||
+      !isLedgerEntryVisibleToStoreEmployee({
+        flowType: patch.flowType,
+        category: patch.category,
+      })
+    ) {
+      return false;
+    }
   }
   const now = new Date().toISOString();
   s.byScope[scopeId]![i] = coerceEntry({

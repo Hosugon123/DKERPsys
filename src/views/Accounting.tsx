@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import type { UserRole } from './Orders';
+import { readSession } from '../lib/authSession';
+import { listSystemUsers } from '../lib/systemUsersStorage';
 import { Wallet, CalendarDays, ChevronDown, Pencil, Trash2, X, Search } from 'lucide-react';
 import { useAccountingLedger } from '../hooks/useAccountingLedger';
 import {
   ACCOUNTING_CATEGORIES,
   FOOD_EXPENSE_CATEGORY,
   MARINADE_EXPENSE_CATEGORY,
+  expenseCategoriesForActorRole,
+  DIRECT_STORE_PAYROLL_LEDGER_CATEGORY,
   MAIN_INGREDIENT_SUBS,
   isCurrentIngredientSubOption,
   isValidIngredientSubForEntry,
@@ -147,8 +152,21 @@ const rangeDateWrapClass = cn(
 const rangeDateInputClass =
   'accounting-form-date-input flex h-11 md:h-9 w-full min-w-0 max-w-full items-center border-0 bg-transparent shadow-none px-3 pr-10 py-0 md:py-1.5 text-base md:text-xs leading-normal text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
 
-export default function Accounting() {
+export default function Accounting({ userRole }: { userRole: UserRole }) {
+  const isAdmin = userRole === 'admin';
   const { entries, add, update, remove } = useAccountingLedger();
+
+  const employeeOrgType = useMemo(() => {
+    if (userRole !== 'employee') return undefined;
+    const s = readSession();
+    const u = listSystemUsers().find((x) => x.id === s?.userId);
+    return u?.employeeOrgType;
+  }, [userRole]);
+
+  const expenseCategoryOptions = useMemo(
+    () => expenseCategoriesForActorRole(userRole, employeeOrgType),
+    [userRole, employeeOrgType],
+  );
 
   const defaultRange = useMemo(() => monthBoundsFromYm(currentYm()), []);
   const [rangeStart, setRangeStart] = useState(defaultRange.start);
@@ -229,21 +247,39 @@ export default function Accounting() {
     () =>
       flowType === 'income'
         ? ACCOUNTING_CATEGORIES.filter(
-            (c) => c !== FOOD_EXPENSE_CATEGORY && c !== MARINADE_EXPENSE_CATEGORY
+            (c) =>
+              c !== FOOD_EXPENSE_CATEGORY &&
+              c !== MARINADE_EXPENSE_CATEGORY &&
+              c !== DIRECT_STORE_PAYROLL_LEDGER_CATEGORY,
           )
-        : [...ACCOUNTING_CATEGORIES],
-    [flowType]
+        : expenseCategoryOptions,
+    [flowType, expenseCategoryOptions]
   );
 
   const editCategoryOptions = useMemo(
     () =>
       editFlowType === 'income'
         ? ACCOUNTING_CATEGORIES.filter(
-            (c) => c !== FOOD_EXPENSE_CATEGORY && c !== MARINADE_EXPENSE_CATEGORY
+            (c) =>
+              c !== FOOD_EXPENSE_CATEGORY &&
+              c !== MARINADE_EXPENSE_CATEGORY &&
+              c !== DIRECT_STORE_PAYROLL_LEDGER_CATEGORY,
           )
-        : [...ACCOUNTING_CATEGORIES],
-    [editFlowType]
+        : expenseCategoryOptions,
+    [editFlowType, expenseCategoryOptions]
   );
+
+  useEffect(() => {
+    if (flowType !== 'expense' || expenseCategoryOptions.length !== 1) return;
+    const only = expenseCategoryOptions[0]!;
+    setCategory((prev) => (prev === only ? prev : only));
+  }, [flowType, expenseCategoryOptions]);
+
+  useEffect(() => {
+    if (editFlowType !== 'expense' || expenseCategoryOptions.length !== 1) return;
+    const only = expenseCategoryOptions[0]!;
+    setEditCategory((prev) => (prev === only ? prev : only));
+  }, [editFlowType, expenseCategoryOptions]);
 
   const resetForm = useCallback(() => {
     setDateYmd(todayYmd());
@@ -528,6 +564,11 @@ export default function Accounting() {
                   </option>
                 ))}
               </select>
+              {isAdmin && category === DIRECT_STORE_PAYROLL_LEDGER_CATEGORY && flowType === 'expense' ? (
+                <p className="text-[11px] text-amber-200/80 leading-snug">
+                  計入直營店營運支出；直營店員工在「收入與支出」與儀表板不會看到薪資明細。
+                </p>
+              ) : null}
             </label>
             <div className="space-y-4 sm:col-span-1">
               {category === FOOD_EXPENSE_CATEGORY && flowType === 'expense' && (

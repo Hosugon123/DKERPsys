@@ -149,3 +149,17 @@ export function getStallDisplayActualRevenue(
   if (!snap) return null;
   return num(snap.actualRevenue);
 }
+
+/**
+ * 與 {@link getStallDisplayActualRevenue} 相同，但僅在盤點頁有登錄實際收入時回傳數值（空白略過）。
+ */
+export function getStallDisplayActualRevenueIfEntered(
+  o: FranchiseManagementOrder | OrderHistoryEntry,
+): number | null {
+  const snap = resolveStallSnapshotForOrder(o);
+  if (!snap) return null;
+  const raw = String(snap.actualRevenue ?? '').trim();
+  if (!raw) return null;
+  const n = num(snap.actualRevenue);
+  return Number.isFinite(n) ? n : null;
+}

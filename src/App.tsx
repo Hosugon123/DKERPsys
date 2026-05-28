@@ -216,7 +216,7 @@ export default function App() {
       case 'salesRecord':
         return <SalesRecord userRole={userRole} />;
       case 'accounting':
-        return <Accounting />;
+        return <Accounting userRole={userRole} />;
       case 'dataHub':
         return <DataHub userRole={userRole} />;
       default:
