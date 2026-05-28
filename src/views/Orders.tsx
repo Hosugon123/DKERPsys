@@ -10,6 +10,7 @@ import {
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
+import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { orders as ordersApi } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
@@ -517,6 +518,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [priceAdjustOrderId, setPriceAdjustOrderId] = useState<string | null>(null);
   const [priceAdjustLines, setPriceAdjustLines] = useState<OrderHistoryLine[]>([]);
   const [priceAdjustError, setPriceAdjustError] = useState<string | null>(null);
+  useUnsavedWorkBlock(
+    'orders-line-edit',
+    pickingOrderId !== null || priceAdjustOrderId !== null,
+    '訂單・調整貨量',
+  );
   const syncOrders = useCallback(() => {
     void (async () => {
       const [mgmt, hist] = await Promise.all([

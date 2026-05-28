@@ -1,4 +1,5 @@
 import { reloadAppShell } from './appRefresh';
+import { canReloadAppShell } from './unsavedWorkGuard';
 
 declare const __APP_BUILD_ID__: string;
 
@@ -51,6 +52,7 @@ export function startDeployUpdateWatch(onUpdate: () => void): () => void {
     checking = true;
     try {
       if (await isNewerDeploymentAvailable()) {
+        if (!canReloadAppShell()) return;
         reloadTriggered = true;
         onUpdate();
       }
@@ -74,6 +76,9 @@ export function startDeployUpdateWatch(onUpdate: () => void): () => void {
   };
 }
 
-export function applyDeployUpdateReload(): void {
+/** @returns 是否已觸發重整（有未儲存工作時略過，下次輪詢再試） */
+export function applyDeployUpdateReload(): boolean {
+  if (!canReloadAppShell()) return false;
   reloadAppShell();
+  return true;
 }

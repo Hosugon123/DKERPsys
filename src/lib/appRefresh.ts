@@ -5,6 +5,7 @@
 import { getStorageMode } from '../services/storageMode';
 import { fetchRemoteBundle } from '../services/remoteSyncHub';
 import { dispatchDongshanStorageSyncEvents, importDongshanDataBundle } from './appDataBundle';
+import { canReloadAppShell } from './unsavedWorkGuard';
 
 export const APP_PAGE_REFRESH_EVENT = 'appPageRefresh';
 
@@ -21,6 +22,7 @@ export type RefreshAppPageOptions = {
 
 /** 強制重新載入頁面（帶快取破除參數，載入後由 App 還原網址） */
 export function reloadAppShell(): void {
+  if (!canReloadAppShell()) return;
   const url = new URL(window.location.href);
   url.searchParams.delete(PULL_RELOAD_QUERY_KEY);
   url.searchParams.set(PULL_RELOAD_QUERY_KEY, String(Date.now()));
@@ -39,8 +41,10 @@ export async function refreshAppPageData(options?: RefreshAppPageOptions): Promi
   }
 
   if (options?.reloadShell && import.meta.env.PROD) {
-    reloadAppShell();
-    return;
+    if (canReloadAppShell()) {
+      reloadAppShell();
+      return;
+    }
   }
 
   window.dispatchEvent(new Event(APP_PAGE_REFRESH_EVENT));

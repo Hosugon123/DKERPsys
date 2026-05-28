@@ -40,6 +40,7 @@ import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
+import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
@@ -246,6 +247,8 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     [supplyItems]
   );
   const stallIds = useMemo(() => stallDisplayItems.map((i) => i.id), [stallDisplayItems]);
+
+  useUnsavedWorkBlock('sales-record-stall-edit', stallEditId !== null, '銷售紀錄・調整盤點');
 
   const startStallEdit = (order: OrderHistoryEntry) => {
     const snap = resolveRecordSnapshot(order);

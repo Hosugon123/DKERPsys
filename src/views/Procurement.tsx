@@ -15,6 +15,7 @@ import {
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { UserRole } from './Orders';
 import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
+import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { orders as ordersApi } from '../services/apiService';
 import {
   displayOrderCreatedByLabel,
@@ -136,6 +137,14 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   );
   /** 售出參考模式：最高／平均／上週／最低（預設上週） */
   const [referenceMode, setReferenceMode] = useState<ProcurementReferenceMode>('lastWeek');
+
+  const procurementCartDirty = useMemo(
+    () =>
+      Object.values(cart).some((q) => q > 0) ||
+      Object.values(qtyInputDraft).some((s) => String(s).trim() !== ''),
+    [cart, qtyInputDraft],
+  );
+  useUnsavedWorkBlock('procurement-cart', procurementCartDirty, '批貨下單');
 
   const syncFavorites = useCallback(() => {
     setFavorites(listProcurementFavorites());

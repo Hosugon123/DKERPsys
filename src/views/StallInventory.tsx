@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import {
   Boxes,
   CheckCircle2,
@@ -20,11 +20,13 @@ import {
   userRoleToSupplyRetailView,
 } from '../lib/supplyCatalog';
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
+import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { num, computeLine, aggregateStallKpis, isStallRemainEntryValid } from '../lib/stallMath';
 import {
   ymd,
   loadDay,
   saveDay,
+  stallDaySnapshotFingerprint,
   recomputeStallOutForStallYmdAndOrder,
   computeStallOutImportBreakdown,
   listUncountedCompletedProcurementOrdersForSession,
@@ -92,6 +94,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const [viewOrderId, setViewOrderId] = useState<string>('');
   /** 訂單摘要＋帶出試算表預設收合，避免清單過長 */
   const [stallOrderDetailOpen, setStallOrderDetailOpen] = useState(false);
+  const stallBaselineRef = useRef('');
   useEffect(() => {
     const t = window.setInterval(() => {
       setNowIso(new Date().toISOString());
@@ -100,8 +103,16 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   }, []);
 
   useEffect(() => {
-    setSnap(loadDay(dateStr));
+    const day = loadDay(dateStr);
+    stallBaselineRef.current = stallDaySnapshotFingerprint(day);
+    setSnap(day);
   }, [dateStr]);
+
+  const stallDirty = useMemo(
+    () => stallDaySnapshotFingerprint(snap) !== stallBaselineRef.current,
+    [snap],
+  );
+  useUnsavedWorkBlock('stall-inventory', stallDirty, '攤上盤點');
 
   useEffect(() => {
     if (!stallCountConfirmOpen) return;
@@ -115,7 +126,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   useEffect(() => {
     const on = () => {
       setStallListTick((n) => n + 1);
-      setSnap(loadDay(dateStr));
+      setSnap((prev) => {
+        if (stallDaySnapshotFingerprint(prev) !== stallBaselineRef.current) return prev;
+        const day = loadDay(dateStr);
+        stallBaselineRef.current = stallDaySnapshotFingerprint(day);
+        return day;
+      });
     };
     window.addEventListener('stallInventoryUpdated', on);
     window.addEventListener('supplyCatalogUpdated', on);
@@ -298,6 +314,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         saveSalesRecord(stampBasisYmd, recordSnap);
       });
       setStallListTick((n) => n + 1);
+      stallBaselineRef.current = stallDaySnapshotFingerprint(next);
       setStallCountConfirmOpen(false);
       setSaveFlash(true);
       setTimeout(() => setSaveFlash(false), 2500);

@@ -105,6 +105,23 @@ export function loadDay(ymdStr: string): DaySnapshot {
   return mergeDayWithCurrentCatalog(base);
 }
 
+/** 比對攤上盤點表是否與基準不同（用於未儲存工作偵測）。 */
+export function stallDaySnapshotFingerprint(snap: DaySnapshot): string {
+  const lineKeys = Object.keys(snap.lines).sort();
+  const lines = lineKeys
+    .map((id) => {
+      const l = snap.lines[id] ?? { out: '', remain: '' };
+      return `${id}\t${String(l.out).trim()}\t${String(l.remain).trim()}`;
+    })
+    .join('\n');
+  return [
+    String(snap.actualRevenue ?? '').trim(),
+    String(snap.revenueGapAmount ?? '').trim(),
+    String(snap.revenueGapReason ?? '').trim(),
+    lines,
+  ].join('\n');
+}
+
 export function saveDay(ymdStr: string, snap: DaySnapshot) {
   const s = loadAll();
   const editor = getSessionActorDisplayName();
