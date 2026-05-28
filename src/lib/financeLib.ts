@@ -9,8 +9,8 @@ import {
   effectiveOrderDateYmd,
   orderConsumableLinesAmountTotal,
   orderIsFranchiseBusinessScoped,
+  orderCountsTowardStallEconomics,
   orderIsHeadquartersDirectScoped,
-  effectiveOrderDateYmd,
   type OrderHistoryEntry,
 } from './orderHistoryStorage';
 import { getStallDisplaySoldAtRetail } from './orderStallDisplayRevenue';
@@ -202,7 +202,7 @@ export function computeStallGapSummary(
   const rows: StallGapDetailRow[] = [];
 
   for (const o of orders) {
-    if (!o.stallCountCompletedAt) continue;
+    if (!orderCountsTowardStallEconomics(o)) continue;
     const stallYmd = stallCountAttributeYmd(o);
     if (!stallYmd) continue;
     if (ymKey != null) {
@@ -295,7 +295,7 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
       const consumableAmt = orderConsumableLinesAmountTotal(o.lines);
       franchiseeOrderTotal += Math.max(0, batchNet - Math.min(batchNet, consumableAmt));
     }
-    if (orderIsHeadquartersDirectScoped(o) && o.stallCountCompletedAt) {
+    if (orderIsHeadquartersDirectScoped(o) && orderCountsTowardStallEconomics(o)) {
       const stallYmd = stallCountAttributeYmd(o);
       if (!stallYmd || stallYmd < a || stallYmd > b) continue;
       const stallRev = getStallDisplaySoldAtRetail(o, HQ_STALL_RETAIL_VIEW);

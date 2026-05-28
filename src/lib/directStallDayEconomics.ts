@@ -6,6 +6,7 @@ import {
   getStallDisplaySoldAtRetail,
 } from './orderStallDisplayRevenue';
 import {
+  orderCountsTowardStallEconomics,
   orderIsHeadquartersDirectScoped,
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
@@ -63,7 +64,7 @@ function stallSalesBoardYmdsForPredicate(
 ): Set<string> {
   const set = new Set<string>();
   for (const o of orders) {
-    if (!matchesScope(o) || !o.stallCountCompletedAt) continue;
+    if (!matchesScope(o) || !orderCountsTowardStallEconomics(o)) continue;
     const ymd = stallSalesBoardRowYmd(o);
     if (ymd) set.add(ymd);
   }
@@ -92,7 +93,7 @@ function gapNoteForScopedYmd(
   const scopeSnapshotOnly = opts?.scopeSnapshotOnly ?? false;
   const bits: string[] = [];
   for (const o of orders) {
-    if (!matchesScope(o) || !o.stallCountCompletedAt) continue;
+    if (!matchesScope(o) || !orderCountsTowardStallEconomics(o)) continue;
     if (stallSalesBoardRowYmd(o) !== ymd) continue;
     const snap = resolveGapSnapshotFromOrder(o, { orderSnapshotOnly: scopeSnapshotOnly });
     if (!snap) continue;
@@ -143,7 +144,7 @@ export function buildDirectStallEconomicsByYmd(
   const acc = new Map<string, AccBucket>();
 
   for (const o of orders) {
-    if (!orderIsHeadquartersDirectScoped(o) || !o.stallCountCompletedAt) continue;
+    if (!orderIsHeadquartersDirectScoped(o) || !orderCountsTowardStallEconomics(o)) continue;
     const ymd = stallSalesBoardRowYmd(o);
     if (!ymd) continue;
     const est = getStallDisplayRetailEstAndRemain(o, retailView);
@@ -215,7 +216,7 @@ export function buildFranchiseStallEconomicsByYmd(
   const acc = new Map<string, AccBucket>();
 
   for (const o of orders) {
-    if (!orderMatchesFranchiseeBusiness(o, franchiseeUserId) || !o.stallCountCompletedAt) continue;
+    if (!orderMatchesFranchiseeBusiness(o, franchiseeUserId) || !orderCountsTowardStallEconomics(o)) continue;
     const ymd = stallSalesBoardRowYmd(o);
     if (!ymd) continue;
     const est = getStallDisplayRetailEstAndRemain(o, retailView);

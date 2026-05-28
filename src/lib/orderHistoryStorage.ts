@@ -299,9 +299,16 @@ export function displayOrderCreatedByLabel(
   return e.createdByName?.trim() || resolveUserDisplayNameById(e.actorUserId) || '—';
 }
 
-/** 已有攤上盤點完成押記（與銷售紀錄綁定），不可改回待出貨或調整叫貨／揀貨品項；總部仍可以「更正批價」僅改單價（見 adminPatchOrderLineUnitPricesById）。 */
+/** 已有攤上盤點完成押記（與銷售紀錄綁定），不可改回待出貨或調整叫貨／揀貨品項；總部仍可以以「更正批價」僅改單價（見 adminPatchOrderLineUnitPricesById）。 */
 export function orderHasStallCountCompleted(o: { stallCountCompletedAt?: string }): boolean {
   return Boolean(o.stallCountCompletedAt?.trim());
+}
+
+/** 已盤點且未取消：才計入銷售數據、營運概況營收與盤點落差彙總。 */
+export function orderCountsTowardStallEconomics(
+  o: Pick<OrderHistoryEntry, 'status' | 'stallCountCompletedAt'>,
+): boolean {
+  return orderHasStallCountCompleted(o) && o.status !== '已取消';
 }
 
 /** 盤點完成者：已存姓名 → 完成者 userId → 舊押記無紀錄時退回建單者 userId（僅顯示用） */

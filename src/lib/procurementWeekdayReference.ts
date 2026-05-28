@@ -1,6 +1,6 @@
 import { addDaysYmd, parseYmd, ymd } from './stallInventoryStorage';
 import { stallSalesBoardRowYmd } from './financeLib';
-import type { OrderHistoryEntry } from './orderHistoryStorage';
+import { orderCountsTowardStallEconomics, type OrderHistoryEntry } from './orderHistoryStorage';
 import {
   getSalesRecord,
   listSalesRecordMeta,
@@ -113,7 +113,7 @@ function soldMapForYmd(
   let fromOrders = false;
 
   for (const o of orders) {
-    if (!o.stallCountCompletedAt) continue;
+    if (!orderCountsTowardStallEconomics(o)) continue;
     const rowYmd = stallSalesBoardRowYmd(o);
     if (rowYmd !== ymdDash) continue;
     const snap = resolveStallSnapshotFromOrder(o);
@@ -142,7 +142,7 @@ function listSameWeekdayYmdsBefore(orderDateYmd: string, orders: OrderHistoryEnt
   const ymdSet = new Set<string>();
 
   for (const o of orders) {
-    if (!o.stallCountCompletedAt) continue;
+    if (!orderCountsTowardStallEconomics(o)) continue;
     const rowYmd = stallSalesBoardRowYmd(o);
     if (!rowYmd || rowYmd >= orderDateYmd) continue;
     if (weekdayIdxMon0FromYmd(rowYmd) !== targetWd) continue;

@@ -19,9 +19,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from 'recharts';
 import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
@@ -52,6 +49,7 @@ import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
   effectiveOrderDateYmd,
+  orderCountsTowardStallEconomics,
   orderIsFranchiseBusinessScoped,
   orderIsHeadquartersDirectScoped,
   orderMatchesSessionScope,
@@ -76,10 +74,6 @@ import { getSalesRecord, mergeSalesRecordWithCatalog, patchSalesRecordRevenueGap
 
 const HQ_STALL_VIEW = 'headquarter' as const;
 const FRANCHISE_STALL_VIEW = 'franchisee' as const;
-
-const EXPENSE_PIE_COLORS = ['#d97706', '#6366f1', '#10b981', '#f43f5e', '#a855f7', '#06b6d4', '#eab308', '#ec4899', '#84cc16', '#f97316'];
-
-const INGREDIENT_STRUCTURE_PIE_COLORS = ['#ea580c', '#6366f1'];
 
 type DashboardOrder = OrderHistoryEntry;
 
@@ -119,6 +113,9 @@ type DirectStallGapRangeMode =
 type StallSalesBoardRangeMode = { kind: 'none' } | DirectStallGapRangeMode;
 type ExpenseShareRow = { id: number; name: string; amount: number; pct: number };
 const RANK_DEFAULT_LIMIT = 10;
+type RevenueRankRow = { id: number; name: string; revenue: number; pct?: number };
+type AmountRankRow = { id: number; name: string; amount: number; pct?: number };
+const FRANCHISE_REVENUE_SCOPE_ALL = 'all';
 
 function aggregateProductRevenue(
   orders: DashboardOrder[],
@@ -163,6 +160,154 @@ function aggregateExpenseShareRows(
   rows.sort((a, b) => b.amount - a.amount);
   const total = rows.reduce((s, r) => s + r.amount, 0);
   return rows.map((r, i) => ({ id: i + 1, name: r.name, amount: r.amount, pct: pct(r.amount, total) }));
+}
+
+function RevenueRankingBars({
+  rows,
+  totalRevenue,
+  showAll,
+  onToggleShowAll,
+  emptyText,
+}: {
+  rows: RevenueRankRow[];
+  totalRevenue: number;
+  showAll: boolean;
+  onToggleShowAll: () => void;
+  emptyText: string;
+}) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-zinc-500 py-8 text-center">{emptyText}</p>;
+  }
+  const visibleRows = showAll ? rows : rows.slice(0, RANK_DEFAULT_LIMIT);
+  return (
+    <>
+      <div className="mt-3 max-h-[26rem] overflow-y-auto pr-1 space-y-2.5 overscroll-y-contain">
+        {visibleRows.map((row, idx) => {
+          const rank = idx + 1;
+          const pctVal = row.pct ?? pct(row.revenue, totalRevenue);
+          const pctSafe = Number.isFinite(pctVal) ? Math.max(0, pctVal) : 0;
+          const fillPct = Math.max(2, Math.min(100, pctSafe));
+          const isTop3 = rank <= 3;
+          return (
+            <div key={`${row.id}-${row.name}`} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <div className="min-w-0 flex items-center gap-2">
+                  <span
+                    className={cn(
+                      'inline-flex h-5 min-w-5 items-center justify-center rounded-md px-1 tabular-nums text-[11px] font-semibold',
+                      isTop3 ? 'bg-amber-600 text-zinc-950' : 'bg-zinc-800 text-zinc-300',
+                    )}
+                  >
+                    {rank}
+                  </span>
+                  <span className="truncate text-zinc-200">{row.name}</span>
+                </div>
+                <span className="shrink-0 tabular-nums text-amber-200">
+                  {moneyTW(row.revenue)} ({pctSafe.toFixed(1)}%)
+                </span>
+              </div>
+              <div className="h-2.5 rounded-full bg-zinc-800/90 border border-zinc-700/80 overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    isTop3
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-700'
+                      : 'bg-gradient-to-r from-zinc-500 to-zinc-700',
+                  )}
+                  style={{ width: `${fillPct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {rows.length > RANK_DEFAULT_LIMIT && (
+        <button
+          type="button"
+          onClick={onToggleShowAll}
+          className="mt-3 text-xs text-amber-400 hover:text-amber-300"
+        >
+          {showAll ? '收合排行' : '展開全部商品'}
+        </button>
+      )}
+    </>
+  );
+}
+
+function AmountRankingBars({
+  rows,
+  totalAmount,
+  showAll,
+  onToggleShowAll,
+  emptyText,
+  expandLabel = '展開全部項目',
+  hideToggle = false,
+}: {
+  rows: AmountRankRow[];
+  totalAmount: number;
+  showAll: boolean;
+  onToggleShowAll: () => void;
+  emptyText: string;
+  expandLabel?: string;
+  hideToggle?: boolean;
+}) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-zinc-500 py-8 text-center">{emptyText}</p>;
+  }
+  const visibleRows = showAll ? rows : rows.slice(0, RANK_DEFAULT_LIMIT);
+  return (
+    <>
+      <div className="mt-3 max-h-[26rem] overflow-y-auto pr-1 space-y-2.5 overscroll-y-contain">
+        {visibleRows.map((row, idx) => {
+          const rank = idx + 1;
+          const pctVal = row.pct ?? pct(row.amount, totalAmount);
+          const pctSafe = Number.isFinite(pctVal) ? Math.max(0, pctVal) : 0;
+          const fillPct = Math.max(2, Math.min(100, pctSafe));
+          const isTop3 = rank <= 3;
+          return (
+            <div key={`${row.id}-${row.name}`} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <div className="min-w-0 flex items-center gap-2">
+                  <span
+                    className={cn(
+                      'inline-flex h-5 min-w-5 items-center justify-center rounded-md px-1 tabular-nums text-[11px] font-semibold',
+                      isTop3 ? 'bg-amber-600 text-zinc-950' : 'bg-zinc-800 text-zinc-300',
+                    )}
+                  >
+                    {rank}
+                  </span>
+                  <span className="truncate text-zinc-200">{row.name}</span>
+                </div>
+                <span className="shrink-0 tabular-nums text-amber-200">
+                  {moneyTW(row.amount)} ({pctSafe.toFixed(1)}%)
+                </span>
+              </div>
+              <div className="h-2.5 rounded-full bg-zinc-800/90 border border-zinc-700/80 overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    isTop3
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-700'
+                      : 'bg-gradient-to-r from-zinc-500 to-zinc-700',
+                  )}
+                  style={{ width: `${fillPct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {!hideToggle && rows.length > RANK_DEFAULT_LIMIT && (
+        <button
+          type="button"
+          onClick={onToggleShowAll}
+          className="mt-3 text-xs text-amber-400 hover:text-amber-300"
+        >
+          {showAll ? '收合排行' : expandLabel}
+        </button>
+      )}
+    </>
+  );
 }
 
 function toYmd(d: Date): string {
@@ -986,6 +1131,7 @@ export default function Dashboard({
   const [showAllFranchise, setShowAllFranchise] = useState(false);
   const [showAllSelf, setShowAllSelf] = useState(false);
   const [showAllExpenseSelf, setShowAllExpenseSelf] = useState(false);
+  const [franchiseRevenueScope, setFranchiseRevenueScope] = useState(FRANCHISE_REVENUE_SCOPE_ALL);
   /** 各加盟店挑選浮層；點頂端按鈕才顯示，不佔主頁版面 */
   const [franchisePickerOpen, setFranchisePickerOpen] = useState(false);
   /** 直營「盤點落差與呆帳」專用區間（與總部營運摘要 summaryRange 獨立） */
@@ -1104,7 +1250,7 @@ export default function Dashboard({
     let directProcurement = 0;
     for (const o of dashboardOrders) {
       if (!orderIsHeadquartersDirectScoped(o)) continue;
-      if (!o.stallCountCompletedAt) continue;
+      if (!orderCountsTowardStallEconomics(o)) continue;
       const stallYmd = stallCountAttributeYmd(o);
       if (!stallYmd || stallYmd < startYmd || stallYmd > endYmd) continue;
       directProcurement += o.totalAmount;
@@ -1321,7 +1467,7 @@ export default function Dashboard({
     const perDay = new Map<string, Map<string, number>>();
 
     for (const o of effectiveOrders) {
-      if (!o.stallCountCompletedAt) continue;
+      if (!orderCountsTowardStallEconomics(o)) continue;
       if (franchiseId) {
         if (!orderMatchesFranchiseeBusinessDash(o, franchiseId)) continue;
       } else if (!orderIsHeadquartersDirectScoped(o)) {
@@ -1422,7 +1568,7 @@ export default function Dashboard({
     if (isAdmin) return null;
     const { startYmd, endYmd } = resolveRange(summaryRange);
     const stallCompleted = effectiveOrders.filter((o) => {
-      if (!o.stallCountCompletedAt) return false;
+      if (!orderCountsTowardStallEconomics(o)) return false;
       const ymd = stallCountAttributeYmd(o);
       return Boolean(ymd && ymd >= startYmd && ymd <= endYmd);
     });
@@ -1560,18 +1706,51 @@ export default function Dashboard({
     );
   }, [adminProductChartOrders, isAdmin]);
 
+  const adminFranchiseRevenueScopeOptions = useMemo(() => {
+    if (!isAdmin) return [] as Array<{ key: string; label: string }>;
+    const map = new Map<string, string>();
+    for (const o of adminProductChartOrders) {
+      if (!orderIsFranchiseBusinessScoped(o)) continue;
+      const userId = o.actorUserId?.trim();
+      const key = userId ? `uid:${userId}` : `label:${o.storeLabel}`;
+      if (!map.has(key)) map.set(key, resolveOrderStoreLabel(o));
+    }
+    const list = Array.from(map.entries())
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant'));
+    return [{ key: FRANCHISE_REVENUE_SCOPE_ALL, label: '整體批貨' }, ...list];
+  }, [adminProductChartOrders, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (adminFranchiseRevenueScopeOptions.some((o) => o.key === franchiseRevenueScope)) return;
+    setFranchiseRevenueScope(FRANCHISE_REVENUE_SCOPE_ALL);
+  }, [adminFranchiseRevenueScopeOptions, franchiseRevenueScope, isAdmin]);
+
   const adminFranchiseProducts = useMemo(() => {
     if (!isAdmin) return [];
     return aggregateProductRevenue(
       adminProductChartOrders,
-      (o) => orderIsFranchiseBusinessScoped(o),
+      (o) => {
+        if (!orderIsFranchiseBusinessScoped(o)) return false;
+        if (franchiseRevenueScope === FRANCHISE_REVENUE_SCOPE_ALL) return true;
+        if (franchiseRevenueScope.startsWith('uid:')) {
+          const uid = franchiseRevenueScope.slice(4);
+          return (o.actorUserId?.trim() ?? '') === uid;
+        }
+        if (franchiseRevenueScope.startsWith('label:')) {
+          const label = franchiseRevenueScope.slice(6);
+          return o.storeLabel === label;
+        }
+        return true;
+      },
       (_o, line) => {
         const item = getSupplyItem(line.productId);
         if (isConsumableItem(item)) return false;
         return !isFranchiseeSelfSuppliedItem(item);
       },
     );
-  }, [adminProductChartOrders, isAdmin]);
+  }, [adminProductChartOrders, franchiseRevenueScope, isAdmin]);
 
   /**
    * 各加盟店摘要（總部選店浮層）：
@@ -1600,7 +1779,7 @@ export default function Dashboard({
 
       const stallYmd = stallCountAttributeYmd(o);
       const isStallInRange = Boolean(
-        o.stallCountCompletedAt && stallYmd && stallYmd >= startYmd && stallYmd <= endYmd,
+        orderCountsTowardStallEconomics(o) && stallYmd && stallYmd >= startYmd && stallYmd <= endYmd,
       );
 
       if (!isCompletedInRange && !isStallInRange) continue;
@@ -2594,115 +2773,46 @@ export default function Dashboard({
               </div>
               <div>
                 <h3 className="text-base font-medium">直營商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
-                {adminDirectProducts.length === 0 ? (
-                  <p className="text-xs text-zinc-500 mt-2">尚無直營已完成訂單。</p>
-                ) : (
-                  <>
-                    <div className={cn('mt-2', isNarrow ? 'h-44' : 'h-36')}>
-                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                        <PieChart>
-                          <Pie
-                            data={adminDirectProducts.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.revenue }))}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={isNarrow ? 22 : 24}
-                            outerRadius={isNarrow ? 58 : 52}
-                            paddingAngle={2}
-                          >
-                            {adminDirectProducts.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
-                              <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']}
-                            contentStyle={{
-                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
-                              borderRadius: '10px',
-                              border: '1px solid #3f3f46',
-                              backgroundColor: '#18181b',
-                              color: '#f5f2ed',
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="space-y-2 mt-2">
-                      {(showAllDirect ? adminDirectProducts : adminDirectProducts.slice(0, RANK_DEFAULT_LIMIT)).map((r) => (
-                        <div key={`direct-${r.id}`} className="flex justify-between text-xs">
-                          <span className="truncate pr-2 text-zinc-300">{r.id}. {r.name}</span>
-                          <span className="text-amber-200 tabular-nums">{moneyTW(r.revenue)} / {r.pct.toFixed(1)}%</span>
-                        </div>
-                      ))}
-                    </div>
-                    {adminDirectProducts.length > RANK_DEFAULT_LIMIT && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllDirect((v) => !v)}
-                        className="mt-2 text-xs text-amber-400 hover:text-amber-300"
-                      >
-                        {showAllDirect ? '收合排行' : '展開全部商品'}
-                      </button>
-                    )}
-                  </>
-                )}
+                <RevenueRankingBars
+                  rows={adminDirectProducts}
+                  totalRevenue={adminDirectProducts.reduce((s, r) => s + r.revenue, 0)}
+                  showAll={showAllDirect}
+                  onToggleShowAll={() => setShowAllDirect((v) => !v)}
+                  emptyText="尚無直營已完成訂單。"
+                />
               </div>
               <div className="border-t border-zinc-800 pt-4">
-                <h3 className="text-base font-medium">加盟批貨商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
-                {adminFranchiseProducts.length === 0 ? (
-                  <p className="text-xs text-zinc-500 mt-2">尚無加盟批貨已完成訂單。</p>
-                ) : (
-                  <>
-                    <div className={cn('mt-2', isNarrow ? 'h-44' : 'h-36')}>
-                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                        <PieChart>
-                          <Pie
-                            data={adminFranchiseProducts.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.revenue }))}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={isNarrow ? 22 : 24}
-                            outerRadius={isNarrow ? 58 : 52}
-                            paddingAngle={2}
-                          >
-                            {adminFranchiseProducts.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
-                              <Cell key={i} fill={INGREDIENT_STRUCTURE_PIE_COLORS[i % INGREDIENT_STRUCTURE_PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']}
-                            contentStyle={{
-                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
-                              borderRadius: '10px',
-                              border: '1px solid #3f3f46',
-                              backgroundColor: '#18181b',
-                              color: '#f5f2ed',
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="space-y-2 mt-2">
-                      {(showAllFranchise ? adminFranchiseProducts : adminFranchiseProducts.slice(0, RANK_DEFAULT_LIMIT)).map((r) => (
-                        <div key={`fr-${r.id}`} className="flex justify-between text-xs">
-                          <span className="truncate pr-2 text-zinc-300">{r.id}. {r.name}</span>
-                          <span className="text-amber-200 tabular-nums">{moneyTW(r.revenue)} / {r.pct.toFixed(1)}%</span>
-                        </div>
-                      ))}
-                    </div>
-                    {adminFranchiseProducts.length > RANK_DEFAULT_LIMIT && (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-base font-medium">加盟批貨商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
+                  <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                    {adminFranchiseRevenueScopeOptions.map((opt) => (
                       <button
+                        key={opt.key}
                         type="button"
-                        onClick={() => setShowAllFranchise((v) => !v)}
-                        className="mt-2 text-xs text-amber-400 hover:text-amber-300"
+                        onClick={() => {
+                          setFranchiseRevenueScope(opt.key);
+                          setShowAllFranchise(false);
+                        }}
+                        className={cn(
+                          'whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs transition-colors',
+                          franchiseRevenueScope === opt.key
+                            ? 'border-amber-500/60 bg-amber-600/20 text-amber-200'
+                            : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800',
+                        )}
+                        aria-pressed={franchiseRevenueScope === opt.key}
                       >
-                        {showAllFranchise ? '收合排行' : '展開全部商品'}
+                        {opt.label}
                       </button>
-                    )}
-                  </>
-                )}
+                    ))}
+                  </div>
+                </div>
+                <RevenueRankingBars
+                  rows={adminFranchiseProducts}
+                  totalRevenue={adminFranchiseProducts.reduce((s, r) => s + r.revenue, 0)}
+                  showAll={showAllFranchise}
+                  onToggleShowAll={() => setShowAllFranchise((v) => !v)}
+                  emptyText="尚無加盟批貨已完成訂單。"
+                />
               </div>
             </>
           ) : (
@@ -2724,123 +2834,23 @@ export default function Dashboard({
               </div>
               <h3 className="text-base font-medium">商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
               <div className="flex-1">
-                {topProducts.length === 0 ? (
-                  <p className="text-sm text-zinc-500 py-8 text-center">尚無已完成銷售可排行。</p>
-                ) : (
-                  <>
-                    <div className={cn(isNarrow ? 'h-48' : 'h-40')}>
-                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                        <PieChart>
-                          <Pie
-                            data={topProducts.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.revenue }))}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={isNarrow ? 28 : 30}
-                            outerRadius={isNarrow ? 68 : 62}
-                            paddingAngle={2}
-                          >
-                            {topProducts.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
-                              <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '營收']}
-                            contentStyle={{
-                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
-                              borderRadius: '10px',
-                              border: '1px solid #3f3f46',
-                              backgroundColor: '#18181b',
-                              color: '#f5f2ed',
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="space-y-2 mt-2">
-                      {(showAllSelf ? topProducts : topProducts.slice(0, RANK_DEFAULT_LIMIT)).map((product) => (
-                        <div key={product.id} className="flex justify-between text-xs">
-                          <span className="truncate pr-2 text-zinc-300">{product.id}. {product.name}</span>
-                          <span className="text-amber-100 tabular-nums">
-                            {moneyTW(product.revenue)} /{' '}
-                            {((product.revenue / Math.max(1, topProductsTotalRevenue)) * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    {topProducts.length > RANK_DEFAULT_LIMIT && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllSelf((v) => !v)}
-                        className="mt-2 text-xs text-amber-400 hover:text-amber-300"
-                      >
-                        {showAllSelf ? '收合排行' : '展開全部商品'}
-                      </button>
-                    )}
-                  </>
-                )}
+                <RevenueRankingBars
+                  rows={topProducts.map((p) => ({ id: p.id, name: p.name, revenue: p.revenue }))}
+                  totalRevenue={topProductsTotalRevenue}
+                  showAll={showAllSelf}
+                  onToggleShowAll={() => setShowAllSelf((v) => !v)}
+                  emptyText="尚無已完成銷售可排行。"
+                />
               </div>
               <div className="border-t border-zinc-800 pt-4">
                 <h3 className="text-base font-medium">支出佔比（{summaryRangeLabel(productChartsRange)}）</h3>
-                {nonAdminExpenseRows.length === 0 ? (
-                  <p className="text-sm text-zinc-500 py-6 text-center">尚無支出資料。</p>
-                ) : (
-                  <>
-                    <div className={cn('mt-2', isNarrow ? 'h-48' : 'h-40')}>
-                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                        <PieChart>
-                          <Pie
-                            data={nonAdminExpenseRows.slice(0, RANK_DEFAULT_LIMIT).map((r) => ({ name: r.name, value: r.amount }))}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={isNarrow ? 28 : 30}
-                            outerRadius={isNarrow ? 68 : 62}
-                            paddingAngle={2}
-                          >
-                            {nonAdminExpenseRows.slice(0, RANK_DEFAULT_LIMIT).map((_, i) => (
-                              <Cell key={i} fill={INGREDIENT_STRUCTURE_PIE_COLORS[i % INGREDIENT_STRUCTURE_PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '支出']}
-                            contentStyle={{
-                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
-                              borderRadius: '10px',
-                              border: '1px solid #3f3f46',
-                              backgroundColor: '#18181b',
-                              color: '#f5f2ed',
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="space-y-2 mt-2">
-                      {(showAllExpenseSelf
-                        ? nonAdminExpenseRows
-                        : nonAdminExpenseRows.slice(0, RANK_DEFAULT_LIMIT)
-                      ).map((row) => (
-                        <div key={row.id} className="flex justify-between text-xs">
-                          <span className="truncate pr-2 text-zinc-300">{row.id}. {row.name}</span>
-                          <span className="text-amber-200 tabular-nums">
-                            {moneyTW(row.amount)} / {row.pct.toFixed(1)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    {nonAdminExpenseRows.length > RANK_DEFAULT_LIMIT && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllExpenseSelf((v) => !v)}
-                        className="mt-2 text-xs text-amber-400 hover:text-amber-300"
-                      >
-                        {showAllExpenseSelf ? '收合排行' : '展開全部項目'}
-                      </button>
-                    )}
-                  </>
-                )}
+                <AmountRankingBars
+                  rows={nonAdminExpenseRows.map((r) => ({ id: r.id, name: r.name, amount: r.amount, pct: r.pct }))}
+                  totalAmount={nonAdminExpenseRows.reduce((s, r) => s + r.amount, 0)}
+                  showAll={showAllExpenseSelf}
+                  onToggleShowAll={() => setShowAllExpenseSelf((v) => !v)}
+                  emptyText="尚無支出資料。"
+                />
               </div>
             </>
           )}
@@ -2874,54 +2884,19 @@ export default function Dashboard({
                     本月尚無支出資料可供分析。
                   </p>
                 ) : (
-                  <>
-                    <div className={cn('w-full', isNarrow ? 'h-[260px]' : 'h-[300px]')}>
-                      <ResponsiveContainer width="100%" height="100%" debounce={isNarrow ? 80 : 0}>
-                        <PieChart>
-                          <Pie
-                            data={adminFinance.expenseBreakdown.map((r) => ({ name: r.name, value: r.value }))}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={isNarrow ? 42 : 56}
-                            outerRadius={isNarrow ? 86 : 110}
-                            paddingAngle={2}
-                            label={
-                              isNarrow
-                                ? false
-                                : ({ name, percent }) =>
-                                    `${String(name).length > 10 ? String(name).slice(0, 10) + '…' : name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                            }
-                          >
-                            {adminFinance.expenseBreakdown.map((_, i) => (
-                              <Cell key={i} fill={EXPENSE_PIE_COLORS[i % EXPENSE_PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value: number | undefined) => [moneyTW(value ?? 0), '支出']}
-                            contentStyle={{
-                              borderRadius: '12px',
-                              border: '1px solid #3f3f46',
-                              backgroundColor: '#18181b',
-                              color: '#f5f2ed',
-                              fontSize: isNarrow ? '0.8125rem' : '0.75rem',
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {adminFinance.expenseBreakdown.map((row, idx) => (
-                        <div key={row.name} className="flex justify-between text-xs">
-                          <span className="truncate pr-2 text-zinc-300">{idx + 1}. {row.name}</span>
-                          <span className="text-amber-200 tabular-nums">
-                            {moneyTW(row.value)} / {row.pctOfExpense.toFixed(1)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
+                  <AmountRankingBars
+                    rows={adminFinance.expenseBreakdown.map((row, idx) => ({
+                      id: idx + 1,
+                      name: row.name,
+                      amount: row.value,
+                      pct: row.pctOfExpense,
+                    }))}
+                    totalAmount={adminFinance.expenseBreakdown.reduce((s, r) => s + r.value, 0)}
+                    showAll
+                    onToggleShowAll={() => {}}
+                    emptyText="本月尚無支出資料可供分析。"
+                    hideToggle
+                  />
                 )}
               </div>
             </div>
