@@ -57,31 +57,33 @@
   }
 
   /**
-   * 品項明細表：垂直／橫向分層捲動，避免斜滑時左右晃動；thead sticky 綁在垂直層。
+   * 品項明細表：單一捲動容器承載直向＋橫向（巢狀 overflow 會使 thead sticky 失效）。
    * 表格用 border-separate（collapse 會使 sticky 失效）。
    */
   .sticky-detail-table-scroll-y {
     max-height: min(70dvh, 36rem);
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
+    overflow: auto;
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    touch-action: pan-y;
-  }
-
-  .sticky-detail-table-scroll-x {
-    overflow-x: auto;
-    overflow-y: visible;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    /* pan-x 會阻擋直向捲動傳到外層 scroll-y（手機明細表無法上下滑） */
     touch-action: pan-x pan-y;
   }
 
-  /* 手機：明細表改由主畫面捲動，避免巢狀捲動與下拉重整衝突 */
+  .sticky-detail-table-scroll-x {
+    overflow: visible;
+    min-width: 0;
+  }
+
+  .sticky-detail-table-scroll-y table thead {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  /* 手機：明細表改由主畫面捲動；橫向仍在表格外層，直向 sticky 綁 main */
   @media (max-width: 639px) {
     .sticky-detail-table-scroll-y {
       max-height: none;
+      overflow-x: auto;
       overflow-y: visible;
       touch-action: auto;
     }

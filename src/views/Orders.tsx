@@ -232,10 +232,11 @@ function fmtLineQty(n: number) {
 }
 
 /** 訂單品項明細表頭：垂直捲動時固定（品項欄另 sticky left） */
-const ORDER_DETAIL_TH_TOP =
-  'sticky top-0 z-[1] bg-zinc-900 shadow-[0_1px_0_0_rgb(39,39,42)]';
+const ORDER_DETAIL_TH_TOP = 'bg-zinc-900';
 const ORDER_DETAIL_TH_TOP_LEFT =
-  'sticky top-0 left-0 z-[3] bg-zinc-900 shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85),0_1px_0_0_rgb(39,39,42)]';
+  'sticky left-0 z-[6] bg-zinc-900 shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]';
+const ORDER_DETAIL_THEAD =
+  'sticky top-0 z-[5] bg-zinc-900 shadow-[0_1px_0_0_rgb(39,39,42),0_4px_8px_-4px_rgba(0,0,0,0.65)]';
 
 type MergedStallSnapForOrderDetail = ReturnType<typeof mergeSalesRecordWithCatalog>;
 type CarrySnapForOrderDetail = ReturnType<typeof loadRemainSnapshotForOrderManagementDisplay> | null;
@@ -1535,7 +1536,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                 ),
                         )}
                       >
-                        <thead className="bg-zinc-800/50 text-zinc-400 text-[15.21px] sm:text-[1.14075rem] uppercase border-b border-zinc-700/50">
+                        <thead
+                          className={cn(
+                            ORDER_DETAIL_THEAD,
+                            'text-zinc-400 text-[15.21px] sm:text-[1.14075rem] uppercase border-b border-zinc-700/50',
+                          )}
+                        >
                           <tr>
                             {isPickingThis ? (
                               <>
