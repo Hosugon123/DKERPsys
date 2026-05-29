@@ -279,29 +279,35 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     }
     const next: DaySnapshot = { ...snap, lines };
     const completedAt = new Date().toISOString();
-    const recordLines: DaySnapshot['lines'] = { ...next.lines };
+    const stampBasisYmd = viewOrder ? effectiveOrderDateYmd(viewOrder) : dateStr;
+    const recomputedForStamp = recomputeStallOutForStallYmdAndOrder(
+      stampBasisYmd,
+      viewOrderId,
+      next,
+      { clearRemain: false },
+    );
+    const recordLinesFromStamp: DaySnapshot['lines'] = { ...recomputedForStamp.lines };
     for (const it of supplyItems) {
-      if (isConsumableItem(it)) delete recordLines[it.id];
+      if (isConsumableItem(it)) delete recordLinesFromStamp[it.id];
     }
-    const recordSnap: SalesRecordDaySnapshot = {
-      lines: recordLines,
+    const recordSnapAligned: SalesRecordDaySnapshot = {
+      lines: recordLinesFromStamp,
       actualRevenue: next.actualRevenue,
       updatedAt: completedAt,
       revenueGapAmount: (next.revenueGapAmount ?? '').trim(),
       revenueGapReason: (next.revenueGapReason ?? '').trim(),
       frozenRetailUnitPriceByItem: Object.fromEntries(
-        stallDisplayItems.map((it) => [it.id, estimatedRetailPerPackage(it)])
+        stallDisplayItems.map((it) => [it.id, estimatedRetailPerPackage(it)]),
       ),
       frozenWholesaleUnitPriceByItem: Object.fromEntries(
-        stallDisplayItems.map((it) => [it.id, pricePerPackage(it)])
+        stallDisplayItems.map((it) => [it.id, pricePerPackage(it)]),
       ),
     };
-    const stampBasisYmd = viewOrder ? effectiveOrderDateYmd(viewOrder) : dateStr;
     void (async () => {
       const okStamp = await ordersApi.setOrderStallCountStamp(viewOrderId, {
         basisYmd: stampBasisYmd,
         completedAt,
-        snapshot: recordSnap,
+        snapshot: recordSnapAligned,
       });
       if (!okStamp) {
         setStallCountConfirmOpen(false);
@@ -309,12 +315,18 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         setTimeout(() => setRecomputeMsg(null), 5000);
         return;
       }
+      const dayToSave: DaySnapshot = {
+        ...recomputedForStamp,
+        actualRevenue: next.actualRevenue,
+        revenueGapAmount: next.revenueGapAmount,
+        revenueGapReason: next.revenueGapReason,
+      };
       await withRemoteStorageWrite(() => {
-        saveDay(stampBasisYmd, next);
-        saveSalesRecord(stampBasisYmd, recordSnap);
+        saveDay(stampBasisYmd, dayToSave);
+        saveSalesRecord(stampBasisYmd, recordSnapAligned);
       });
       setStallListTick((n) => n + 1);
-      stallBaselineRef.current = stallDaySnapshotFingerprint(next);
+      stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
       setStallCountConfirmOpen(false);
       setSaveFlash(true);
       setTimeout(() => setSaveFlash(false), 2500);

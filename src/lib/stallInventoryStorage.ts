@@ -13,6 +13,8 @@ import {
   getSalesRecord,
   applySalesRecordOrderDeduction,
   mergeSalesRecordWithCatalog,
+  saveSalesRecord,
+  type SalesRecordDaySnapshot,
 } from './salesRecordStorage';
 import { ymdDashToSlash } from './dateDisplay';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
@@ -403,6 +405,51 @@ export function recomputeStallOutForOrderId(orderId: string) {
   const o = findOrderByIdInStores(orderId);
   if (!o) return;
   recomputeStallOutForStallYmdAndOrder(effectiveOrderDateYmd(o), orderId);
+}
+
+/**
+ * 訂單叫貨量變更後：依訂單歸屬日重算攤上「帶出」（尚未盤點押記時）。
+ * 避免先植入、後改貨量，完成盤點時快照仍為舊帶出／舊剩餘。
+ */
+export function syncStallOutAfterOrderLinesChanged(orderId: string): void {
+  const o = findOrderByIdInStores(orderId);
+  if (!o || o.status === '已取消') return;
+  if (o.stallCountCompletedAt?.trim()) return;
+  const bookYmd = effectiveOrderDateYmd(o);
+  if (!bookYmd) return;
+  recomputeStallOutForStallYmdAndOrder(bookYmd, orderId);
+}
+
+/**
+ * 已盤點訂單調整快照後：同步寫入該盤點日之銷售紀錄與攤上日庫，
+ * 使 `loadDayForProcurement(basisYmd)` 與次日批貨扣庫讀法一致。
+ */
+export function syncBasisDayFromOrderSnapshot(orderId: string): void {
+  const o = findOrderByIdInStores(orderId);
+  const basisYmd = o?.stallCountBasisYmd?.trim();
+  const snap = o?.stallCountSnapshot;
+  if (!o || !basisYmd || !snap) return;
+
+  const merged = mergeSalesRecordWithCatalog(snap as SalesRecordDaySnapshot);
+  saveSalesRecord(basisYmd, {
+    lines: merged.lines,
+    actualRevenue: merged.actualRevenue,
+    updatedAt: merged.updatedAt,
+    revenueGapAmount: merged.revenueGapAmount,
+    revenueGapReason: merged.revenueGapReason,
+    frozenRetailUnitPriceByItem: merged.frozenRetailUnitPriceByItem,
+    frozenWholesaleUnitPriceByItem: merged.frozenWholesaleUnitPriceByItem,
+  });
+
+  const work = loadDay(basisYmd);
+  saveDay(basisYmd, {
+    ...work,
+    lines: merged.lines,
+    actualRevenue: merged.actualRevenue ?? work.actualRevenue,
+    revenueGapAmount: merged.revenueGapAmount ?? work.revenueGapAmount,
+    revenueGapReason: merged.revenueGapReason ?? work.revenueGapReason,
+    updatedAt: merged.updatedAt,
+  });
 }
 
 export type StallOrderForDateRow = {

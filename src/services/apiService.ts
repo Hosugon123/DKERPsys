@@ -9,6 +9,7 @@ import { getStorageMode, type StorageMode } from './storageMode';
 import { withRemoteStorageRead, withRemoteStorageWrite } from './remoteSyncHub';
 import * as accountingLedger from '../lib/accountingLedgerStorage';
 import * as orderHistory from '../lib/orderHistoryStorage';
+import * as stallInventory from '../lib/stallInventoryStorage';
 import * as userCatalog from '../lib/userCatalogState';
 import * as costStructure from '../lib/costStructureStorage';
 import {
@@ -114,7 +115,11 @@ export const orders = {
     id: string,
     nextLines: orderHistory.OrderHistoryLine[],
   ): Promise<orderHistory.UpdateEditableOrderLinesResult> {
-    return withRemoteStorageWrite(() => orderHistory.updateEditableOrderLinesById(id, nextLines));
+    return withRemoteStorageWrite(() => {
+      const res = orderHistory.updateEditableOrderLinesById(id, nextLines);
+      if (res.ok) stallInventory.syncStallOutAfterOrderLinesChanged(id);
+      return res;
+    });
   },
   async adminPatchOrderLineUnitPricesById(
     id: string,
@@ -149,7 +154,11 @@ export const orders = {
     orderId: string,
     snapshot: import('../lib/salesRecordStorage').SalesRecordDaySnapshot,
   ): Promise<orderHistory.UpdateStallSnapshotResult> {
-    return withRemoteStorageWrite(() => orderHistory.updateStallCountSnapshotByOrderId(orderId, snapshot));
+    return withRemoteStorageWrite(() => {
+      const res = orderHistory.updateStallCountSnapshotByOrderId(orderId, snapshot);
+      if (res.ok) stallInventory.syncBasisDayFromOrderSnapshot(orderId);
+      return res;
+    });
   },
   async updateOrderDateYmdByOrderId(
     orderId: string,
