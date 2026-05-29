@@ -63,7 +63,7 @@
   .sticky-detail-table-scroll-y {
     max-height: min(70dvh, 36rem);
     overflow: auto;
-    overscroll-behavior: contain;
+    overscroll-behavior: auto;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-x pan-y;
   }
