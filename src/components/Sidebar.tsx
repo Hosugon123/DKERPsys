@@ -23,6 +23,7 @@ import {
   saveNavOrderForRole,
 } from '../lib/sidebarNavOrderStorage';
 import { cn } from '../lib/utils';
+import type { MobileSidebarSwipeHandlers } from '../hooks/useMobileSidebarSwipe';
 
 interface SidebarProps {
   currentView: string;
@@ -32,6 +33,11 @@ interface SidebarProps {
   userRole: string;
   isSuperAdmin: boolean;
   onLogout: () => void;
+  /** 手機遮罩層滑動關閉側欄 */
+  overlaySwipe?: Pick<
+    MobileSidebarSwipeHandlers,
+    'onTouchStart' | 'onTouchMove' | 'onTouchEnd' | 'onTouchCancel'
+  >;
 }
 
 const navItemById: Record<
@@ -91,6 +97,7 @@ export default function Sidebar({
   userRole,
   isSuperAdmin,
   onLogout,
+  overlaySwipe,
 }: SidebarProps) {
   const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
   const [reorderMode, setReorderMode] = useState(false);
@@ -156,10 +163,15 @@ export default function Sidebar({
         role="presentation"
         aria-hidden={!isOpen}
         className={cn(
-          'fixed inset-0 z-40 touch-none overscroll-none bg-black/50 md:hidden',
+          'fixed inset-0 z-40 overscroll-none bg-black/50 md:hidden',
+          overlaySwipe ? 'touch-pan-x' : 'touch-none',
           isOpen ? 'block' : 'hidden',
         )}
         onClick={() => setIsOpen(false)}
+        onTouchStart={overlaySwipe?.onTouchStart}
+        onTouchMove={overlaySwipe?.onTouchMove}
+        onTouchEnd={overlaySwipe?.onTouchEnd}
+        onTouchCancel={overlaySwipe?.onTouchCancel}
       />
       <aside
         id="app-sidebar-drawer"

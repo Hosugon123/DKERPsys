@@ -14,6 +14,7 @@ import {
 import { getUserAvatar, removeUserAvatar, setUserAvatar } from '../lib/userAvatarStorage';
 import type { UserRole } from '../views/Orders';
 import RemoteSyncIndicator from './RemoteSyncIndicator';
+import type { MobileSidebarSwipeHandlers } from '../hooks/useMobileSidebarSwipe';
 
 interface TopbarProps {
   isMobileMenuOpen: boolean;
@@ -21,6 +22,10 @@ interface TopbarProps {
   loginId: string;
   userRole: UserRole;
   onLogout: () => void;
+  sidebarSwipe?: Pick<
+    MobileSidebarSwipeHandlers,
+    'onTouchStart' | 'onTouchMove' | 'onTouchEnd' | 'onTouchCancel'
+  >;
 }
 
 export default function Topbar({
@@ -29,6 +34,7 @@ export default function Topbar({
   loginId,
   userRole,
   onLogout,
+  sidebarSwipe,
 }: TopbarProps) {
   const DEFAULT_AVATAR = `https://api.dicebear.com/7.x/notionists/svg?seed=${encodeURIComponent(
     loginId
@@ -244,7 +250,13 @@ export default function Topbar({
 
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-[#111111] pt-[env(safe-area-inset-top)]">
+      <header
+        className="sticky top-0 z-30 border-b border-zinc-800 bg-[#111111] pt-[env(safe-area-inset-top)]"
+        onTouchStart={sidebarSwipe?.onTouchStart}
+        onTouchMove={sidebarSwipe?.onTouchMove}
+        onTouchEnd={sidebarSwipe?.onTouchEnd}
+        onTouchCancel={sidebarSwipe?.onTouchCancel}
+      >
         <div className="flex h-12 sm:h-14 lg:h-16 items-center justify-between px-3 sm:px-4 lg:px-8">
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <button

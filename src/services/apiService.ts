@@ -35,7 +35,12 @@ export {
   withRemoteStorageWrite,
 } from './remoteSyncHub';
 export type { RemoteSyncStatus } from './remoteSyncHub';
-export { getRemoteSyncStatus, REMOTE_SYNC_STATUS_EVENT } from './remoteSyncHub';
+export {
+  getRemoteSyncStatus,
+  isRemoteSyncLocked,
+  REMOTE_SYNC_STATUS_EVENT,
+  REMOTE_SYNC_VERSION_CONFLICT_EVENT,
+} from './remoteSyncHub';
 
 // ——— 流水帳 ———
 

@@ -6,7 +6,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import DeployUpdateBanner from './components/DeployUpdateBanner';
 import PullToRefresh from './components/PullToRefresh';
+import RemoteSyncVersionConflictModal from './components/RemoteSyncVersionConflictModal';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
+import { useMobileSidebarSwipe } from './hooks/useMobileSidebarSwipe';
 import {
   APP_PAGE_REFRESH_EVENT,
   PULL_RELOAD_QUERY_KEY,
@@ -51,6 +53,11 @@ export default function App() {
   const [pageRefreshKey, setPageRefreshKey] = useState(0);
   const isNarrow = useIsNarrowScreen();
   const scrollLockYRef = useRef(0);
+  const sidebarSwipe = useMobileSidebarSwipe({
+    enabled: isNarrow,
+    isOpen: isMobileMenuOpen,
+    setIsOpen: setIsMobileMenuOpen,
+  });
 
   const isSuperAdmin = session ? isSuperAdminSession(session.loginId) : false;
 
@@ -231,6 +238,7 @@ export default function App() {
           載入中…
         </div>
         <DeployUpdateBanner />
+        <RemoteSyncVersionConflictModal />
       </>
     );
   }
@@ -245,6 +253,7 @@ export default function App() {
           }}
         />
         <DeployUpdateBanner />
+        <RemoteSyncVersionConflictModal />
       </>
     );
   }
@@ -259,6 +268,7 @@ export default function App() {
         userRole={userRole}
         isSuperAdmin={isSuperAdmin}
         onLogout={handleLogout}
+        overlaySwipe={isNarrow ? sidebarSwipe : undefined}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar
@@ -267,16 +277,19 @@ export default function App() {
           loginId={session.loginId}
           userRole={userRole}
           onLogout={handleLogout}
+          sidebarSwipe={isNarrow ? sidebarSwipe : undefined}
         />
         <PullToRefresh
           enabled={isNarrow}
           onRefresh={handlePullRefresh}
+          sidebarSwipe={isNarrow ? sidebarSwipe : undefined}
           className="uio-touch-host min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pt-4 md:px-6 md:pb-6 md:pt-6 lg:px-8 lg:pb-8 lg:pt-8"
         >
           <div key={`${currentView}-${pageRefreshKey}`}>{renderView()}</div>
         </PullToRefresh>
       </div>
       <DeployUpdateBanner />
+      <RemoteSyncVersionConflictModal />
     </div>
   );
 }

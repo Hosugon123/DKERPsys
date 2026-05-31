@@ -3,7 +3,7 @@
  */
 import {
   DONGSHAN_EXPORT_STORAGE_KEYS,
-  buildDongshanDataBundle,
+  buildDongshanDataBundleForPush,
   importDongshanDataBundle,
   parseBundleJson,
   serializeDongshanDataBundle,
@@ -12,18 +12,59 @@ import {
 import { getApiBaseUrl, getApiSyncToken, getAsyncStorageDelayMs, getStorageMode } from './storageMode';
 
 export const REMOTE_SYNC_STATUS_EVENT = 'dongshanRemoteSyncStatus';
+export const REMOTE_SYNC_VERSION_CONFLICT_EVENT = 'dongshanRemoteSyncVersionConflict';
 
-export type RemoteSyncStatus = 'idle' | 'ok' | 'offline' | 'auth_error' | 'error';
+export type RemoteSyncStatus =
+  | 'idle'
+  | 'ok'
+  | 'offline'
+  | 'auth_error'
+  | 'error'
+  | 'version_conflict';
+
+export class RemoteVersionConflictError extends Error {
+  readonly code = 'VERSION_CONFLICT' as const;
+
+  constructor(message = '雲端已有更新的資料') {
+    super(message);
+    this.name = 'RemoteVersionConflictError';
+  }
+}
 
 let lastStatus: RemoteSyncStatus = 'idle';
+/** 本機最後一次成功套用之雲端 bundle.updatedAt（用於 PUT 防撞） */
+let lastRemoteUpdatedAt = 0;
+/** 409 衝突後鎖定雲端推送，避免過期覆寫；須重新整理取得最新資料 */
+let remoteSyncLocked = false;
 
 export function getRemoteSyncStatus(): RemoteSyncStatus {
   return lastStatus;
 }
 
+export function isRemoteSyncLocked(): boolean {
+  return remoteSyncLocked;
+}
+
+function noteRemoteBundleUpdatedAt(bundle: DongshanDataBundleV1 | null | undefined): void {
+  const ts = bundle?.updatedAt;
+  if (typeof ts === 'number' && Number.isFinite(ts) && ts >= 0) {
+    lastRemoteUpdatedAt = ts;
+  }
+}
+
 function dispatchStatus(s: RemoteSyncStatus): void {
   lastStatus = s;
   window.dispatchEvent(new CustomEvent(REMOTE_SYNC_STATUS_EVENT, { detail: s }));
+}
+
+function handleVersionConflict(): void {
+  remoteSyncLocked = true;
+  dispatchStatus('version_conflict');
+  window.dispatchEvent(new CustomEvent(REMOTE_SYNC_VERSION_CONFLICT_EVENT));
+}
+
+function isVersionConflictError(e: unknown): boolean {
+  return e instanceof RemoteVersionConflictError;
 }
 
 function buildApiUrl(path: string): string {
@@ -46,6 +87,15 @@ function isNetworkishError(e: unknown): boolean {
 function statusFromResponse(res: Response): RemoteSyncStatus {
   if (res.status === 401 || res.status === 403) return 'auth_error';
   return 'error';
+}
+
+function prepareBundleForPush(bundleText?: string): DongshanDataBundleV1 {
+  if (bundleText) {
+    const bundle = parseBundleJson(bundleText) as DongshanDataBundleV1;
+    bundle.updatedAt = Date.now();
+    return bundle;
+  }
+  return buildDongshanDataBundleForPush();
 }
 
 /** 雲端回傳的 bundle 是否視為「尚無有效資料」（可改以本地一次性上傳）。 */
@@ -95,6 +145,7 @@ export async function fetchRemoteBundle(): Promise<DongshanDataBundleV1> {
   if (!body?.ok || !body.bundle) {
     throw new Error('遠端同步回應格式錯誤。');
   }
+  noteRemoteBundleUpdatedAt(body.bundle);
   return body.bundle;
 }
 
@@ -103,22 +154,35 @@ export async function pushRemoteBundle(bundleText?: string): Promise<void> {
   if (!token) {
     throw new Error('遠端同步缺少 VITE_API_SYNC_TOKEN。');
   }
-  const raw = bundleText ?? serializeDongshanDataBundle();
-  const bundle = parseBundleJson(raw) as DongshanDataBundleV1;
+
+  const bundle = prepareBundleForPush(bundleText);
   const res = await fetch(buildApiUrl('/sync-bundle'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ bundle }),
+    body: JSON.stringify({
+      bundle,
+      /** 本機最後已知雲端版本；後端與雲端 updatedAt 比對，偵測多裝置過期覆寫 */
+      syncedFromUpdatedAt: lastRemoteUpdatedAt,
+    }),
   });
+
+  if (res.status === 409) {
+    handleVersionConflict();
+    throw new RemoteVersionConflictError();
+  }
+
   if (!res.ok) {
     throw Object.assign(new Error(`PUT ${res.status}`), { syncStatus: statusFromResponse(res) });
   }
+
+  noteRemoteBundleUpdatedAt(bundle);
 }
 
 function applySyncFailureFromUnknown(e: unknown): void {
+  if (isVersionConflictError(e)) return;
   if (e && typeof e === 'object' && 'syncStatus' in e) {
     const s = (e as { syncStatus?: RemoteSyncStatus }).syncStatus;
     if (s === 'auth_error' || s === 'error') {
@@ -139,6 +203,7 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
     return;
   }
 
+  remoteSyncLocked = false;
   dispatchStatus('idle');
 
   try {
@@ -150,6 +215,7 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
         dispatchStatus('error');
         return;
       }
+      noteRemoteBundleUpdatedAt(bundle);
     } else if (localExportStorageHasData()) {
       await pushRemoteBundle();
     }
@@ -164,7 +230,7 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
  * ensureAuthBootstrap 等啟動步驟若改變了 localStorage，於 remote 模式下補一次 PUT。
  */
 export async function pushRemoteIfLocalBundleChangedSince(snapshot: string): Promise<void> {
-  if (getStorageMode() !== 'remote') return;
+  if (getStorageMode() !== 'remote' || remoteSyncLocked) return;
   const now = serializeDongshanDataBundle();
   if (now === snapshot) return;
   try {
@@ -179,7 +245,7 @@ export async function pushRemoteIfLocalBundleChangedSince(snapshot: string): Pro
  * 略過 apiService、已直接寫入 *Storage 時，補送目前整包至雲端。
  */
 export async function syncRemoteAfterDirectLocalMutation(): Promise<void> {
-  if (getStorageMode() !== 'remote') return;
+  if (getStorageMode() !== 'remote' || remoteSyncLocked) return;
   try {
     await pushRemoteBundle();
     dispatchStatus('ok');
@@ -207,10 +273,18 @@ export async function withRemoteStorageWrite<T>(fn: () => T | Promise<T>): Promi
     return out;
   }
 
+  if (remoteSyncLocked) {
+    handleVersionConflict();
+    return out;
+  }
+
   try {
     await pushRemoteBundle(after);
     dispatchStatus('ok');
   } catch (e) {
+    if (isVersionConflictError(e)) {
+      return out;
+    }
     applySyncFailureFromUnknown(e);
   }
 

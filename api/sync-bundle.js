@@ -48,6 +48,7 @@ function emptyBundle() {
     bundleVersion: 1,
     app: 'dongshan-ya-to',
     exportedAt: new Date().toISOString(),
+    updatedAt: 0,
     format: 'dongshan-localStorage-snapshot-v1',
     keys: {},
   };
@@ -62,6 +63,14 @@ function internalError(res, e) {
   return res.status(500).json({ ok: false, error: 'sync bundle failed', message });
 }
 
+function versionConflict(res) {
+  return res.status(409).json({
+    ok: false,
+    error: 'VERSION_CONFLICT',
+    message: '雲端已有更新的資料',
+  });
+}
+
 function parseJsonBodyMaybe(body) {
   if (body == null) return null;
   if (typeof body === 'string') {
@@ -73,6 +82,21 @@ function parseJsonBodyMaybe(body) {
   }
   if (typeof body === 'object' && !Array.isArray(body)) return body;
   return null;
+}
+
+function readUpdatedAt(bundle) {
+  const ts = bundle?.updatedAt;
+  return typeof ts === 'number' && Number.isFinite(ts) ? ts : 0;
+}
+
+function isCloudBundleEmpty(bundle) {
+  if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) return true;
+  const keys = bundle.keys;
+  if (!keys || typeof keys !== 'object' || Array.isArray(keys)) return true;
+  for (const value of Object.values(keys)) {
+    if (value != null && String(value).length > 0) return false;
+  }
+  return true;
 }
 
 export default async function handler(req, res) {
@@ -102,7 +126,31 @@ export default async function handler(req, res) {
         return badRequest(res, 'invalid bundle');
       }
 
-      await redis.set(KV_KEY, JSON.stringify(bundle));
+      const incomingUpdatedAt = readUpdatedAt(bundle);
+      const syncedFromUpdatedAt =
+        typeof body.syncedFromUpdatedAt === 'number' && Number.isFinite(body.syncedFromUpdatedAt)
+          ? body.syncedFromUpdatedAt
+          : incomingUpdatedAt;
+
+      const rawCloud = await redis.get(KV_KEY);
+      const cloudBundle = parseJsonBodyMaybe(rawCloud);
+      const cloudUpdatedAt =
+        cloudBundle && typeof cloudBundle === 'object' && !isCloudBundleEmpty(cloudBundle)
+          ? readUpdatedAt(cloudBundle)
+          : 0;
+
+      if (cloudUpdatedAt > 0) {
+        if (syncedFromUpdatedAt < cloudUpdatedAt || incomingUpdatedAt < cloudUpdatedAt) {
+          return versionConflict(res);
+        }
+      }
+
+      const storedBundle = {
+        ...bundle,
+        updatedAt: incomingUpdatedAt > 0 ? incomingUpdatedAt : Date.now(),
+      };
+
+      await redis.set(KV_KEY, JSON.stringify(storedBundle));
       return res.status(200).json({ ok: true });
     }
 

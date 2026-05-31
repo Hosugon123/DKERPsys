@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { Loader2, ArrowDown } from 'lucide-react';
 import { cn } from '../lib/utils';
+import type { MobileSidebarSwipeHandlers } from '../hooks/useMobileSidebarSwipe';
 
 const PULL_THRESHOLD_PX = 68;
 const PULL_MAX_PX = 112;
@@ -18,6 +19,8 @@ type PullToRefreshProps = {
   onRefresh: () => Promise<void>;
   /** 僅在手機等窄螢幕啟用 */
   enabled?: boolean;
+  /** 手機側欄滑動手勢（與下拉重整共用觸控，自動互斥） */
+  sidebarSwipe?: MobileSidebarSwipeHandlers;
   className?: string;
 };
 
@@ -25,6 +28,7 @@ export default function PullToRefresh({
   children,
   onRefresh,
   enabled = true,
+  sidebarSwipe,
   className,
 }: PullToRefreshProps) {
   const scrollRef = useRef<HTMLElement | null>(null);
@@ -73,6 +77,7 @@ export default function PullToRefresh({
   }, [resetPull]);
 
   const onTouchStart = (e: ReactTouchEvent<HTMLElement>) => {
+    sidebarSwipe?.onTouchStart(e);
     if (!enabled || refreshing) return;
     if (!canPull()) return;
     if (isNestedScrollTarget(e.target)) return;
@@ -81,6 +86,11 @@ export default function PullToRefresh({
   };
 
   const onTouchMove = (e: ReactTouchEvent<HTMLElement>) => {
+    sidebarSwipe?.onTouchMove(e);
+    if (sidebarSwipe?.isHorizontalSwipeActive()) {
+      resetPull();
+      return;
+    }
     if (!enabled || !pullingRef.current || refreshing) return;
     if (isNestedScrollTarget(e.target)) {
       resetPull();
@@ -104,7 +114,12 @@ export default function PullToRefresh({
     setPullY(next);
   };
 
-  const onTouchEnd = () => {
+  const onTouchEnd = (e: ReactTouchEvent<HTMLElement>) => {
+    const consumedBySidebar = sidebarSwipe?.onTouchEnd(e) ?? false;
+    if (consumedBySidebar) {
+      resetPull();
+      return;
+    }
     if (!enabled || !pullingRef.current || refreshing) return;
     pullingRef.current = false;
     if (pullYRef.current >= PULL_THRESHOLD_PX) {

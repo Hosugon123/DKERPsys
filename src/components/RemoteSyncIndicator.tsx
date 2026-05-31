@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import {
   getRemoteSyncStatus,
   REMOTE_SYNC_STATUS_EVENT,
+  REMOTE_SYNC_VERSION_CONFLICT_EVENT,
   type RemoteSyncStatus,
 } from '../services/remoteSyncHub';
 import { getStorageMode } from '../services/storageMode';
 
 function statusTitle(s: RemoteSyncStatus): string {
   switch (s) {
+    case 'version_conflict':
+      return '同步失敗：雲端已有更新的資料，請重新整理網頁';
     case 'offline':
       return '離線模式：無法連線雲端（變更僅存在本機，恢復連線後請重新整理）';
     case 'auth_error':
@@ -37,16 +40,25 @@ export default function RemoteSyncIndicator({ className = '' }: RemoteSyncIndica
   if (status === 'idle' || status === 'ok') return null;
 
   const title = statusTitle(status);
+  const isConflict = status === 'version_conflict';
 
   return (
     <span
-      className={`relative inline-flex h-2.5 w-2.5 shrink-0 ${className}`}
+      className={`relative inline-flex shrink-0 ${isConflict ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5'} ${className}`}
       title={title}
       aria-label={title}
       role="status"
     >
-      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-600 ring-2 ring-red-900/50" />
+      <span
+        className={`absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-80 ${
+          isConflict ? 'animate-ping [animation-duration:0.85s]' : 'animate-ping'
+        }`}
+      />
+      <span
+        className={`relative inline-flex rounded-full bg-red-600 ring-2 ring-red-900/50 ${
+          isConflict ? 'h-3.5 w-3.5 animate-pulse' : 'h-2.5 w-2.5'
+        }`}
+      />
     </span>
   );
 }

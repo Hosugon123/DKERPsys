@@ -38,6 +38,8 @@ export type DongshanDataBundleV1 = {
   bundleVersion: typeof DONGSHAN_DATA_BUNDLE_VERSION;
   app: typeof DONGSHAN_APP_ID;
   exportedAt: string;
+  /** 毫秒時間戳：雲端 bundle 最後寫入時間（PUT 前由前端更新） */
+  updatedAt?: number;
   /** 固定格式識別，便於 AI／腳本辨識 */
   format: 'dongshan-localStorage-snapshot-v1';
   /** localStorage key → 原始字串（JSON 字串化後之內容）；null 表示該鍵目前無資料 */
@@ -71,7 +73,7 @@ function dispatchPostImportSync() {
 }
 
 /** 產生可下載之 bundle 物件 */
-export function buildDongshanDataBundle(): DongshanDataBundleV1 {
+export function buildDongshanDataBundle(options?: { updatedAt?: number }): DongshanDataBundleV1 {
   const keys: Partial<Record<DongshanStorageKey, string | null>> = {};
   for (const k of DONGSHAN_EXPORT_STORAGE_KEYS) {
     try {
@@ -80,13 +82,22 @@ export function buildDongshanDataBundle(): DongshanDataBundleV1 {
       keys[k] = null;
     }
   }
-  return {
+  const bundle: DongshanDataBundleV1 = {
     bundleVersion: DONGSHAN_DATA_BUNDLE_VERSION,
     app: DONGSHAN_APP_ID,
     exportedAt: new Date().toISOString(),
     format: 'dongshan-localStorage-snapshot-v1',
     keys,
   };
+  if (options?.updatedAt != null) {
+    bundle.updatedAt = options.updatedAt;
+  }
+  return bundle;
+}
+
+/** 準備推送雲端：寫入 updatedAt 為目前毫秒時間戳 */
+export function buildDongshanDataBundleForPush(): DongshanDataBundleV1 {
+  return buildDongshanDataBundle({ updatedAt: Date.now() });
 }
 
 export function serializeDongshanDataBundle(): string {
