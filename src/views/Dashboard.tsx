@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import {
   TrendingUp,
   FileText,
@@ -598,7 +607,42 @@ function DashboardInlineSummaryRangePicker({
   wideStretch?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const current = SUMMARY_RANGE_OPTIONS.find((option) => option.key === value);
+
+  const updateMenuRect = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setMenuRect({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuRect(null);
+      return;
+    }
+    updateMenuRect();
+    window.addEventListener('resize', updateMenuRect);
+    window.addEventListener('scroll', updateMenuRect, true);
+    return () => {
+      window.removeEventListener('resize', updateMenuRect);
+      window.removeEventListener('scroll', updateMenuRect, true);
+    };
+  }, [open, updateMenuRect]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
 
   if (!isNarrow) {
     return (
@@ -615,14 +659,48 @@ function DashboardInlineSummaryRangePicker({
     );
   }
 
+  const menu =
+    open && menuRect
+      ? createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            aria-label={ariaLabel}
+            style={{ top: menuRect.top, left: menuRect.left, width: menuRect.width }}
+            className={cn(
+              'fixed z-[200] max-h-[min(16rem,50vh)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30',
+              narrowMenuClassName,
+            )}
+          >
+            {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="option"
+                aria-selected={value === key}
+                className={cn(
+                  'block w-full px-3 py-2 text-left text-xs transition-colors',
+                  value === key
+                    ? 'bg-amber-600/20 text-amber-300'
+                    : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100',
+                )}
+                onClick={() => {
+                  onChange(key);
+                  setOpen(false);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
-    <div
-      className={cn('relative', narrowWrapperClassName)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
-      }}
-    >
+    <div className={cn('relative', narrowWrapperClassName)}>
       <button
+        ref={triggerRef}
         type="button"
         className={narrowTriggerClassName ?? SUMMARY_RANGE_INLINE_BUTTON_CLASS}
         aria-label={ariaLabel}
@@ -637,35 +715,7 @@ function DashboardInlineSummaryRangePicker({
           aria-hidden
         />
       </button>
-      {open && (
-        <div
-          role="listbox"
-          aria-label={ariaLabel}
-          className={cn(
-            'absolute top-full z-30 mt-1 max-h-[min(16rem,50vh)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30',
-            narrowMenuClassName ?? 'left-0 right-0 w-full min-w-0',
-          )}
-        >
-          {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              role="option"
-              aria-selected={value === key}
-              className={cn(
-                'block w-full px-3 py-2 text-left text-xs transition-colors',
-                value === key ? 'bg-amber-600/20 text-amber-300' : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100',
-              )}
-              onClick={() => {
-                onChange(key);
-                setOpen(false);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+      {menu}
     </div>
   );
 }
