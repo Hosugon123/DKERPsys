@@ -16,7 +16,10 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { UserRole } from './Orders';
 import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
+import { clearWorkDraft } from '../lib/workDraftStorage';
 import { orders as ordersApi } from '../services/apiService';
+import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import {
   displayOrderCreatedByLabel,
   effectiveOrderDateYmd,
@@ -95,8 +98,18 @@ const PROC_DOCK_SELECT_CLASS =
 const PROC_WEEKDAY_SELECT_CLASS =
   `${PROC_DOCK_SELECT_CLASS} min-w-[5rem] max-w-[9.5rem] px-2`;
 
+type ProcurementWorkDraft = {
+  cart: Record<string, number>;
+  qtyInputDraft: Record<string, string>;
+  stallBasisOrderId: string;
+  newOrderDateYmd: string;
+  referenceWeekdayIdx: number;
+  referenceMode: ProcurementReferenceMode;
+};
+
 export default function Procurement({ userRole }: { userRole: UserRole }) {
   const isNarrow = useIsNarrowScreen();
+  const restoredProcurement = useRestoreWorkDraft<ProcurementWorkDraft>('procurement');
   /** 僅超級管理員可編輯品項、批價、零售；加盟主可編輯本店零售參考價。 */
   const isSuperAdmin = userRole === 'admin';
   const isFranchisee = userRole === 'franchisee';
@@ -105,7 +118,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const [view, setView] = useState<'order' | 'catalog' | 'retail'>('order');
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
   const catalogItems = useSupplyCatalogItems(userRole);
-  const [cart, setCart] = useState<Record<string, number>>({});
+  const [cart, setCart] = useState<Record<string, number>>(() => restoredProcurement?.cart ?? {});
   const [activeCategory, setActiveCategory] = useState<'all' | ItemCategory>('all');
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [stallTick, setStallTick] = useState(0);
@@ -118,10 +131,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   /** 第一次點刪除後記錄 id，需再點同列刪除才執行；幾秒後自動取消。 */
   const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
   /** 手動輸入份數時的草稿（key 存在表示該欄以輸入字串為準） */
-  const [qtyInputDraft, setQtyInputDraft] = useState<Record<string, string>>({});
+  const [qtyInputDraft, setQtyInputDraft] = useState<Record<string, string>>(
+    () => restoredProcurement?.qtyInputDraft ?? {},
+  );
   /** 欲扣除之帳上剩餘所依據的「已盤點完成」叫貨單（非僅依曆法日） */
-  const [stallBasisOrderId, setStallBasisOrderId] = useState(() =>
-    getPreferredProcurementBasisOrderId()
+  const [stallBasisOrderId, setStallBasisOrderId] = useState(
+    () => restoredProcurement?.stallBasisOrderId ?? getPreferredProcurementBasisOrderId(),
   );
   /** 盤點日當天售出一覽：伸縮（同歷史訂單邏輯，預設收合） */
   const [stallDaySalesOpen, setStallDaySalesOpen] = useState(false);
@@ -130,13 +145,18 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   /** 送出訂單前須在彈層內再按一次「確定送出」 */
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   /** 訂單歸屬日（可預先下單）；下單時間為送出當下之 createdAt */
-  const [newOrderDateYmd, setNewOrderDateYmd] = useState(() => defaultProcurementOrderDateYmd());
+  const [newOrderDateYmd, setNewOrderDateYmd] = useState(
+    () => restoredProcurement?.newOrderDateYmd ?? defaultProcurementOrderDateYmd(),
+  );
   /** 預計叫貨落在星期幾；售出參考依 referenceMode 對照歷史同星期幾 */
-  const [referenceWeekdayIdx, setReferenceWeekdayIdx] = useState(() =>
-    defaultProcurementReferenceWeekdayIdx()
+  const [referenceWeekdayIdx, setReferenceWeekdayIdx] = useState(
+    () => restoredProcurement?.referenceWeekdayIdx ?? defaultProcurementReferenceWeekdayIdx(),
   );
   /** 售出參考模式：最高／平均／上週／最低（預設上週） */
-  const [referenceMode, setReferenceMode] = useState<ProcurementReferenceMode>('lastWeek');
+  const [referenceMode, setReferenceMode] = useState<ProcurementReferenceMode>(
+    () => restoredProcurement?.referenceMode ?? 'lastWeek',
+  );
+  const [checkoutSyncNotice, setCheckoutSyncNotice] = useState<string | null>(null);
 
   const procurementCartDirty = useMemo(
     () =>
@@ -145,6 +165,19 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     [cart, qtyInputDraft],
   );
   useUnsavedWorkBlock('procurement-cart', procurementCartDirty, '批貨下單');
+
+  usePersistWorkDraft(
+    'procurement',
+    {
+      cart,
+      qtyInputDraft,
+      stallBasisOrderId,
+      newOrderDateYmd,
+      referenceWeekdayIdx,
+      referenceMode,
+    },
+    procurementCartDirty,
+  );
 
   const syncFavorites = useCallback(() => {
     setFavorites(listProcurementFavorites());
@@ -497,6 +530,14 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         orderDateYmd: newOrderDateYmd,
         procurementDeductionBasisOrderId: stallBasisOrderId,
       });
+      if (getRemoteSyncStatus() === 'version_conflict') {
+        setCheckoutSyncNotice(
+          '訂單已先存於本機，但與雲端版本衝突。請依畫面提示重新整理，系統會自動還原您剛才的資料。',
+        );
+        setTimeout(() => setCheckoutSyncNotice(null), 10000);
+        return;
+      }
+      clearWorkDraft('procurement');
       setOrderSuccess(true);
       setCart({});
       setQtyInputDraft({});
@@ -753,6 +794,12 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
           </p>
         )}
       </div>
+
+      {checkoutSyncNotice && (
+        <div className="bg-amber-600/15 border border-amber-500/50 text-amber-100 px-4 py-3 rounded-xl text-sm sm:text-base leading-relaxed">
+          {checkoutSyncNotice}
+        </div>
+      )}
 
       {orderSuccess && (
         <div className="bg-emerald-600/20 border border-emerald-500/50 text-emerald-400 px-4 py-3 rounded-xl flex items-center gap-3 text-sm sm:text-base">

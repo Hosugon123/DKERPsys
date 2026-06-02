@@ -9,6 +9,10 @@ import {
   serializeDongshanDataBundle,
   type DongshanDataBundleV1,
 } from '../lib/appDataBundle';
+import {
+  applyConflictRecoveryAfterRemoteImport,
+  stashLocalBundleForConflictRecovery,
+} from '../lib/conflictRecoveryStorage';
 import { getApiBaseUrl, getApiSyncToken, getAsyncStorageDelayMs, getStorageMode } from './storageMode';
 
 export const REMOTE_SYNC_STATUS_EVENT = 'dongshanRemoteSyncStatus';
@@ -58,6 +62,7 @@ function dispatchStatus(s: RemoteSyncStatus): void {
 }
 
 function handleVersionConflict(): void {
+  stashLocalBundleForConflictRecovery();
   remoteSyncLocked = true;
   dispatchStatus('version_conflict');
   window.dispatchEvent(new CustomEvent(REMOTE_SYNC_VERSION_CONFLICT_EVENT));
@@ -218,6 +223,15 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
       noteRemoteBundleUpdatedAt(bundle);
     } else if (localExportStorageHasData()) {
       await pushRemoteBundle();
+    }
+
+    if (applyConflictRecoveryAfterRemoteImport()) {
+      try {
+        await pushRemoteBundle();
+      } catch (e) {
+        applySyncFailureFromUnknown(e);
+        return;
+      }
     }
 
     dispatchStatus('ok');

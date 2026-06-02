@@ -21,6 +21,8 @@ import {
 } from '../lib/supplyCatalog';
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
+import { clearWorkDraft } from '../lib/workDraftStorage';
 import { num, computeLine, aggregateStallKpis, isStallRemainEntryValid } from '../lib/stallMath';
 import {
   ymd,
@@ -80,18 +82,35 @@ const STALL_QTY_STEP_INPUT =
   'shrink-0 h-9 w-10 sm:w-12 box-border rounded border border-zinc-700 bg-zinc-900/80 px-1 text-center text-sm font-mono tabular-nums leading-normal';
 const STALL_QTY_ROW = 'inline-flex items-center justify-center gap-0.5 flex-nowrap';
 
+type StallInventoryWorkDraft = {
+  dateStr: string;
+  viewOrderId: string;
+  snap: DaySnapshot;
+};
+
 export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
+  const restoredStall = useRestoreWorkDraft<StallInventoryWorkDraft>('stall-inventory');
   const [nowIso, setNowIso] = useState(() => new Date().toISOString());
   const dateStr = useMemo(() => ymd(new Date(nowIso)), [nowIso]);
-  const [snap, setSnap] = useState<DaySnapshot>(() => loadDay(ymd(new Date())));
+  const [snap, setSnap] = useState<DaySnapshot>(() => {
+    if (restoredStall?.snap && restoredStall.dateStr === ymd(new Date())) {
+      return restoredStall.snap;
+    }
+    return loadDay(ymd(new Date()));
+  });
   const [saveFlash, setSaveFlash] = useState(false);
   const [stallListTick, setStallListTick] = useState(0);
   const [recomputeMsg, setRecomputeMsg] = useState<string | null>(null);
   const [stallCountConfirmOpen, setStallCountConfirmOpen] = useState(false);
   /** 本場盤點鎖定之單一叫貨單：植入帶出、盤點完成押記皆針對此單。 */
-  const [viewOrderId, setViewOrderId] = useState<string>('');
+  const [viewOrderId, setViewOrderId] = useState(() =>
+    restoredStall?.dateStr === ymd(new Date()) ? restoredStall.viewOrderId : '',
+  );
+  const skipNextDayLoadRef = useRef(
+    Boolean(restoredStall && restoredStall.dateStr === ymd(new Date())),
+  );
   /** 訂單摘要＋帶出試算表預設收合，避免清單過長 */
   const [stallOrderDetailOpen, setStallOrderDetailOpen] = useState(false);
   const stallBaselineRef = useRef('');
@@ -103,6 +122,11 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   }, []);
 
   useEffect(() => {
+    if (skipNextDayLoadRef.current) {
+      skipNextDayLoadRef.current = false;
+      stallBaselineRef.current = stallDaySnapshotFingerprint(loadDay(dateStr));
+      return;
+    }
     const day = loadDay(dateStr);
     stallBaselineRef.current = stallDaySnapshotFingerprint(day);
     setSnap(day);
@@ -113,6 +137,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     [snap],
   );
   useUnsavedWorkBlock('stall-inventory', stallDirty, '攤上盤點');
+
+  usePersistWorkDraft(
+    'stall-inventory',
+    { dateStr, viewOrderId, snap },
+    stallDirty,
+  );
 
   useEffect(() => {
     if (!stallCountConfirmOpen) return;
@@ -327,6 +357,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       });
       setStallListTick((n) => n + 1);
       stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
+      clearWorkDraft('stall-inventory');
       setStallCountConfirmOpen(false);
       setSaveFlash(true);
       setTimeout(() => setSaveFlash(false), 2500);

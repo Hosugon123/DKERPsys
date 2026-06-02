@@ -41,6 +41,9 @@ export default function RemoteSyncVersionConflictModal() {
             <p className="mt-3 text-sm leading-relaxed text-zinc-200 sm:text-base">
               其他裝置（例如攤位盤點）已在不久前更新了最新數據。為了防止資料被覆蓋，本機已被鎖定。請立刻重新整理網頁，取得最新資料後再行操作。
             </p>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-400 sm:text-sm">
+              您剛才在本機填寫或送出的內容已自動備份，重新整理後會盡力還原；若畫面上仍有未送出的欄位，也會一併恢復。
+            </p>
           </div>
         </div>
         <div className="mt-6 flex justify-end">

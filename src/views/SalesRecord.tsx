@@ -41,6 +41,8 @@ import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
+import { clearWorkDraft } from '../lib/workDraftStorage';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
@@ -117,7 +119,14 @@ function resolveRecordSnapshot(order: OrderHistoryEntry) {
   return null;
 }
 
+type SalesRecordStallEditDraft = {
+  orderId: string;
+  draft: SalesRecordDaySnapshot;
+  orderDateDraftYmd: string;
+};
+
 export default function SalesRecord({ userRole }: { userRole: UserRole }) {
+  const restoredStallEdit = useRestoreWorkDraft<SalesRecordStallEditDraft>('sales-record-stall-edit');
   const isSuperAdmin = userRole === 'admin';
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
@@ -157,6 +166,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   }, [refreshOrders]);
 
   const exitStallEdit = useCallback(() => {
+    clearWorkDraft('sales-record-stall-edit');
     setStallEditId(null);
     setStallEditDraft(null);
     setStallEditError(null);
@@ -165,6 +175,14 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     setOrderDateError(null);
     setOrderDateSaving(false);
   }, []);
+
+  useEffect(() => {
+    if (!restoredStallEdit) return;
+    setStallEditId(restoredStallEdit.orderId);
+    setExpandedId(restoredStallEdit.orderId);
+    setStallEditDraft(restoredStallEdit.draft);
+    setOrderDateDraftYmd(restoredStallEdit.orderDateDraftYmd);
+  }, [restoredStallEdit]);
 
   useEffect(() => {
     if (stallEditId && expandedId !== stallEditId) {
@@ -249,6 +267,16 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   const stallIds = useMemo(() => stallDisplayItems.map((i) => i.id), [stallDisplayItems]);
 
   useUnsavedWorkBlock('sales-record-stall-edit', stallEditId !== null, '銷售紀錄・調整盤點');
+
+  usePersistWorkDraft(
+    'sales-record-stall-edit',
+    {
+      orderId: stallEditId!,
+      draft: stallEditDraft!,
+      orderDateDraftYmd,
+    },
+    stallEditId !== null && stallEditDraft !== null,
+  );
 
   const startStallEdit = (order: OrderHistoryEntry) => {
     const snap = resolveRecordSnapshot(order);

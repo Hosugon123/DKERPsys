@@ -11,6 +11,8 @@ import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
+import { clearWorkDraft } from '../lib/workDraftStorage';
 import { orders as ordersApi } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
@@ -483,7 +485,15 @@ function parsePickQty(s: string) {
   return Math.max(0, Math.min(PICK_MAX_Q, Math.floor(parseInt(s.replace(/[^\d]/g, ''), 10) || 0)));
 }
 
+type OrdersLineEditDraft = {
+  mode: 'picking' | 'priceAdjust';
+  orderId: string;
+  lines: OrderHistoryLine[];
+  original?: OrderHistoryLine[];
+};
+
 export default function Orders({ userRole }: { userRole: UserRole }) {
+  const restoredLineEdit = useRestoreWorkDraft<OrdersLineEditDraft>('orders-line-edit');
   const isHeadquarters = userRole === 'admin';
   /** 訂單明細表「叫貨金額小計」僅加盟主與管理員可見，員工不顯示 */
   const showOrderProcurementSubtotalCol = userRole === 'admin' || userRole === 'franchisee';
@@ -524,6 +534,30 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     pickingOrderId !== null || priceAdjustOrderId !== null,
     '訂單・調整貨量',
   );
+
+  useEffect(() => {
+    if (!restoredLineEdit) return;
+    if (restoredLineEdit.mode === 'picking') {
+      setPickingOrderId(restoredLineEdit.orderId);
+      setPickingLines(restoredLineEdit.lines);
+      setPickingOriginal(restoredLineEdit.original ?? restoredLineEdit.lines.map((l) => ({ ...l })));
+    } else {
+      setPriceAdjustOrderId(restoredLineEdit.orderId);
+      setPriceAdjustLines(restoredLineEdit.lines);
+    }
+  }, [restoredLineEdit]);
+
+  usePersistWorkDraft(
+    'orders-line-edit',
+    {
+      mode: pickingOrderId ? ('picking' as const) : ('priceAdjust' as const),
+      orderId: (pickingOrderId ?? priceAdjustOrderId)!,
+      lines: pickingOrderId ? pickingLines : priceAdjustLines,
+      original: pickingOrderId ? pickingOriginal : undefined,
+    },
+    pickingOrderId !== null || priceAdjustOrderId !== null,
+  );
+
   const syncOrders = useCallback(() => {
     void (async () => {
       const [mgmt, hist] = await Promise.all([
@@ -785,6 +819,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   };
 
   const exitPickingEdit = useCallback(() => {
+    clearWorkDraft('orders-line-edit');
     setPickingOrderId(null);
     setPickingLines([]);
     setPickingOriginal([]);
@@ -792,6 +827,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   }, []);
 
   const exitPriceAdjust = useCallback(() => {
+    clearWorkDraft('orders-line-edit');
     setPriceAdjustOrderId(null);
     setPriceAdjustLines([]);
     setPriceAdjustError(null);
