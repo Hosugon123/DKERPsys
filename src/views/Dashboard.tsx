@@ -32,6 +32,9 @@ import {
 import { UserRole } from './Orders';
 import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
+import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
+import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
 import {
   computeAdminDashboardFinanceForYmdRange,
   computeStallGapSummary,
@@ -806,10 +809,35 @@ function commitRevenueBaselineDraft(scopeId: string, idx: number, rawInput: stri
   setRevenueBaselineTarget(scopeId, idx, n);
 }
 
+type RevenueBaselineWorkDraft = {
+  scopeId: string;
+  editing: boolean;
+  editDrafts: Record<number, string>;
+};
+
 function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
-  const [editing, setEditing] = useState(false);
-  const [editDrafts, setEditDrafts] = useState<Record<number, string>>({});
+  const restoredBaseline = useRestoreWorkDraft<RevenueBaselineWorkDraft>(
+    WORK_DRAFT_IDS.dashboardRevenueBaseline,
+  );
+  const restoredForScope =
+    restoredBaseline?.scopeId === scopeId ? restoredBaseline : undefined;
+  const [editing, setEditing] = useState(() => restoredForScope?.editing ?? false);
+  const [editDrafts, setEditDrafts] = useState<Record<number, string>>(
+    () => restoredForScope?.editDrafts ?? {},
+  );
   const [loadTick, setLoadTick] = useState(0);
+
+  useUnsavedWorkBlock(
+    `${WORK_DRAFT_IDS.dashboardRevenueBaseline}:${scopeId}`,
+    editing,
+    '營業額打底',
+  );
+
+  usePersistWorkDraft(
+    WORK_DRAFT_IDS.dashboardRevenueBaseline,
+    { scopeId, editing, editDrafts },
+    editing,
+  );
 
   useEffect(() => {
     const onUpdate = () => setLoadTick((t) => t + 1);
@@ -839,6 +867,7 @@ function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
     for (const { idx } of REVENUE_BASELINE_WEEKDAYS) {
       commitRevenueBaselineDraft(scopeId, idx, editDrafts[idx] ?? '');
     }
+    clearWorkDraft(WORK_DRAFT_IDS.dashboardRevenueBaseline);
     setEditing(false);
     setLoadTick((t) => t + 1);
   };

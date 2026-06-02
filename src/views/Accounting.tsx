@@ -4,6 +4,10 @@ import { readSession } from '../lib/authSession';
 import { listSystemUsers } from '../lib/systemUsersStorage';
 import { Wallet, CalendarDays, ChevronDown, Pencil, Trash2, X, Search } from 'lucide-react';
 import { useAccountingLedger } from '../hooks/useAccountingLedger';
+import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
+import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
+import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import {
   ACCOUNTING_CATEGORIES,
   FOOD_EXPENSE_CATEGORY,
@@ -125,6 +129,24 @@ function MainIngredientSubcategorySelect({
 const EMPTY_CATEGORY = '' as const;
 const EMPTY_SUB = '';
 
+type AccountingWorkDraft = {
+  dateYmd: string;
+  flowType: AccountingFlowType;
+  category: AccountingCategory | typeof EMPTY_CATEGORY;
+  subCategory: string;
+  note: string;
+  amountRaw: string;
+  editing: null | {
+    entryId: string;
+    editDateYmd: string;
+    editFlowType: AccountingFlowType;
+    editCategory: AccountingCategory | typeof EMPTY_CATEGORY;
+    editSubCategory: string;
+    editNote: string;
+    editAmountRaw: string;
+  };
+};
+
 /**
  * 新增／編輯表單日期：緊湊高度、取消多餘 padding，並壓制 WebKit 原生 date 欄位預設 min-height。
  */
@@ -153,6 +175,7 @@ const rangeDateInputClass =
   'accounting-form-date-input flex h-11 md:h-9 w-full min-w-0 max-w-full items-center border-0 bg-transparent shadow-none px-3 pr-10 py-0 md:py-1.5 text-base md:text-xs leading-normal text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
 
 export default function Accounting({ userRole }: { userRole: UserRole }) {
+  const restoredAccounting = useRestoreWorkDraft<AccountingWorkDraft>(WORK_DRAFT_IDS.accounting);
   const isAdmin = userRole === 'admin';
   const { entries, add, update, remove } = useAccountingLedger();
 
@@ -174,22 +197,77 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
   const [quickPreset, setQuickPreset] = useState<DateQuickPreset | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const [dateYmd, setDateYmd] = useState(todayYmd);
-  const [flowType, setFlowType] = useState<AccountingFlowType>('expense');
-  const [category, setCategory] = useState<AccountingCategory | typeof EMPTY_CATEGORY>(EMPTY_CATEGORY);
-  const [subCategory, setSubCategory] = useState('');
-  const [note, setNote] = useState('');
-  const [amountRaw, setAmountRaw] = useState('');
+  const [dateYmd, setDateYmd] = useState(() => restoredAccounting?.dateYmd ?? todayYmd());
+  const [flowType, setFlowType] = useState<AccountingFlowType>(
+    () => restoredAccounting?.flowType ?? 'expense',
+  );
+  const [category, setCategory] = useState<AccountingCategory | typeof EMPTY_CATEGORY>(
+    () => restoredAccounting?.category ?? EMPTY_CATEGORY,
+  );
+  const [subCategory, setSubCategory] = useState(() => restoredAccounting?.subCategory ?? '');
+  const [note, setNote] = useState(() => restoredAccounting?.note ?? '');
+  const [amountRaw, setAmountRaw] = useState(() => restoredAccounting?.amountRaw ?? '');
   const [formError, setFormError] = useState<string | null>(null);
 
   const [editingEntry, setEditingEntry] = useState<AccountingLedgerEntry | null>(null);
-  const [editDateYmd, setEditDateYmd] = useState('');
-  const [editFlowType, setEditFlowType] = useState<AccountingFlowType>('expense');
-  const [editCategory, setEditCategory] = useState<AccountingCategory | typeof EMPTY_CATEGORY>(EMPTY_CATEGORY);
-  const [editSubCategory, setEditSubCategory] = useState('');
-  const [editNote, setEditNote] = useState('');
-  const [editAmountRaw, setEditAmountRaw] = useState('');
+  const [editDateYmd, setEditDateYmd] = useState(() => restoredAccounting?.editing?.editDateYmd ?? '');
+  const [editFlowType, setEditFlowType] = useState<AccountingFlowType>(
+    () => restoredAccounting?.editing?.editFlowType ?? 'expense',
+  );
+  const [editCategory, setEditCategory] = useState<AccountingCategory | typeof EMPTY_CATEGORY>(
+    () => restoredAccounting?.editing?.editCategory ?? EMPTY_CATEGORY,
+  );
+  const [editSubCategory, setEditSubCategory] = useState(
+    () => restoredAccounting?.editing?.editSubCategory ?? '',
+  );
+  const [editNote, setEditNote] = useState(() => restoredAccounting?.editing?.editNote ?? '');
+  const [editAmountRaw, setEditAmountRaw] = useState(
+    () => restoredAccounting?.editing?.editAmountRaw ?? '',
+  );
   const [editError, setEditError] = useState<string | null>(null);
+
+  const accountingFormDirty = useMemo(
+    () =>
+      category !== EMPTY_CATEGORY ||
+      note.trim() !== '' ||
+      amountRaw.trim() !== '' ||
+      subCategory !== EMPTY_SUB ||
+      dateYmd !== todayYmd(),
+    [category, note, amountRaw, subCategory, dateYmd],
+  );
+  const accountingDirty = accountingFormDirty || editingEntry !== null;
+
+  useUnsavedWorkBlock(WORK_DRAFT_IDS.accounting, accountingDirty, '收入與支出');
+
+  usePersistWorkDraft(
+    WORK_DRAFT_IDS.accounting,
+    {
+      dateYmd,
+      flowType,
+      category,
+      subCategory,
+      note,
+      amountRaw,
+      editing: editingEntry
+        ? {
+            entryId: editingEntry.id,
+            editDateYmd,
+            editFlowType,
+            editCategory,
+            editSubCategory,
+            editNote,
+            editAmountRaw,
+          }
+        : null,
+    },
+    accountingDirty,
+  );
+
+  useEffect(() => {
+    if (!restoredAccounting?.editing) return;
+    const row = entries.find((e) => e.id === restoredAccounting.editing!.entryId);
+    if (row) setEditingEntry(row);
+  }, [entries, restoredAccounting]);
 
   const rangeBounds = useMemo(() => {
     if (!rangeStart || !rangeEnd) return { lo: '', hi: '' };
@@ -337,6 +415,11 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
       note,
       amount: amt,
     });
+    if (getRemoteSyncStatus() === 'version_conflict') {
+      setFormError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
+      return false;
+    }
+    clearWorkDraft(WORK_DRAFT_IDS.accounting);
     return true;
   }, [add, amountRaw, category, dateYmd, flowType, note, subCategory]);
 
@@ -396,6 +479,7 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
   const closeEdit = () => {
     setEditingEntry(null);
     setEditError(null);
+    if (!accountingFormDirty) clearWorkDraft(WORK_DRAFT_IDS.accounting);
   };
 
   useEffect(() => {
@@ -452,6 +536,11 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
       note: editNote,
       amount: amt,
     });
+    if (getRemoteSyncStatus() === 'version_conflict') {
+      setEditError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
+      return;
+    }
+    clearWorkDraft(WORK_DRAFT_IDS.accounting);
     closeEdit();
   };
 

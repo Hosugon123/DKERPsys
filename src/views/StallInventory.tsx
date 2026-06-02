@@ -22,7 +22,8 @@ import {
 import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
-import { clearWorkDraft } from '../lib/workDraftStorage';
+import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
+import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import { num, computeLine, aggregateStallKpis, isStallRemainEntryValid } from '../lib/stallMath';
 import {
   ymd,
@@ -91,7 +92,7 @@ type StallInventoryWorkDraft = {
 export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
-  const restoredStall = useRestoreWorkDraft<StallInventoryWorkDraft>('stall-inventory');
+  const restoredStall = useRestoreWorkDraft<StallInventoryWorkDraft>(WORK_DRAFT_IDS.stallInventory);
   const [nowIso, setNowIso] = useState(() => new Date().toISOString());
   const dateStr = useMemo(() => ymd(new Date(nowIso)), [nowIso]);
   const [snap, setSnap] = useState<DaySnapshot>(() => {
@@ -136,10 +137,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     () => stallDaySnapshotFingerprint(snap) !== stallBaselineRef.current,
     [snap],
   );
-  useUnsavedWorkBlock('stall-inventory', stallDirty, '攤上盤點');
+  useUnsavedWorkBlock(WORK_DRAFT_IDS.stallInventory, stallDirty, '攤上盤點');
 
   usePersistWorkDraft(
-    'stall-inventory',
+    WORK_DRAFT_IDS.stallInventory,
     { dateStr, viewOrderId, snap },
     stallDirty,
   );
@@ -357,7 +358,13 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       });
       setStallListTick((n) => n + 1);
       stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
-      clearWorkDraft('stall-inventory');
+      if (getRemoteSyncStatus() === 'version_conflict') {
+        setStallCountConfirmOpen(false);
+        setRecomputeMsg('盤點已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
+        setTimeout(() => setRecomputeMsg(null), 10000);
+        return;
+      }
+      clearWorkDraft(WORK_DRAFT_IDS.stallInventory);
       setStallCountConfirmOpen(false);
       setSaveFlash(true);
       setTimeout(() => setSaveFlash(false), 2500);

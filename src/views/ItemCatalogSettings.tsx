@@ -1,5 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Search, Tags, Plus, Trash2, Save } from 'lucide-react';
+import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { usePersistWorkDraftEffect, useRestoreWorkDraft } from '../hooks/useWorkDraft';
+import { WORK_DRAFT_IDS, clearWorkDraft, saveWorkDraft } from '../lib/workDraftStorage';
 import {
   CATEGORY_CHIPS,
   getBaseSupplyItem,
@@ -74,7 +77,7 @@ async function commitBaseFromForm(
   else await products.catalog.setSupplyItemOverride(id, patch);
 }
 
-type CatalogRowForm = {
+export type CatalogRowForm = {
   name: string;
   price: string;
   hqCost: string;
@@ -83,6 +86,13 @@ type CatalogRowForm = {
   category: ItemCategory;
   franchiseeSelfSuppliedForPayable: boolean;
   retail: string;
+};
+
+type ItemCatalogDeferredDraft = {
+  dirtyIds: string[];
+  pendingDeleteIds: string[];
+  draftNewKeys: string[];
+  snapshots: Record<string, CatalogRowForm>;
 };
 
 function isDraftCatalogRowId(id: string): boolean {
@@ -207,14 +217,24 @@ function applyRetailForItemOnly(item: SupplyItem, retailStr: string) {
 type Props = { embedded?: boolean; retailOnly?: boolean };
 
 export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
+  const restoredCatalog = useRestoreWorkDraft<ItemCatalogDeferredDraft>(
+    WORK_DRAFT_IDS.itemCatalogDeferred,
+  );
   const [v, setV] = useState(0);
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState<'all' | ItemCategory>('all');
   const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
   const deferSaveCatalog = Boolean(embedded && !retailOnly);
-  const [draftNewKeys, setDraftNewKeys] = useState<string[]>([]);
-  const [dirtyIds, setDirtyIds] = useState<Set<string>>(() => new Set());
-  const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(() => new Set());
+  const [draftNewKeys, setDraftNewKeys] = useState<string[]>(() => restoredCatalog?.draftNewKeys ?? []);
+  const [dirtyIds, setDirtyIds] = useState<Set<string>>(
+    () => new Set(restoredCatalog?.dirtyIds ?? []),
+  );
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(
+    () => new Set(restoredCatalog?.pendingDeleteIds ?? []),
+  );
+  const [restoredSnapshots, setRestoredSnapshots] = useState<Record<string, CatalogRowForm> | null>(
+    () => restoredCatalog?.snapshots ?? null,
+  );
   const [savingCatalog, setSavingCatalog] = useState(false);
   const snapshotGettersRef = useRef<Map<string, () => CatalogRowForm>>(new Map());
 
@@ -276,6 +296,37 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
     deferSaveCatalog &&
     (dirtyIds.size > 0 || pendingDeleteIds.size > 0 || draftNewKeys.length > 0);
 
+  const dirtyIdsKey = useMemo(() => [...dirtyIds].sort().join('\0'), [dirtyIds]);
+  const pendingDeleteIdsKey = useMemo(() => [...pendingDeleteIds].sort().join('\0'), [pendingDeleteIds]);
+
+  useUnsavedWorkBlock(WORK_DRAFT_IDS.itemCatalogDeferred, canSaveCatalog, '品項目錄編輯');
+
+  usePersistWorkDraftEffect(
+    WORK_DRAFT_IDS.itemCatalogDeferred,
+    canSaveCatalog,
+    () => {
+      const snapshots: Record<string, CatalogRowForm> = {};
+      for (const id of dirtyIds) {
+        const fn = snapshotGettersRef.current.get(id);
+        if (fn) snapshots[id] = fn();
+      }
+      saveWorkDraft(WORK_DRAFT_IDS.itemCatalogDeferred, {
+        dirtyIds: [...dirtyIds],
+        pendingDeleteIds: [...pendingDeleteIds],
+        draftNewKeys,
+        snapshots,
+      });
+    },
+    [dirtyIdsKey, pendingDeleteIdsKey, draftNewKeys],
+    400,
+  );
+
+  useEffect(() => {
+    if (!restoredSnapshots) return;
+    const t = window.setTimeout(() => setRestoredSnapshots(null), 0);
+    return () => window.clearTimeout(t);
+  }, [restoredSnapshots]);
+
   const handleSaveCatalog = useCallback(async () => {
     if (!deferSaveCatalog || savingCatalog) return;
     if (dirtyIds.size === 0 && pendingDeleteIds.size === 0 && draftNewKeys.length === 0) return;
@@ -304,6 +355,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
       setDirtyIds(new Set());
       setPendingDeleteIds(new Set());
       setDeleteArmedId(null);
+      clearWorkDraft(WORK_DRAFT_IDS.itemCatalogDeferred);
       snapshotGettersRef.current.clear();
       setV((x) => x + 1);
       const nextSt = await products.catalog.loadUserCatalogState();
@@ -502,6 +554,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
                         hasOverride={false}
                         deleteArmed={deleteArmedId === draftItem.id}
                         deferSave
+                        restoredForm={restoredSnapshots?.[draftItem.id]}
                         snapshotGettersRef={snapshotGettersRef}
                         markRowDirty={markRowDirty}
                         onPatchBase={() => {}}
@@ -520,6 +573,7 @@ export default function ItemCatalogSettings({ embedded, retailOnly }: Props) {
                     hasOverride={isCustomItemId(it.id) || Boolean(overrideOnly[it.id])}
                     deleteArmed={deleteArmedId === it.id}
                     deferSave={deferSaveCatalog}
+                    restoredForm={restoredSnapshots?.[it.id]}
                     snapshotGettersRef={snapshotGettersRef}
                     markRowDirty={markRowDirty}
                     onPatchBase={(f) => void commitBaseFromForm(it.id, f)}
@@ -599,6 +653,7 @@ function ItemRow({
   deferSave = false,
   snapshotGettersRef,
   markRowDirty,
+  restoredForm,
   onPatchBase,
   onUpdateCustom,
   onDeleteClick,
@@ -609,6 +664,7 @@ function ItemRow({
   hasOverride: boolean;
   deleteArmed: boolean;
   deferSave?: boolean;
+  restoredForm?: CatalogRowForm;
   snapshotGettersRef?: MutableRefObject<Map<string, () => CatalogRowForm>>;
   markRowDirty?: (id: string) => void;
   onPatchBase: (f: CatalogRowForm) => void;
@@ -618,27 +674,40 @@ function ItemRow({
 }) {
   const b = getBaseSupplyItem(item.id);
   const draftRow = isDraftCatalogRowId(item.id);
-  const [name, setName] = useState(item.name);
-  const [price, setPrice] = useState(String(item.pricePerPiece));
+  const [name, setName] = useState(restoredForm?.name ?? item.name);
+  const [price, setPrice] = useState(restoredForm?.price ?? String(item.pricePerPiece));
   const [hqCost, setHqCost] = useState(
-    item.hqCostPerPiece != null ? String(item.hqCostPerPiece) : '',
+    restoredForm?.hqCost ?? (item.hqCostPerPiece != null ? String(item.hqCostPerPiece) : ''),
   );
   const [retail, setRetail] = useState(() =>
+    restoredForm?.retail ??
     String(
       (item.retailPerPiece != null
         ? item.retailPerPiece
         : defaultRetailPerPieceFromWholesale(item)
-      ).toString()
-    )
+      ).toString(),
+    ),
   );
-  const [unit, setUnit] = useState(item.pieceUnit);
-  const [tag, setTag] = useState(item.tag ?? '');
-  const [category, setCategory] = useState<ItemCategory>(item.category);
+  const [unit, setUnit] = useState(restoredForm?.unit ?? item.pieceUnit);
+  const [tag, setTag] = useState(restoredForm?.tag ?? item.tag ?? '');
+  const [category, setCategory] = useState<ItemCategory>(restoredForm?.category ?? item.category);
   const [franchiseeSelfSuppliedForPayable, setFranchiseeSelfSuppliedForPayable] = useState(
-    !!item.franchiseeSelfSuppliedForPayable
+    restoredForm?.franchiseeSelfSuppliedForPayable ?? !!item.franchiseeSelfSuppliedForPayable,
   );
 
+  const skipItemPropSyncRef = useRef(!!restoredForm);
+
   useEffect(() => {
+    if (restoredForm) markRowDirty?.(item.id);
+    // 僅在還原草稿時標記一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (skipItemPropSyncRef.current) {
+      skipItemPropSyncRef.current = false;
+      return;
+    }
     setName(item.name);
     setPrice(String(item.pricePerPiece));
     setRetail(

@@ -12,7 +12,8 @@ import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
-import { clearWorkDraft } from '../lib/workDraftStorage';
+import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
+import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import { orders as ordersApi } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
@@ -493,7 +494,7 @@ type OrdersLineEditDraft = {
 };
 
 export default function Orders({ userRole }: { userRole: UserRole }) {
-  const restoredLineEdit = useRestoreWorkDraft<OrdersLineEditDraft>('orders-line-edit');
+  const restoredLineEdit = useRestoreWorkDraft<OrdersLineEditDraft>(WORK_DRAFT_IDS.ordersLineEdit);
   const isHeadquarters = userRole === 'admin';
   /** 訂單明細表「叫貨金額小計」僅加盟主與管理員可見，員工不顯示 */
   const showOrderProcurementSubtotalCol = userRole === 'admin' || userRole === 'franchisee';
@@ -530,7 +531,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [priceAdjustLines, setPriceAdjustLines] = useState<OrderHistoryLine[]>([]);
   const [priceAdjustError, setPriceAdjustError] = useState<string | null>(null);
   useUnsavedWorkBlock(
-    'orders-line-edit',
+    WORK_DRAFT_IDS.ordersLineEdit,
     pickingOrderId !== null || priceAdjustOrderId !== null,
     '訂單・調整貨量',
   );
@@ -548,7 +549,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   }, [restoredLineEdit]);
 
   usePersistWorkDraft(
-    'orders-line-edit',
+    WORK_DRAFT_IDS.ordersLineEdit,
     {
       mode: pickingOrderId ? ('picking' as const) : ('priceAdjust' as const),
       orderId: (pickingOrderId ?? priceAdjustOrderId)!,
@@ -819,7 +820,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   };
 
   const exitPickingEdit = useCallback(() => {
-    clearWorkDraft('orders-line-edit');
+    clearWorkDraft(WORK_DRAFT_IDS.ordersLineEdit);
     setPickingOrderId(null);
     setPickingLines([]);
     setPickingOriginal([]);
@@ -827,7 +828,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   }, []);
 
   const exitPriceAdjust = useCallback(() => {
-    clearWorkDraft('orders-line-edit');
+    clearWorkDraft(WORK_DRAFT_IDS.ordersLineEdit);
     setPriceAdjustOrderId(null);
     setPriceAdjustLines([]);
     setPriceAdjustError(null);
@@ -856,6 +857,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setPickingError(null);
     void (async () => {
       const res = await ordersApi.updateEditableOrderLinesById(orderId, pickingLines);
+      if (getRemoteSyncStatus() === 'version_conflict') {
+        setPickingError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
+        return;
+      }
       if (res.ok === true) {
         exitPickingEdit();
         syncOrders();
@@ -892,6 +897,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setPriceAdjustError(null);
     void (async () => {
       const res = await ordersApi.adminPatchOrderLineUnitPricesById(orderId, priceAdjustLines);
+      if (getRemoteSyncStatus() === 'version_conflict') {
+        setPriceAdjustError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
+        return;
+      }
       if (res.ok === true) {
         exitPriceAdjust();
         syncOrders();

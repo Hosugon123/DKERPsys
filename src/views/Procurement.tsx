@@ -17,7 +17,7 @@ import type { UserRole } from './Orders';
 import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
-import { clearWorkDraft } from '../lib/workDraftStorage';
+import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
 import { orders as ordersApi } from '../services/apiService';
 import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import {
@@ -109,7 +109,7 @@ type ProcurementWorkDraft = {
 
 export default function Procurement({ userRole }: { userRole: UserRole }) {
   const isNarrow = useIsNarrowScreen();
-  const restoredProcurement = useRestoreWorkDraft<ProcurementWorkDraft>('procurement');
+  const restoredProcurement = useRestoreWorkDraft<ProcurementWorkDraft>(WORK_DRAFT_IDS.procurement);
   /** 僅超級管理員可編輯品項、批價、零售；加盟主可編輯本店零售參考價。 */
   const isSuperAdmin = userRole === 'admin';
   const isFranchisee = userRole === 'franchisee';
@@ -164,10 +164,10 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       Object.values(qtyInputDraft).some((s) => String(s).trim() !== ''),
     [cart, qtyInputDraft],
   );
-  useUnsavedWorkBlock('procurement-cart', procurementCartDirty, '批貨下單');
+  useUnsavedWorkBlock(WORK_DRAFT_IDS.procurement, procurementCartDirty, '批貨下單');
 
   usePersistWorkDraft(
-    'procurement',
+    WORK_DRAFT_IDS.procurement,
     {
       cart,
       qtyInputDraft,
@@ -537,7 +537,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         setTimeout(() => setCheckoutSyncNotice(null), 10000);
         return;
       }
-      clearWorkDraft('procurement');
+      clearWorkDraft(WORK_DRAFT_IDS.procurement);
       setOrderSuccess(true);
       setCart({});
       setQtyInputDraft({});

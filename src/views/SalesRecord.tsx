@@ -42,7 +42,8 @@ import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
-import { clearWorkDraft } from '../lib/workDraftStorage';
+import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
+import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
@@ -126,7 +127,9 @@ type SalesRecordStallEditDraft = {
 };
 
 export default function SalesRecord({ userRole }: { userRole: UserRole }) {
-  const restoredStallEdit = useRestoreWorkDraft<SalesRecordStallEditDraft>('sales-record-stall-edit');
+  const restoredStallEdit = useRestoreWorkDraft<SalesRecordStallEditDraft>(
+    WORK_DRAFT_IDS.salesRecordStallEdit,
+  );
   const isSuperAdmin = userRole === 'admin';
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
@@ -166,7 +169,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   }, [refreshOrders]);
 
   const exitStallEdit = useCallback(() => {
-    clearWorkDraft('sales-record-stall-edit');
+    clearWorkDraft(WORK_DRAFT_IDS.salesRecordStallEdit);
     setStallEditId(null);
     setStallEditDraft(null);
     setStallEditError(null);
@@ -266,10 +269,14 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   );
   const stallIds = useMemo(() => stallDisplayItems.map((i) => i.id), [stallDisplayItems]);
 
-  useUnsavedWorkBlock('sales-record-stall-edit', stallEditId !== null, '銷售紀錄・調整盤點');
+  useUnsavedWorkBlock(
+    WORK_DRAFT_IDS.salesRecordStallEdit,
+    stallEditId !== null,
+    '銷售紀錄・調整盤點',
+  );
 
   usePersistWorkDraft(
-    'sales-record-stall-edit',
+    WORK_DRAFT_IDS.salesRecordStallEdit,
     {
       orderId: stallEditId!,
       draft: stallEditDraft!,
@@ -335,6 +342,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     };
     void (async () => {
       const res: UpdateStallSnapshotResult = await ordersApi.updateStallCountSnapshotByOrderId(orderId, next);
+      if (getRemoteSyncStatus() === 'version_conflict') {
+        setStallEditError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
+        return;
+      }
       switch (res.ok) {
         case true:
           exitStallEdit();

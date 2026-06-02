@@ -3,6 +3,17 @@
  */
 const PREFIX = 'dongshan_work_draft_v1:';
 
+/** 各畫面草稿鍵（集中管理，避免拼字錯誤） */
+export const WORK_DRAFT_IDS = {
+  procurement: 'procurement',
+  stallInventory: 'stall-inventory',
+  salesRecordStallEdit: 'sales-record-stall-edit',
+  ordersLineEdit: 'orders-line-edit',
+  accounting: 'accounting',
+  itemCatalogDeferred: 'item-catalog-deferred',
+  dashboardRevenueBaseline: 'dashboard-revenue-baseline',
+} as const;
+
 function draftKey(id: string): string {
   return `${PREFIX}${id}`;
 }
