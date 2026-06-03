@@ -59,7 +59,10 @@ import {
   isFranchiseeSelfSuppliedItem,
   type SupplyRetailView,
 } from '../lib/supplyCatalog';
-import { getStallDisplaySoldAtRetail } from '../lib/orderStallDisplayRevenue';
+import {
+  getStallDisplayActualRevenueIfEntered,
+  getStallDisplaySoldAtRetail,
+} from '../lib/orderStallDisplayRevenue';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
   loadFranchiseManagementOrders,
@@ -1667,10 +1670,12 @@ export default function Dashboard({
     const stallRetailView: SupplyRetailView = franchiseStallSalesBoardOwnerUserId
       ? FRANCHISE_STALL_VIEW
       : HQ_STALL_VIEW;
-    const revenue = stallCompleted.reduce(
-      (s, o) => s + (getStallDisplaySoldAtRetail(o, stallRetailView) ?? 0),
-      0,
-    );
+    const revenue = stallCompleted.reduce((s, o) => {
+      if (franchiseOperatingExpenseModel) {
+        return s + (getStallDisplayActualRevenueIfEntered(o) ?? 0);
+      }
+      return s + (getStallDisplaySoldAtRetail(o, stallRetailView) ?? 0);
+    }, 0);
     let procurementCost = 0;
     let ledgerExpense = 0;
     let expense = 0;
@@ -1904,7 +1909,7 @@ export default function Dashboard({
    * 各加盟店摘要（總部選店浮層）：
    * - 已完成訂單數：依「建單日落於本期間」計
    * - 盤點完成數：依「盤點日落於本期間」計
-   * - 盤點後營收：以盤點日歸屬；總部介面不顯示批貨進貨成本（詳細請進入該加盟主視角）
+   * - 實際營收：盤點登錄之實際收入，以盤點日歸屬；總部介面不顯示批貨進貨成本（詳細請進入該加盟主視角）
    */
   const franchiseStoreBreakdown = useMemo(() => {
     if (!realIsAdmin) return [];
@@ -1957,7 +1962,7 @@ export default function Dashboard({
       if (isCompletedInRange) row.completedOrderCount += 1;
       if (isStallInRange) {
         row.stallCompletedCount += 1;
-        row.revenue += getStallDisplaySoldAtRetail(o, HQ_STALL_VIEW) ?? 0;
+        row.revenue += getStallDisplayActualRevenueIfEntered(o) ?? 0;
       }
       map.set(key, row);
     }
@@ -2476,12 +2481,13 @@ export default function Dashboard({
                     <p className="text-[10px] text-zinc-600 mt-1">零售推算售出</p>
                   </div>
                   <div className="rounded-xl border border-amber-900/35 bg-amber-950/15 p-3">
-                    <p className="text-[11px] text-amber-200/75">盤點後營收</p>
+                    <p className="text-[11px] text-amber-200/75">實際營收</p>
                     <p className="text-lg font-light tabular-nums text-amber-200 mt-1">
                       {focusDayEconomics?.actual !== null && focusDayEconomics?.actual !== undefined
                         ? moneyTW(focusDayEconomics.actual)
                         : '—'}
                     </p>
+                    <p className="text-[10px] text-zinc-600 mt-1">盤點登錄實收</p>
                     {focusDayWeekdayIdx === REVENUE_BASELINE_OFF_WEEKDAY_IDX ? (
                       <p className="text-[10px] text-zinc-600 mt-1">週二公休</p>
                     ) : focusDayRevenueBaseline !== undefined ? (
@@ -2804,7 +2810,7 @@ export default function Dashboard({
                             </span>
                           </div>
                           <div>
-                            <p className="text-[11px] text-zinc-500">盤點後營收</p>
+                            <p className="text-[11px] text-zinc-500">實際營收</p>
                             <p className="text-lg sm:text-xl font-light tabular-nums text-amber-300">
                               {moneyTW(row.revenue)}
                             </p>

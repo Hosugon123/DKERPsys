@@ -637,6 +637,112 @@ export function aggregateOrderLinesForSave(lines: OrderHistoryLine[]) {
   return { lines: kept, itemCount, totalAmount };
 }
 
+/** 各品項實出量（qty>0 合計），供比對調整貨量是否已寫入訂單。 */
+export function orderLineQtyByProductId(lines: OrderHistoryLine[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const l of lines) {
+    const q = roundProcurementQty(Number(l.qty) || 0);
+    if (q <= 0) continue;
+    m.set(l.productId, roundProcurementQty((m.get(l.productId) ?? 0) + q));
+  }
+  return m;
+}
+
+export function orderLineQtyMapsEqual(a: OrderHistoryLine[], b: OrderHistoryLine[]): boolean {
+  const ma = orderLineQtyByProductId(a);
+  const mb = orderLineQtyByProductId(b);
+  if (ma.size !== mb.size) return false;
+  for (const [k, v] of ma) {
+    if (mb.get(k) !== v) return false;
+  }
+  return true;
+}
+
+/** 讀取單號對應品項（兩庫皆查；訂單管理優先），供儲存後驗證用。 */
+export function readOrderLinesByIdFromStores(id: string): OrderHistoryLine[] | null {
+  const mgmt = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  if (mgmt) return mgmt.lines;
+  const hist = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  return hist?.lines ?? null;
+}
+
+type AggregatedOrderLines = ReturnType<typeof aggregateOrderLinesForSave>;
+
+type LinePatchBlockReason = 'canceled' | 'stall_count_locked' | 'not_pending';
+
+function linePatchBlockReason(
+  row: { status: FranchiseOrderStatus; stallCountCompletedAt?: string },
+  mode: 'pending' | 'editable',
+): LinePatchBlockReason | null {
+  if (row.status === '已取消') return 'canceled';
+  if (orderHasStallCountCompleted(row)) return 'stall_count_locked';
+  if (mode === 'pending' && row.status !== '待出貨') return 'not_pending';
+  return null;
+}
+
+/**
+ * 同一單號若同時存在「訂單管理」與「歷史訂單」兩庫，一併寫入，避免只更新一庫、畫面卻讀到舊副本。
+ */
+function patchOrderLinesInEitherStore(
+  id: string,
+  totals: AggregatedOrderLines,
+  mode: 'pending' | 'editable',
+): { ok: true } | { ok: false; reason: 'not_found' | LinePatchBlockReason } {
+  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
+
+  const now = new Date().toISOString();
+  const who = persistableActorDisplayName();
+  const { lines, itemCount, totalAmount } = totals;
+  let wrote = false;
+  const blockers = new Set<LinePatchBlockReason>();
+
+  if (mgmtHit) {
+    const block = linePatchBlockReason(mgmtHit, mode);
+    if (block) blockers.add(block);
+    else {
+      const patched = patchFranchiseManagementOrderById(id, (row) => ({
+        ...row,
+        lines,
+        itemCount,
+        totalAmount,
+        payableAmount: totalAmount,
+        selfSuppliedCostAmount: 0,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      }));
+      if (patched) wrote = true;
+    }
+  }
+
+  if (histHit) {
+    const block = linePatchBlockReason(histHit, mode);
+    if (block) blockers.add(block);
+    else {
+      const payableAmount = totalAmount;
+      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, histHit.actorRole);
+      const patched = patchOrderHistoryById(id, (row) => ({
+        ...row,
+        lines,
+        itemCount,
+        totalAmount,
+        payableAmount,
+        selfSuppliedCostAmount,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      }));
+      if (patched) wrote = true;
+    }
+  }
+
+  if (wrote) return { ok: true };
+  if (blockers.has('stall_count_locked')) return { ok: false, reason: 'stall_count_locked' };
+  if (blockers.has('canceled')) return { ok: false, reason: 'canceled' };
+  if (blockers.has('not_pending')) return { ok: false, reason: 'not_pending' };
+  return { ok: false, reason: 'not_found' };
+}
+
 export type UpdateLinesResult =
   | { ok: true }
   | { ok: false; reason: 'not_found' | 'not_pending' | 'empty' | 'stall_count_locked' };
@@ -645,50 +751,9 @@ export type UpdateLinesResult =
  * 依單號更新待出貨品項（總部或加盟/店員帳內之訂單，會自動尋找儲位）。
  */
 export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryLine[]): UpdateLinesResult {
-  const { lines, itemCount, totalAmount } = aggregateOrderLinesForSave(nextLines);
-  if (lines.length === 0) return { ok: false, reason: 'empty' };
-
-  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
-  if (mgmtHit) {
-    if (mgmtHit.status !== '待出貨') return { ok: false, reason: 'not_pending' };
-    if (orderHasStallCountCompleted(mgmtHit)) return { ok: false, reason: 'stall_count_locked' };
-    const now = new Date().toISOString();
-    const who = persistableActorDisplayName();
-    const patched = patchFranchiseManagementOrderById(id, (row) => ({
-      ...row,
-      lines,
-      itemCount,
-      totalAmount,
-      payableAmount: totalAmount,
-      selfSuppliedCostAmount: 0,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
-  }
-
-  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
-  if (histHit) {
-    if (histHit.status !== '待出貨') return { ok: false, reason: 'not_pending' };
-    if (orderHasStallCountCompleted(histHit)) return { ok: false, reason: 'stall_count_locked' };
-    const now = new Date().toISOString();
-    const payableAmount = totalAmount;
-    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, histHit.actorRole);
-    const who = persistableActorDisplayName();
-    const patched = patchOrderHistoryById(id, (row) => ({
-      ...row,
-      lines,
-      itemCount,
-      totalAmount,
-      payableAmount,
-      selfSuppliedCostAmount,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
-  }
-
-  return { ok: false, reason: 'not_found' };
+  const totals = aggregateOrderLinesForSave(nextLines);
+  if (totals.lines.length === 0) return { ok: false, reason: 'empty' };
+  return patchOrderLinesInEitherStore(id, totals, 'pending');
 }
 
 export type UpdateEditableOrderLinesResult =
@@ -824,50 +889,9 @@ export function updateEditableOrderLinesById(
   id: string,
   nextLines: OrderHistoryLine[]
 ): UpdateEditableOrderLinesResult {
-  const { lines, itemCount, totalAmount } = aggregateOrderLinesForSave(nextLines);
-  if (lines.length === 0) return { ok: false, reason: 'empty' };
-
-  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
-  if (mgmtHit) {
-    if (mgmtHit.status === '已取消') return { ok: false, reason: 'canceled' };
-    if (orderHasStallCountCompleted(mgmtHit)) return { ok: false, reason: 'stall_count_locked' };
-    const now = new Date().toISOString();
-    const who = persistableActorDisplayName();
-    const patched = patchFranchiseManagementOrderById(id, (row) => ({
-      ...row,
-      lines,
-      itemCount,
-      totalAmount,
-      payableAmount: totalAmount,
-      selfSuppliedCostAmount: 0,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
-  }
-
-  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
-  if (histHit) {
-    if (histHit.status === '已取消') return { ok: false, reason: 'canceled' };
-    if (orderHasStallCountCompleted(histHit)) return { ok: false, reason: 'stall_count_locked' };
-    const now = new Date().toISOString();
-    const payableAmount = totalAmount;
-    const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, histHit.actorRole);
-    const who = persistableActorDisplayName();
-    const patched = patchOrderHistoryById(id, (row) => ({
-      ...row,
-      lines,
-      itemCount,
-      totalAmount,
-      payableAmount,
-      selfSuppliedCostAmount,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
-  }
-
-  return { ok: false, reason: 'not_found' };
+  const totals = aggregateOrderLinesForSave(nextLines);
+  if (totals.lines.length === 0) return { ok: false, reason: 'empty' };
+  return patchOrderLinesInEitherStore(id, totals, 'editable');
 }
 
 /**

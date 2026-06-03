@@ -206,6 +206,28 @@ function inferLedgerScopeIdFromCreator(createdByUserId: string | undefined): str
   return resolveLedgerScopeIdForUser(u);
 }
 
+/** 登記者為「員工」帳號（非管理員、加盟主）；無 createdBy 之舊資料視為非員工登記。 */
+export function isLedgerEntryCreatedByEmployeeUser(createdByUserId: string | undefined): boolean {
+  const id = createdByUserId?.trim();
+  if (!id) return false;
+  const u = listSystemUsers().find((x) => x.id === id);
+  return u?.role === 'employee';
+}
+
+/** 目前登入之店員是否可編輯／刪除此筆（員工僅能維護自己登記的項目）。 */
+export function canSessionEmployeeMaintainLedgerEntry(
+  e: Pick<AccountingLedgerEntry, 'createdByUserId' | 'flowType' | 'category'>,
+): boolean {
+  const ctx = getDataScopeContext();
+  if (ctx.role !== 'employee') return true;
+  const uid = ctx.userId.trim();
+  return (
+    Boolean(uid) &&
+    e.createdByUserId === uid &&
+    isLedgerEntryVisibleToStoreEmployee(e)
+  );
+}
+
 function migrateMisplacedLedgerScopes(s: StoreV2): { store: StoreV2; changed: boolean } {
   const hq = [...(s.byScope[HQ_SCOPE_ID] ?? [])];
   if (hq.length === 0) return { store: s, changed: false };
@@ -532,14 +554,14 @@ export function ingredientSubSpendBreakdownForMonth(ym: string): {
 function filterLedgerEntriesForRole(rows: AccountingLedgerEntry[]): AccountingLedgerEntry[] {
   const ctx = getDataScopeContext();
   if (ctx.role !== 'employee') return rows;
-  const uid = ctx.userId.trim();
-  if (!uid) return [];
   return rows.filter(
-    (e) => isLedgerEntryVisibleToStoreEmployee(e) && e.createdByUserId === uid,
+    (e) =>
+      isLedgerEntryVisibleToStoreEmployee(e) &&
+      isLedgerEntryCreatedByEmployeeUser(e.createdByUserId),
   );
 }
 
-/** 所有紀錄（新→舊）：僅目前身分對應之 scope；員工僅能看見自己登記之項目 */
+/** 所有紀錄（新→舊）：僅目前身分對應之 scope；店員可看同店其他員工登記，不含管理員／加盟主 */
 export function listAccountingLedgerEntries(): AccountingLedgerEntry[] {
   const scopeId = resolveAccountingLedgerScopeId();
   const s = loadStore();
@@ -611,16 +633,8 @@ export function removeAccountingLedgerEntry(id: string): boolean {
   const prev = s.byScope[scopeId] ?? [];
   const hit = prev.find((e) => e.id === id);
   if (!hit) return false;
-  if (ctx.role === 'employee') {
-    const uid = ctx.userId.trim();
-    if (
-      !uid ||
-      !hit.createdByUserId ||
-      hit.createdByUserId !== uid ||
-      !isLedgerEntryVisibleToStoreEmployee(hit)
-    ) {
-      return false;
-    }
+  if (ctx.role === 'employee' && !canSessionEmployeeMaintainLedgerEntry(hit)) {
+    return false;
   }
   const next = prev.filter((e) => e.id !== id);
   if (next.length === prev.length) return false;
@@ -646,12 +660,8 @@ export function updateAccountingLedgerEntry(id: string, patch: AccountingLedgerU
   if (i < 0) return false;
   const prev = s.byScope[scopeId]![i];
   if (ctx.role === 'employee') {
-    const uid = ctx.userId.trim();
     if (
-      !uid ||
-      !prev.createdByUserId ||
-      prev.createdByUserId !== uid ||
-      !isLedgerEntryVisibleToStoreEmployee(prev) ||
+      !canSessionEmployeeMaintainLedgerEntry(prev) ||
       !isLedgerEntryVisibleToStoreEmployee({
         flowType: patch.flowType,
         category: patch.category,

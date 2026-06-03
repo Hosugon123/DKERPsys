@@ -12,6 +12,7 @@ import {
   ACCOUNTING_CATEGORIES,
   FOOD_EXPENSE_CATEGORY,
   MARINADE_EXPENSE_CATEGORY,
+  canSessionEmployeeMaintainLedgerEntry,
   expenseCategoriesForActorRole,
   DIRECT_STORE_PAYROLL_LEDGER_CATEGORY,
   MAIN_INGREDIENT_SUBS,
@@ -994,26 +995,30 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
                   >
                     {row.flowType === 'income' ? '+' : '−'}${money(row.amount)}
                   </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(row)}
-                      className="p-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-amber-400 hover:border-amber-700/50 transition-colors"
-                      title="編輯"
-                      aria-label={`編輯 ${row.category}`}
-                    >
-                      <Pencil size={18} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDelete(row)}
-                      className="p-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-900/50 transition-colors"
-                      title="刪除"
-                      aria-label={`刪除 ${row.category}`}
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
+                  {canSessionEmployeeMaintainLedgerEntry(row) ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(row)}
+                        className="p-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-amber-400 hover:border-amber-700/50 transition-colors"
+                        title="編輯"
+                        aria-label={`編輯 ${row.category}`}
+                      >
+                        <Pencil size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(row)}
+                        className="p-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-900/50 transition-colors"
+                        title="刪除"
+                        aria-label={`刪除 ${row.category}`}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ) : userRole === 'employee' ? (
+                    <span className="text-[0.65rem] text-zinc-600 shrink-0">僅供檢視</span>
+                  ) : null}
                 </div>
               </li>
             ))}

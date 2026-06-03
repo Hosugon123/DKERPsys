@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, type MouseEvent } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, type MouseEvent } from 'react';
 import { Package, CalendarDays, ChevronDown, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -25,6 +25,9 @@ import {
   type FranchiseManagementOrder,
   type OrderHistoryEntry,
   type OrderHistoryLine,
+  orderLineQtyMapsEqual,
+  readOrderLinesByIdFromStores,
+  type UpdateEditableOrderLinesResult,
 } from '../lib/orderHistoryStorage';
 import {
   getStallDisplayRetailEstAndRemain,
@@ -289,14 +292,9 @@ function computeOrderDetailLineMetrics(
       : line.unitPrice;
   const batchUnitPrice = Number(line.unitPrice) || 0;
   const orderSub = Math.round(batchUnitPrice * line.qty * 100) / 100;
-  const procurementQtyFromDiff =
-    carryRemainQty !== null
-      ? roundProcurementQty(Math.max(0, displayedBringOut - carryRemainQty))
-      : null;
-  const procurementQtyCellText =
-    procurementQtyFromDiff !== null ? fmtLineQty(procurementQtyFromDiff) : fmtLineQty(orderQtyRounded);
-  const procurementQtyForHint =
-    procurementQtyFromDiff !== null ? procurementQtyFromDiff : orderQtyRounded;
+  /** 叫貨數量欄：一律顯示已寫入訂單之實出（line.qty），避免與「帶出」試算混淆。 */
+  const procurementQtyCellText = fmtLineQty(orderQtyRounded);
+  const procurementQtyForHint = orderQtyRounded;
   const retailEstSub = Math.round(displayedBringOut * unitRetail * 100) / 100;
   return {
     carryRemainQty,
@@ -347,12 +345,14 @@ function pickingLineUnitForDisplay(
 function OrderEditActionBar({
   error,
   summary,
+  statusHint,
   saveLabel,
   onSave,
   onCancel,
 }: {
   error: string | null;
   summary?: string;
+  statusHint?: string;
   saveLabel: string;
   onSave: () => void;
   onCancel: () => void;
@@ -369,11 +369,16 @@ function OrderEditActionBar({
         </p>
       )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between max-w-[100rem] mx-auto w-full">
-        {summary ? (
-          <p className="text-sm text-zinc-400 tabular-nums">{summary}</p>
-        ) : (
-          <span className="hidden sm:block" aria-hidden />
-        )}
+        <div className="min-w-0 flex flex-col gap-0.5">
+          {summary ? (
+            <p className="text-sm text-zinc-400 tabular-nums">{summary}</p>
+          ) : (
+            <span className="hidden sm:block" aria-hidden />
+          )}
+          {statusHint ? (
+            <p className="text-xs text-zinc-500 leading-snug">{statusHint}</p>
+          ) : null}
+        </div>
         <div className="flex gap-2 w-full sm:w-auto sm:shrink-0">
           <button
             type="button"
@@ -481,6 +486,23 @@ function orderStatusDisplayLabel(
 }
 
 const PICK_MAX_Q = 99_999;
+/** 調整實出後自動寫入訂單（免按「儲存貨量」） */
+const PICKING_AUTOSAVE_MS = 1200;
+
+function pickingErrorMessage(
+  res: Extract<UpdateEditableOrderLinesResult, { ok: false }>,
+): string {
+  switch (res.reason) {
+    case 'empty':
+      return '實出數全為 0 時，請改為【取消訂單】或至少保留 1 項。';
+    case 'canceled':
+      return '此單已取消，無法調整貨量。';
+    case 'stall_count_locked':
+      return '此單已完成盤點押記，無法調整貨量。';
+    default:
+      return '找不到此訂單。';
+  }
+}
 
 function parsePickQty(s: string) {
   return Math.max(0, Math.min(PICK_MAX_Q, Math.floor(parseInt(s.replace(/[^\d]/g, ''), 10) || 0)));
@@ -526,6 +548,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [pickingLines, setPickingLines] = useState<OrderHistoryLine[]>([]);
   const [pickingOriginal, setPickingOriginal] = useState<OrderHistoryLine[]>([]);
   const [pickingError, setPickingError] = useState<string | null>(null);
+  const [pickingPersistStatus, setPickingPersistStatus] = useState<
+    'idle' | 'dirty' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const pickingAutosaveGenRef = useRef(0);
   /** 總部：僅修正各列批價（不改數量），已出貨或已盤點押記亦可 */
   const [priceAdjustOrderId, setPriceAdjustOrderId] = useState<string | null>(null);
   const [priceAdjustLines, setPriceAdjustLines] = useState<OrderHistoryLine[]>([]);
@@ -559,15 +585,13 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     pickingOrderId !== null || priceAdjustOrderId !== null,
   );
 
-  const syncOrders = useCallback(() => {
-    void (async () => {
-      const [mgmt, hist] = await Promise.all([
-        loadMgmtSliceForRole(userRole),
-        loadHistorySliceForRole(userRole),
-      ]);
-      setMgmtOrders(mgmt);
-      setHistoryOrders(hist);
-    })();
+  const syncOrders = useCallback(async () => {
+    const [mgmt, hist] = await Promise.all([
+      loadMgmtSliceForRole(userRole),
+      loadHistorySliceForRole(userRole),
+    ]);
+    setMgmtOrders(mgmt);
+    setHistoryOrders(hist);
   }, [userRole]);
 
   useEffect(() => {
@@ -819,13 +843,61 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setCancelModal(null);
   };
 
-  const exitPickingEdit = useCallback(() => {
+  const clearPickingUi = useCallback(() => {
     clearWorkDraft(WORK_DRAFT_IDS.ordersLineEdit);
     setPickingOrderId(null);
     setPickingLines([]);
     setPickingOriginal([]);
     setPickingError(null);
+    setPickingPersistStatus('idle');
+    pickingAutosaveGenRef.current += 1;
   }, []);
+
+  const exitPickingEdit = useCallback(
+    (opts?: { revertToOriginal?: boolean }) => {
+      const orderId = pickingOrderId;
+      const original = pickingOriginal.map((l) => ({ ...l }));
+      const current = pickingLines.map((l) => ({ ...l }));
+      const shouldRevert = opts?.revertToOriginal === true;
+      clearPickingUi();
+      if (!shouldRevert || !orderId || original.length === 0) return;
+      if (orderLineQtyMapsEqual(current, original)) return;
+      void (async () => {
+        const res = await ordersApi.updateEditableOrderLinesById(orderId, original);
+        if (res.ok) await syncOrders();
+      })();
+    },
+    [pickingOrderId, pickingOriginal, pickingLines, clearPickingUi, syncOrders],
+  );
+
+  const persistPickingLines = useCallback(
+    async (orderId: string, lines: OrderHistoryLine[]): Promise<UpdateEditableOrderLinesResult> => {
+      const res = await ordersApi.updateEditableOrderLinesById(orderId, lines);
+      if (getRemoteSyncStatus() === 'version_conflict') {
+        setPickingError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
+        setPickingPersistStatus('error');
+        return { ok: false, reason: 'not_found' };
+      }
+      if (!res.ok) {
+        setPickingError(pickingErrorMessage(res));
+        setPickingPersistStatus('error');
+        return res;
+      }
+      await syncOrders();
+      const stored = readOrderLinesByIdFromStores(orderId);
+      if (!stored || !orderLineQtyMapsEqual(lines, stored)) {
+        setPickingError(
+          '儲存後讀取到的數量與剛才輸入不一致。若使用雲端同步，請確認已上傳成功並重新整理；否則請再試一次。',
+        );
+        setPickingPersistStatus('error');
+        return { ok: false, reason: 'not_found' };
+      }
+      setPickingError(null);
+      setPickingPersistStatus('saved');
+      return res;
+    },
+    [syncOrders],
+  );
 
   const exitPriceAdjust = useCallback(() => {
     clearWorkDraft(WORK_DRAFT_IDS.ordersLineEdit);
@@ -851,36 +923,43 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     );
     setPickingLines(lines.map((l) => ({ ...l })));
     setPickingOriginal(lines.map((l) => ({ ...l })));
+    setPickingPersistStatus('saved');
   };
 
   const savePickingEdit = (orderId: string) => {
-    setPickingError(null);
+    pickingAutosaveGenRef.current += 1;
     void (async () => {
-      const res = await ordersApi.updateEditableOrderLinesById(orderId, pickingLines);
-      if (getRemoteSyncStatus() === 'version_conflict') {
-        setPickingError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
-        return;
-      }
-      if (res.ok === true) {
-        exitPickingEdit();
-        syncOrders();
-        return;
-      }
-      switch (res.reason) {
-        case 'empty':
-          setPickingError('實出數全為 0 時，請改為【取消訂單】或至少保留 1 項。');
-          break;
-        case 'canceled':
-          setPickingError('此單已取消，無法調整貨量。');
-          break;
-        case 'stall_count_locked':
-          setPickingError('此單已完成盤點押記，無法調整貨量。');
-          break;
-        default:
-          setPickingError('找不到此訂單。');
-      }
+      setPickingPersistStatus('saving');
+      const res = await persistPickingLines(orderId, pickingLines);
+      if (res.ok) exitPickingEdit({ revertToOriginal: false });
     })();
   };
+
+  /** 調整實出後自動寫入訂單，避免未按「儲存貨量」就離開導致回溯 */
+  useEffect(() => {
+    if (!pickingOrderId) return;
+    const raw = rawList.find((o) => o.id === pickingOrderId);
+    if (!raw) return;
+
+    if (orderLineQtyMapsEqual(pickingLines, raw.lines)) {
+      setPickingPersistStatus((s) => (s === 'saving' ? s : 'saved'));
+      return;
+    }
+
+    setPickingPersistStatus('dirty');
+    const gen = ++pickingAutosaveGenRef.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        if (pickingAutosaveGenRef.current !== gen) return;
+        setPickingPersistStatus('saving');
+        const res = await persistPickingLines(pickingOrderId, pickingLines);
+        if (pickingAutosaveGenRef.current !== gen) return;
+        if (res.ok) setPickingPersistStatus('saved');
+      })();
+    }, PICKING_AUTOSAVE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [pickingOrderId, pickingLines, rawList, persistPickingLines]);
 
   const startPriceAdjust = (e: MouseEvent<HTMLButtonElement>, orderId: string) => {
     e.stopPropagation();
@@ -2069,7 +2148,16 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           summary={`${pickingDockSummary.pickCount} 份 · ${pickingDockSummary.totalLabel} $ ${pickingDockSummary.pickTotal.toLocaleString()}`}
           saveLabel="儲存貨量"
           onSave={() => savePickingEdit(pickingOrderId)}
-          onCancel={() => exitPickingEdit()}
+          onCancel={() => exitPickingEdit({ revertToOriginal: true })}
+          statusHint={
+            pickingPersistStatus === 'saving'
+              ? '正在自動儲存實出數量…'
+              : pickingPersistStatus === 'dirty'
+                ? '變更將在約 1 秒後自動儲存；「標記出貨」僅改狀態，與貨量無關'
+                : pickingPersistStatus === 'saved'
+                  ? '實出已寫入訂單；明細「叫貨數量」即已儲存實出，「帶出數量」為昨剩餘＋叫貨試算'
+                  : '調整後會自動儲存；按「放棄」可還原為進入編輯前的數量'
+          }
         />
       )}
       {priceAdjustOrderId && priceAdjustDockSummary && (

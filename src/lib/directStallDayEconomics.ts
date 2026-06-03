@@ -28,7 +28,7 @@ export type DirectStallDayEconomics = {
   remainValue: number;
   /** 應有營業額（零售推算售出） */
   expectedRetail: number;
-  /** 盤點後實收；無登錄時為 null */
+  /** 實際營收（盤點登錄實收）；無登錄時為 null */
   actual: number | null;
   /** 實收 − 應有；無實收時為 null */
   gap: number | null;
