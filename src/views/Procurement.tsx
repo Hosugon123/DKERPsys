@@ -1507,18 +1507,18 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
 
       {submitModalOpen && (
         <div
-          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="submit-order-confirm-title"
         >
-          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl p-5 sm:p-6 animate-in fade-in duration-200">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
+          <div className="w-full max-w-md min-w-0 max-h-[min(90dvh,100%)] overflow-y-auto overscroll-y-contain rounded-t-2xl sm:rounded-2xl border border-zinc-700 border-b-0 sm:border-b bg-zinc-900 shadow-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 sm:pb-6 animate-in fade-in duration-200">
+            <div className="flex items-start justify-between gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
                 <h3 id="submit-order-confirm-title" className="text-lg font-bold text-[#f5f2ed]">
                   確認送出訂單？
                 </h3>
-                <p className="text-sm text-zinc-500 mt-2">
+                <p className="text-xs sm:text-sm text-zinc-500 mt-2 leading-relaxed break-words">
                   {showProcurementCost ? (
                     <>
                       {payableTitle}{' '}
@@ -1569,19 +1569,19 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <X size={22} />
               </button>
             </div>
-            <div className="mt-4">
+            <div className="mt-4 min-w-0 max-w-full">
               <label
                 htmlFor="new-order-date-ymd"
-                className="block cursor-pointer rounded-xl border-2 border-zinc-700/90 bg-zinc-950/80 p-3 transition-colors hover:border-zinc-600 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/25"
+                className="block min-w-0 max-w-full cursor-pointer rounded-xl border-2 border-zinc-700/90 bg-zinc-950/80 p-2.5 sm:p-3 transition-colors hover:border-zinc-600 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/25"
               >
                 <span className="block text-xs font-medium text-zinc-400 mb-2">訂單日期（點此區選擇）</span>
-                <div className="relative">
+                <div className="relative min-w-0 max-w-full overflow-hidden">
                   <input
                     id="new-order-date-ymd"
                     type="date"
                     value={newOrderDateYmd}
                     onChange={(e) => syncOrderDateFromPicker(e.target.value)}
-                    className="w-full min-h-12 cursor-pointer rounded-lg border border-zinc-600/80 bg-zinc-900/90 pl-3 pr-11 py-2.5 text-base text-zinc-100 [color-scheme:dark] focus:outline-none sm:text-sm"
+                    className="box-border w-full max-w-full min-w-0 min-h-11 sm:min-h-12 cursor-pointer rounded-lg border border-zinc-600/80 bg-zinc-900/90 pl-3 pr-10 py-2 text-sm text-zinc-100 [color-scheme:dark] focus:outline-none"
                   />
                   <CalendarDays
                     className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-amber-500/80"
