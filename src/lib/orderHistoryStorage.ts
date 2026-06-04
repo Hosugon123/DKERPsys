@@ -286,6 +286,25 @@ function canAccessOrder(
   return ctx.scopeId === HQ_SCOPE_ID;
 }
 
+/**
+ * 訂單管理／批貨後列表：總部直營員工需看見加盟主叫貨單（出貨作業），
+ * 否則僅能看見 scope:hq 內單據會「加盟主昨晚下單、白天總部看不到」。
+ */
+export function canAccessOrderInManagementList(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>,
+  ctx: ReturnType<typeof getDataScopeContext> = getDataScopeContext(),
+): boolean {
+  if (canAccessOrder(row, ctx)) return true;
+  if (
+    ctx.role === 'employee' &&
+    ctx.scopeId === HQ_SCOPE_ID &&
+    row.actorRole === 'franchisee'
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** 目前登入身分是否可讀取該筆訂單（盤點／叫貨扣庫／列表共用） */
 export function orderMatchesSessionScope(
   row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId'>
@@ -349,7 +368,7 @@ export function loadOrderHistory(): OrderHistoryEntry[] {
     const list = Array.isArray(parsed) ? parsed : [];
     // 舊資料可能含 admin 單；保留並交由 scope/角色層過濾，避免直營員工看不到歷史直營單。
     return list
-      .filter((e) => canAccessOrder(e, ctx))
+      .filter((e) => canAccessOrderInManagementList(e, ctx))
       .map((e) => normalizeHistoryEntry(e as OrderHistoryEntry & { status?: FranchiseOrderStatus }));
   } catch {
     return [];
