@@ -28,6 +28,7 @@ import {
   displayOrderLastUpdatedByLabel,
   displayOrderStallCountCompletedByLabel,
   effectiveOrderDateYmd,
+  getOrderStorageRevisionMs,
 } from '../lib/orderHistoryStorage';
 import {
   formatSlashDateTimeWithWeekdayFromIso,
@@ -41,9 +42,9 @@ import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
+import { useStorageRevisionGuard } from '../hooks/useStorageRevisionGuard';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
-import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
@@ -285,6 +286,31 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     stallEditId !== null && stallEditDraft !== null,
   );
 
+  const readStallEditRevisionMs = useCallback(
+    () => (stallEditId ? getOrderStorageRevisionMs(stallEditId) : 0),
+    [stallEditId],
+  );
+
+  const { canWriteWithoutStaleOverwrite, noteWriteSucceeded } = useStorageRevisionGuard({
+    active: stallEditId !== null,
+    readRevisionMs: readStallEditRevisionMs,
+    onStorageNewer: () => {
+      if (!stallEditId) return;
+      const order = orders.find((o) => o.id === stallEditId);
+      if (!order) return;
+      const snap = resolveRecordSnapshot(order);
+      if (!snap) return;
+      setStallEditDraft(
+        mergeSalesRecordWithCatalog(
+          JSON.parse(JSON.stringify(snap)) as SalesRecordDaySnapshot,
+        ),
+      );
+      setOrderDateDraftYmd(effectiveOrderDateYmd(order));
+      setStallEditError(null);
+    },
+    extraEvents: ['orderHistoryUpdated', 'franchiseManagementOrdersUpdated'],
+  });
+
   const startStallEdit = (order: OrderHistoryEntry) => {
     const snap = resolveRecordSnapshot(order);
     if (!snap) return;
@@ -320,6 +346,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
 
   const saveStallEdit = (orderId: string) => {
     if (!stallEditDraft) return;
+    if (!canWriteWithoutStaleOverwrite()) {
+      setStallEditError('雲端已更新此單資料，畫面已同步；請確認後再儲存。');
+      return;
+    }
     const missing: string[] = [];
     for (const item of stallDisplayItems) {
       const raw = stallEditDraft.lines[item.id]?.remain;
@@ -342,12 +372,9 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     };
     void (async () => {
       const res: UpdateStallSnapshotResult = await ordersApi.updateStallCountSnapshotByOrderId(orderId, next);
-      if (getRemoteSyncStatus() === 'version_conflict') {
-        setStallEditError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
-        return;
-      }
       switch (res.ok) {
         case true:
+          noteWriteSucceeded();
           exitStallEdit();
           refreshOrders();
           break;

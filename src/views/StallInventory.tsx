@@ -11,6 +11,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { UserRole } from './Orders';
+import { DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT } from '../lib/appDataBundle';
 import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import {
   estimatedRetailPerPackage,
@@ -23,7 +24,6 @@ import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
-import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import { num, computeLine, aggregateStallKpis, isStallRemainEntryValid } from '../lib/stallMath';
 import {
   ymd,
@@ -165,10 +165,18 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       });
     };
     window.addEventListener('stallInventoryUpdated', on);
+    window.addEventListener('salesRecordUpdated', on);
+    window.addEventListener('orderHistoryUpdated', on);
+    window.addEventListener('franchiseManagementOrdersUpdated', on);
+    window.addEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, on);
     window.addEventListener('supplyCatalogUpdated', on);
     window.addEventListener(AUTH_SESSION_CHANGED_EVENT, on);
     return () => {
       window.removeEventListener('stallInventoryUpdated', on);
+      window.removeEventListener('salesRecordUpdated', on);
+      window.removeEventListener('orderHistoryUpdated', on);
+      window.removeEventListener('franchiseManagementOrdersUpdated', on);
+      window.removeEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, on);
       window.removeEventListener('supplyCatalogUpdated', on);
       window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, on);
     };
@@ -358,12 +366,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       });
       setStallListTick((n) => n + 1);
       stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
-      if (getRemoteSyncStatus() === 'version_conflict') {
-        setStallCountConfirmOpen(false);
-        setRecomputeMsg('盤點已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
-        setTimeout(() => setRecomputeMsg(null), 10000);
-        return;
-      }
       clearWorkDraft(WORK_DRAFT_IDS.stallInventory);
       setStallCountConfirmOpen(false);
       setSaveFlash(true);

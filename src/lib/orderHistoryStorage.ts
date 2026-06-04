@@ -1,3 +1,4 @@
+import { mergeOrderLikeRecord, recordUpdatedAtMs } from './bundleRecordMerge';
 import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
@@ -427,10 +428,12 @@ export function loadCompletedOrderHistoryList(): OrderHistoryEntry[] {
     .map(franchiseMgmtToHistoryEntry);
   const byId = new Map<string, OrderHistoryEntry>();
   for (const e of fromList) {
-    byId.set(e.id, e);
+    const prev = byId.get(e.id);
+    byId.set(e.id, prev ? mergeOrderLikeRecord(prev, e) : e);
   }
   for (const e of fromMgmt) {
-    byId.set(e.id, e);
+    const prev = byId.get(e.id);
+    byId.set(e.id, prev ? mergeOrderLikeRecord(prev, e) : e);
   }
   return Array.from(byId.values()).sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
@@ -600,11 +603,10 @@ export function updateOrderHistoryStatus(id: string, status: FranchiseOrderStatu
  * 依單號更新狀態：先尋訂單管理庫，再尋歷史訂單（供超管合併檢視時使用）。
  */
 export function updateOrderStatusInEitherStore(id: string, status: FranchiseOrderStatus): void {
-  if (loadFranchiseManagementOrders().some((o) => o.id === id)) {
-    updateFranchiseManagementOrderStatus(id, status);
-    return;
-  }
-  updateOrderHistoryStatus(id, status);
+  const inMgmt = loadFranchiseManagementOrdersAll().some((o) => o.id === id);
+  const inHist = loadOrderHistoryAllEntries().some((o) => o.id === id);
+  if (inMgmt) updateFranchiseManagementOrderStatus(id, status);
+  if (inHist) updateOrderHistoryStatus(id, status);
 }
 
 function roundMoney(n: number) {
@@ -656,6 +658,29 @@ export function orderLineQtyMapsEqual(a: OrderHistoryLine[], b: OrderHistoryLine
     if (mb.get(k) !== v) return false;
   }
   return true;
+}
+
+/** 兩庫同單號合併為一筆（狀態／數量／盤點押記皆採較完整者），供列表與修訂時間判斷。 */
+export function readMergedOrderByIdFromStores(
+  id: string,
+): OrderHistoryEntry | FranchiseManagementOrder | null {
+  const mgmt = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  const hist = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (mgmt && hist) {
+    return mergeOrderLikeRecord(
+      franchiseMgmtToHistoryEntry(mgmt),
+      normalizeHistoryEntry(hist as OrderHistoryEntry & { status?: FranchiseOrderStatus }),
+    );
+  }
+  if (mgmt) return mgmt;
+  if (hist) return normalizeHistoryEntry(hist as OrderHistoryEntry & { status?: FranchiseOrderStatus });
+  return null;
+}
+
+/** 訂單在 storage 上的修訂時間（毫秒），供遠端同步後判斷 UI 是否過期。 */
+export function getOrderStorageRevisionMs(id: string): number {
+  const row = readMergedOrderByIdFromStores(id);
+  return row ? recordUpdatedAtMs(row) : 0;
 }
 
 /** 讀取單號對應品項（兩庫皆查；訂單管理優先），供儲存後驗證用。 */
@@ -839,10 +864,13 @@ export function adminPatchOrderLineUnitPricesById(
   };
 
   const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
+
   if (mgmtHit) {
     const now = new Date().toISOString();
     const who = persistableActorDisplayName();
-    const res = tryPatch(mgmtHit, (tot) => {
+    const mgmtRes = tryPatch(mgmtHit, (tot) => {
       patchFranchiseManagementOrderById(id, (row) => ({
         ...row,
         lines: tot.lines,
@@ -854,10 +882,8 @@ export function adminPatchOrderLineUnitPricesById(
         ...(who ? { lastUpdatedByName: who } : {}),
       }));
     });
-    return res;
+    if (!mgmtRes.ok) return mgmtRes;
   }
-
-  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
   if (histHit) {
     const now = new Date().toISOString();
     const who = persistableActorDisplayName();
@@ -875,10 +901,9 @@ export function adminPatchOrderLineUnitPricesById(
         ...(who ? { lastUpdatedByName: who } : {}),
       }));
     });
-    return res;
+    if (!res.ok) return res;
   }
-
-  return { ok: false, reason: 'not_found' };
+  return { ok: true };
 }
 
 /**
@@ -985,21 +1010,24 @@ export function setOrderStallCountStamp(
     ...(who ? { stallCountCompletedByName: who, lastUpdatedByName: who } : {}),
   };
   const now = new Date().toISOString();
+  let ok = false;
   if (loadFranchiseManagementOrdersAll().some((o) => o.id === orderId)) {
-    return patchFranchiseManagementOrderById(orderId, (row) => ({
-      ...row,
-      ...stampPatch,
-      updatedAt: now,
-    }));
+    ok =
+      patchFranchiseManagementOrderById(orderId, (row) => ({
+        ...row,
+        ...stampPatch,
+        updatedAt: now,
+      })) || ok;
   }
   if (loadOrderHistoryAllEntries().some((o) => o.id === orderId)) {
-    return patchOrderHistoryById(orderId, (row) => ({
-      ...row,
-      ...stampPatch,
-      updatedAt: now,
-    }));
+    ok =
+      patchOrderHistoryById(orderId, (row) => ({
+        ...row,
+        ...stampPatch,
+        updatedAt: now,
+      })) || ok;
   }
-  return false;
+  return ok;
 }
 
 export type UpdateStallSnapshotResult = { ok: true } | { ok: false; reason: 'not_found' | 'no_stamp' };
@@ -1021,28 +1049,32 @@ export function updateStallCountSnapshotByOrderId(
 
   const who = persistableActorDisplayName();
   const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === orderId);
-  if (mgmtHit) {
-    if (!mgmtHit.stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
-    const patched = patchFranchiseManagementOrderById(orderId, (row) => ({
-      ...row,
-      stallCountSnapshot: nextSnap,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
-  }
   const histHit = loadOrderHistoryAllEntries().find((o) => o.id === orderId);
-  if (histHit) {
-    if (!histHit.stallCountCompletedAt) return { ok: false, reason: 'no_stamp' };
-    const patched = patchOrderHistoryById(orderId, (row) => ({
-      ...row,
-      stallCountSnapshot: nextSnap,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
+  if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
+  if (mgmtHit && !mgmtHit.stallCountCompletedAt && (!histHit || !histHit.stallCountCompletedAt)) {
+    return { ok: false, reason: 'no_stamp' };
   }
-  return { ok: false, reason: 'not_found' };
+
+  let wrote = false;
+  if (mgmtHit?.stallCountCompletedAt) {
+    wrote =
+      patchFranchiseManagementOrderById(orderId, (row) => ({
+        ...row,
+        stallCountSnapshot: nextSnap,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      })) || wrote;
+  }
+  if (histHit?.stallCountCompletedAt) {
+    wrote =
+      patchOrderHistoryById(orderId, (row) => ({
+        ...row,
+        stallCountSnapshot: nextSnap,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      })) || wrote;
+  }
+  return wrote ? { ok: true } : { ok: false, reason: 'no_stamp' };
 }
 
 /**
@@ -1060,25 +1092,26 @@ export function updateOrderDateYmdByOrderId(
   const now = new Date().toISOString();
   const who = persistableActorDisplayName();
 
+  let wrote = false;
   if (loadFranchiseManagementOrdersAll().some((o) => o.id === orderId)) {
-    const patched = patchFranchiseManagementOrderById(orderId, (row) => ({
-      ...row,
-      orderDateYmd: bookYmd,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
+    wrote =
+      patchFranchiseManagementOrderById(orderId, (row) => ({
+        ...row,
+        orderDateYmd: bookYmd,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      })) || wrote;
   }
   if (loadOrderHistoryAllEntries().some((o) => o.id === orderId)) {
-    const patched = patchOrderHistoryById(orderId, (row) => ({
-      ...row,
-      orderDateYmd: bookYmd,
-      updatedAt: now,
-      ...(who ? { lastUpdatedByName: who } : {}),
-    }));
-    return patched ? { ok: true } : { ok: false, reason: 'not_found' };
+    wrote =
+      patchOrderHistoryById(orderId, (row) => ({
+        ...row,
+        orderDateYmd: bookYmd,
+        updatedAt: now,
+        ...(who ? { lastUpdatedByName: who } : {}),
+      })) || wrote;
   }
-  return { ok: false, reason: 'not_found' };
+  return wrote ? { ok: true } : { ok: false, reason: 'not_found' };
 }
 
 /**
@@ -1089,11 +1122,15 @@ export function listOrdersWithStallCountCompleted(): OrderHistoryEntry[] {
   const byId = new Map<string, OrderHistoryEntry>();
   for (const m of loadFranchiseManagementOrders()) {
     if (!m.stallCountCompletedAt) continue;
-    byId.set(m.id, franchiseMgmtToHistoryEntry(m));
+    const entry = franchiseMgmtToHistoryEntry(m);
+    const prev = byId.get(m.id);
+    byId.set(m.id, prev ? mergeOrderLikeRecord(prev, entry) : entry);
   }
   for (const e of loadOrderHistory()) {
     if (!e.stallCountCompletedAt) continue;
-    byId.set(e.id, normalizeHistoryEntry(e));
+    const entry = normalizeHistoryEntry(e);
+    const prev = byId.get(e.id);
+    byId.set(e.id, prev ? mergeOrderLikeRecord(prev, entry) : entry);
   }
   const sorted = Array.from(byId.values()).sort((a, b) => {
     const ta = a.stallCountCompletedAt ?? '';

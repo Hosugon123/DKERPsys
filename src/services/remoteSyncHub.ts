@@ -1,13 +1,20 @@
 /**
  * 雲端 bundle 同步（VITE_STORAGE_MODE=remote）：啟動拉取、寫入後推送、狀態廣播。
+ *
+ * 多裝置策略：推送前／拉回時依單號 union 合併訂單等紀錄；去抖動推送 + 409 自動合併重試；不彈同步警報。
  */
 import {
   DONGSHAN_EXPORT_STORAGE_KEYS,
+  buildDongshanDataBundle,
   buildDongshanDataBundleForPush,
   importDongshanDataBundle,
+  isRemoteBundleEffectivelyEmpty,
+  mergeDongshanBundlesLocalWinsDirty,
   parseBundleJson,
   serializeDongshanDataBundle,
+  storageKeysChangedBetweenBundleTexts,
   type DongshanDataBundleV1,
+  type DongshanStorageKey,
 } from '../lib/appDataBundle';
 import {
   applyConflictRecoveryAfterRemoteImport,
@@ -16,6 +23,7 @@ import {
 import { getApiBaseUrl, getApiSyncToken, getAsyncStorageDelayMs, getStorageMode } from './storageMode';
 
 export const REMOTE_SYNC_STATUS_EVENT = 'dongshanRemoteSyncStatus';
+/** 保留事件名稱供舊版相容；衝突改為靜默合併，不再彈出全螢幕警報 */
 export const REMOTE_SYNC_VERSION_CONFLICT_EVENT = 'dongshanRemoteSyncVersionConflict';
 
 export type RemoteSyncStatus =
@@ -35,11 +43,20 @@ export class RemoteVersionConflictError extends Error {
   }
 }
 
+/** 連續寫入合併推送的等待時間（毫秒） */
+const PUSH_DEBOUNCE_MS = 900;
+/** 409 後自動合併重試次數 */
+const MAX_CONFLICT_MERGE_RETRIES = 2;
+
 let lastStatus: RemoteSyncStatus = 'idle';
 /** 本機最後一次成功套用之雲端 bundle.updatedAt（用於 PUT 防撞） */
 let lastRemoteUpdatedAt = 0;
-/** 409 衝突後鎖定雲端推送，避免過期覆寫；須重新整理取得最新資料 */
 let remoteSyncLocked = false;
+
+let pushChain: Promise<void> = Promise.resolve();
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingAfterText: string | null = null;
+const pendingDirtyKeys = new Set<DongshanStorageKey>();
 
 export function getRemoteSyncStatus(): RemoteSyncStatus {
   return lastStatus;
@@ -59,13 +76,6 @@ function noteRemoteBundleUpdatedAt(bundle: DongshanDataBundleV1 | null | undefin
 function dispatchStatus(s: RemoteSyncStatus): void {
   lastStatus = s;
   window.dispatchEvent(new CustomEvent(REMOTE_SYNC_STATUS_EVENT, { detail: s }));
-}
-
-function handleVersionConflict(): void {
-  stashLocalBundleForConflictRecovery();
-  remoteSyncLocked = true;
-  dispatchStatus('version_conflict');
-  window.dispatchEvent(new CustomEvent(REMOTE_SYNC_VERSION_CONFLICT_EVENT));
 }
 
 function isVersionConflictError(e: unknown): boolean {
@@ -103,7 +113,6 @@ function prepareBundleForPush(bundleText?: string): DongshanDataBundleV1 {
   return buildDongshanDataBundleForPush();
 }
 
-/** 雲端回傳的 bundle 是否視為「尚無有效資料」（可改以本地一次性上傳）。 */
 export function isRemoteBundleEffectivelyEmpty(bundle: DongshanDataBundleV1 | null | undefined): boolean {
   if (bundle == null) return true;
   const keys = bundle.keys;
@@ -116,7 +125,6 @@ export function isRemoteBundleEffectivelyEmpty(bundle: DongshanDataBundleV1 | nu
   return true;
 }
 
-/** 本地是否有納入同步之任一鍵有內容。 */
 export function localExportStorageHasData(): boolean {
   for (const k of DONGSHAN_EXPORT_STORAGE_KEYS) {
     try {
@@ -169,13 +177,11 @@ export async function pushRemoteBundle(bundleText?: string): Promise<void> {
     },
     body: JSON.stringify({
       bundle,
-      /** 本機最後已知雲端版本；後端與雲端 updatedAt 比對，偵測多裝置過期覆寫 */
       syncedFromUpdatedAt: lastRemoteUpdatedAt,
     }),
   });
 
   if (res.status === 409) {
-    handleVersionConflict();
     throw new RemoteVersionConflictError();
   }
 
@@ -184,6 +190,96 @@ export async function pushRemoteBundle(bundleText?: string): Promise<void> {
   }
 
   noteRemoteBundleUpdatedAt(bundle);
+}
+
+async function mergeCloudWithLocalDirty(
+  localBundleText: string,
+  dirtyKeys: readonly DongshanStorageKey[],
+): Promise<string> {
+  const cloud = await fetchRemoteBundle();
+  const local = parseBundleJson(localBundleText) as DongshanDataBundleV1;
+  const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys);
+  const result = importDongshanDataBundle(merged);
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+  noteRemoteBundleUpdatedAt(cloud);
+  return JSON.stringify(merged);
+}
+
+async function reconcileLocalBundleWithCloudBeforePush(
+  bundleText: string,
+  dirtyKeys: readonly DongshanStorageKey[],
+): Promise<string> {
+  const cloud = await fetchRemoteBundle();
+  if (isRemoteBundleEffectivelyEmpty(cloud)) return bundleText;
+  const local = parseBundleJson(bundleText) as DongshanDataBundleV1;
+  const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys);
+  const result = importDongshanDataBundle(merged);
+  if (!result.ok) throw new Error(result.error);
+  noteRemoteBundleUpdatedAt(cloud);
+  return JSON.stringify(merged);
+}
+
+async function pushBundleTextWithAutoMerge(
+  bundleText: string,
+  dirtyKeys: readonly DongshanStorageKey[],
+): Promise<void> {
+  remoteSyncLocked = false;
+  const dirty = dirtyKeys.length > 0 ? dirtyKeys : [...DONGSHAN_EXPORT_STORAGE_KEYS];
+  let text = bundleText;
+
+  try {
+    text = await reconcileLocalBundleWithCloudBeforePush(text, dirty);
+  } catch (e) {
+    if (!isNetworkishError(e)) throw e;
+  }
+
+  for (let attempt = 0; attempt <= MAX_CONFLICT_MERGE_RETRIES; attempt++) {
+    try {
+      await pushRemoteBundle(text);
+      dispatchStatus('ok');
+      return;
+    } catch (e) {
+      if (!isVersionConflictError(e)) {
+        throw e;
+      }
+      if (attempt >= MAX_CONFLICT_MERGE_RETRIES) {
+        stashLocalBundleForConflictRecovery();
+        dispatchStatus('ok');
+        return;
+      }
+      text = await mergeCloudWithLocalDirty(text, dirty);
+    }
+  }
+}
+
+function scheduleDebouncedPush(beforeText: string, afterText: string): void {
+  for (const k of storageKeysChangedBetweenBundleTexts(beforeText, afterText)) {
+    pendingDirtyKeys.add(k);
+  }
+  pendingAfterText = afterText;
+
+  if (debounceTimer != null) {
+    clearTimeout(debounceTimer);
+  }
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    const text = pendingAfterText;
+    const dirty = [...pendingDirtyKeys];
+    pendingDirtyKeys.clear();
+    pendingAfterText = null;
+    if (!text) return;
+    pushChain = pushChain.then(() => flushDebouncedPush(text, dirty));
+  }, PUSH_DEBOUNCE_MS);
+}
+
+async function flushDebouncedPush(bundleText: string, dirtyKeys: DongshanStorageKey[]): Promise<void> {
+  try {
+    await pushBundleTextWithAutoMerge(bundleText, dirtyKeys);
+  } catch (e) {
+    applySyncFailureFromUnknown(e);
+  }
 }
 
 function applySyncFailureFromUnknown(e: unknown): void {
@@ -200,8 +296,27 @@ function applySyncFailureFromUnknown(e: unknown): void {
 }
 
 /**
- * 應用程式啟動／重新整理時呼叫一次：先 GET；雲端有資料則覆蓋本地；雲端空且本地有資料則 PUT 上傳。
+ * 分頁重新可見時更新雲端版本戳記，降低下一筆 PUT 誤判 409 的機率。
  */
+export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
+  if (getStorageMode() !== 'remote') return;
+  try {
+    const cloud = await fetchRemoteBundle();
+    if (isRemoteBundleEffectivelyEmpty(cloud)) {
+      dispatchStatus('ok');
+      return;
+    }
+    const local = buildDongshanDataBundle();
+    const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, []);
+    const result = importDongshanDataBundle(merged);
+    if (!result.ok) throw new Error(result.error);
+    noteRemoteBundleUpdatedAt(cloud);
+    dispatchStatus('ok');
+  } catch (e) {
+    applySyncFailureFromUnknown(e);
+  }
+}
+
 export async function initRemoteSyncOnAppLoad(): Promise<void> {
   if (getStorageMode() !== 'remote') {
     dispatchStatus('idle');
@@ -215,23 +330,26 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
     const bundle = await fetchRemoteBundle();
 
     if (!isRemoteBundleEffectivelyEmpty(bundle)) {
-      const result = importDongshanDataBundle(bundle);
+      const local = buildDongshanDataBundle();
+      const merged = mergeDongshanBundlesLocalWinsDirty(local, bundle, []);
+      const result = importDongshanDataBundle(merged);
       if (!result.ok) {
         dispatchStatus('error');
         return;
       }
       noteRemoteBundleUpdatedAt(bundle);
     } else if (localExportStorageHasData()) {
-      await pushRemoteBundle();
+      await pushBundleTextWithAutoMerge(
+        serializeDongshanDataBundle(),
+        [...DONGSHAN_EXPORT_STORAGE_KEYS],
+      );
     }
 
     if (applyConflictRecoveryAfterRemoteImport()) {
-      try {
-        await pushRemoteBundle();
-      } catch (e) {
-        applySyncFailureFromUnknown(e);
-        return;
-      }
+      await pushBundleTextWithAutoMerge(
+        serializeDongshanDataBundle(),
+        [...DONGSHAN_EXPORT_STORAGE_KEYS],
+      );
     }
 
     dispatchStatus('ok');
@@ -240,32 +358,21 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
   }
 }
 
-/**
- * ensureAuthBootstrap 等啟動步驟若改變了 localStorage，於 remote 模式下補一次 PUT。
- */
 export async function pushRemoteIfLocalBundleChangedSince(snapshot: string): Promise<void> {
-  if (getStorageMode() !== 'remote' || remoteSyncLocked) return;
+  if (getStorageMode() !== 'remote') return;
   const now = serializeDongshanDataBundle();
   if (now === snapshot) return;
-  try {
-    await pushRemoteBundle(now);
-    dispatchStatus('ok');
-  } catch (e) {
-    applySyncFailureFromUnknown(e);
-  }
+  scheduleDebouncedPush(snapshot, now);
+  await pushChain;
 }
 
-/**
- * 略過 apiService、已直接寫入 *Storage 時，補送目前整包至雲端。
- */
 export async function syncRemoteAfterDirectLocalMutation(): Promise<void> {
-  if (getStorageMode() !== 'remote' || remoteSyncLocked) return;
-  try {
-    await pushRemoteBundle();
-    dispatchStatus('ok');
-  } catch (e) {
-    applySyncFailureFromUnknown(e);
-  }
+  if (getStorageMode() !== 'remote') return;
+  const before = serializeDongshanDataBundle();
+  const after = serializeDongshanDataBundle();
+  if (after === before) return;
+  scheduleDebouncedPush(before, after);
+  await pushChain;
 }
 
 export async function withRemoteStorageRead<T>(fn: () => T | Promise<T>): Promise<T> {
@@ -283,23 +390,8 @@ export async function withRemoteStorageWrite<T>(fn: () => T | Promise<T>): Promi
   const out = await Promise.resolve(fn());
   const after = serializeDongshanDataBundle();
 
-  if (after === before) {
-    return out;
-  }
-
-  if (remoteSyncLocked) {
-    handleVersionConflict();
-    return out;
-  }
-
-  try {
-    await pushRemoteBundle(after);
-    dispatchStatus('ok');
-  } catch (e) {
-    if (isVersionConflictError(e)) {
-      return out;
-    }
-    applySyncFailureFromUnknown(e);
+  if (after !== before) {
+    scheduleDebouncedPush(before, after);
   }
 
   return out;

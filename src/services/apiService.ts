@@ -30,6 +30,7 @@ import { getStoreCode3, setStoreCode3 } from '../lib/storeCodeStorage';
 export {
   initRemoteSyncOnAppLoad,
   pushRemoteIfLocalBundleChangedSince,
+  refreshRemoteBundleVersionIfStale,
   syncRemoteAfterDirectLocalMutation,
   withRemoteStorageRead,
   withRemoteStorageWrite,

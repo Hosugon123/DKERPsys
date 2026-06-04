@@ -19,7 +19,6 @@ import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
 import { orders as ordersApi } from '../services/apiService';
-import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import {
   displayOrderCreatedByLabel,
   effectiveOrderDateYmd,
@@ -530,13 +529,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         orderDateYmd: newOrderDateYmd,
         procurementDeductionBasisOrderId: stallBasisOrderId,
       });
-      if (getRemoteSyncStatus() === 'version_conflict') {
-        setCheckoutSyncNotice(
-          '訂單已先存於本機，但與雲端版本衝突。請依畫面提示重新整理，系統會自動還原您剛才的資料。',
-        );
-        setTimeout(() => setCheckoutSyncNotice(null), 10000);
-        return;
-      }
       clearWorkDraft(WORK_DRAFT_IDS.procurement);
       setOrderSuccess(true);
       setCart({});

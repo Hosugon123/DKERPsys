@@ -2,6 +2,7 @@
  * 財務與營運指標計算（純函式，不依賴 React／畫面）。
  * 供儀表板、匯出報表或未來 AI／API 串接使用。
  */
+import { mergeOrderLikeRecord } from './bundleRecordMerge';
 import { toLocalYmdDashed } from './dateDisplay';
 import {
   loadFranchiseManagementOrders,
@@ -107,10 +108,12 @@ function mergeOrdersForAdminFinance(): OrderHistoryEntry[] {
   const hist = loadOrderHistory();
   const byId = new Map<string, OrderHistoryEntry>();
   for (const e of mgmt) {
-    byId.set(e.id, e);
+    const prev = byId.get(e.id);
+    byId.set(e.id, prev ? mergeOrderLikeRecord(prev, e) : e);
   }
   for (const e of hist) {
-    byId.set(e.id, e);
+    const prev = byId.get(e.id);
+    byId.set(e.id, prev ? mergeOrderLikeRecord(prev, e) : e);
   }
   return Array.from(byId.values());
 }

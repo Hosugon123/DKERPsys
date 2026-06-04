@@ -7,7 +7,6 @@ import { useAccountingLedger } from '../hooks/useAccountingLedger';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
-import { getRemoteSyncStatus } from '../services/remoteSyncHub';
 import {
   ACCOUNTING_CATEGORIES,
   FOOD_EXPENSE_CATEGORY,
@@ -416,10 +415,6 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
       note,
       amount: amt,
     });
-    if (getRemoteSyncStatus() === 'version_conflict') {
-      setFormError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
-      return false;
-    }
     clearWorkDraft(WORK_DRAFT_IDS.accounting);
     return true;
   }, [add, amountRaw, category, dateYmd, flowType, note, subCategory]);
@@ -537,10 +532,6 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
       note: editNote,
       amount: amt,
     });
-    if (getRemoteSyncStatus() === 'version_conflict') {
-      setEditError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
-      return;
-    }
     clearWorkDraft(WORK_DRAFT_IDS.accounting);
     closeEdit();
   };

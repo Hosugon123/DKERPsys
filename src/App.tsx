@@ -6,7 +6,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import DeployUpdateBanner from './components/DeployUpdateBanner';
 import PullToRefresh from './components/PullToRefresh';
-import RemoteSyncVersionConflictModal from './components/RemoteSyncVersionConflictModal';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
 import { useMobileSidebarSwipe } from './hooks/useMobileSidebarSwipe';
 import {
@@ -39,8 +38,15 @@ import {
 } from './lib/authSession';
 import { serializeDongshanDataBundle } from './lib/appDataBundle';
 import { getDefaultLandingViewForRole } from './lib/sidebarNavConfig';
-import { initRemoteSyncOnAppLoad, pushRemoteIfLocalBundleChangedSince } from './services/apiService';
+import {
+  initRemoteSyncOnAppLoad,
+  pushRemoteIfLocalBundleChangedSince,
+  refreshRemoteBundleVersionIfStale,
+} from './services/apiService';
 import { getStorageMode } from './services/storageMode';
+import { ensureRemoteImportDraftPolicy } from './lib/remoteImportDraftPolicy';
+
+ensureRemoteImportDraftPolicy();
 
 export default function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -68,6 +74,15 @@ export default function App() {
       const next = `${url.pathname}${url.search}${url.hash}`;
       window.history.replaceState(null, '', next);
     }
+  }, []);
+
+  useEffect(() => {
+    if (getStorageMode() !== 'remote') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshRemoteBundleVersionIfStale();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   useEffect(() => {
@@ -238,7 +253,6 @@ export default function App() {
           載入中…
         </div>
         <DeployUpdateBanner />
-        <RemoteSyncVersionConflictModal />
       </>
     );
   }
@@ -253,7 +267,6 @@ export default function App() {
           }}
         />
         <DeployUpdateBanner />
-        <RemoteSyncVersionConflictModal />
       </>
     );
   }
@@ -289,7 +302,6 @@ export default function App() {
         </PullToRefresh>
       </div>
       <DeployUpdateBanner />
-      <RemoteSyncVersionConflictModal />
     </div>
   );
 }

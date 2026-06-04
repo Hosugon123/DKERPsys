@@ -13,7 +13,6 @@ import {
 } from '../lib/pwaIconStorage';
 import { getUserAvatar, removeUserAvatar, setUserAvatar } from '../lib/userAvatarStorage';
 import type { UserRole } from '../views/Orders';
-import RemoteSyncIndicator from './RemoteSyncIndicator';
 import type { MobileSidebarSwipeHandlers } from '../hooks/useMobileSidebarSwipe';
 
 interface TopbarProps {
@@ -285,7 +284,6 @@ export default function Topbar({
             </div>
 
             <div className="hidden items-center gap-1.5 sm:flex">
-              <RemoteSyncIndicator className="mr-0.5" />
               <button
                 type="button"
                 className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-zinc-800"
@@ -293,9 +291,6 @@ export default function Topbar({
               >
                 <Bell size={20} />
               </button>
-            </div>
-            <div className="flex items-center sm:hidden">
-              <RemoteSyncIndicator className="mr-1" />
             </div>
             <input
               ref={pwaIconInputRef}

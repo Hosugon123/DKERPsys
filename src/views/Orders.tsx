@@ -13,7 +13,9 @@ import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
-import { getRemoteSyncStatus } from '../services/remoteSyncHub';
+import { mergeOrderLikeRecord } from '../lib/bundleRecordMerge';
+import { getOrderStorageRevisionMs } from '../lib/orderHistoryStorage';
+import { DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT } from '../lib/appDataBundle';
 import { orders as ordersApi } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
@@ -459,10 +461,12 @@ function mergeRawOrdersForDisplay(
 ): RawOrder[] {
   const byId = new Map<string, RawOrder>();
   for (const o of mgmt) {
-    if (!byId.has(o.id)) byId.set(o.id, o);
+    const prev = byId.get(o.id);
+    byId.set(o.id, prev ? mergeOrderLikeRecord(prev, o) : o);
   }
   for (const o of history) {
-    if (!byId.has(o.id)) byId.set(o.id, o);
+    const prev = byId.get(o.id);
+    byId.set(o.id, prev ? mergeOrderLikeRecord(prev, o) : o);
   }
   return Array.from(byId.values()).sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
@@ -552,6 +556,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     'idle' | 'dirty' | 'saving' | 'saved' | 'error'
   >('idle');
   const pickingAutosaveGenRef = useRef(0);
+  /** 開始調整貨量時訂單的 updatedAt；雲端拉回較新資料時勿用舊 UI 覆寫 */
+  const pickingStorageUpdatedAtRef = useRef(0);
   /** 總部：僅修正各列批價（不改數量），已出貨或已盤點押記亦可 */
   const [priceAdjustOrderId, setPriceAdjustOrderId] = useState<string | null>(null);
   const [priceAdjustLines, setPriceAdjustLines] = useState<OrderHistoryLine[]>([]);
@@ -822,8 +828,21 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
 
   const applyShipped = () => {
     if (!shipModal) return;
-    setStatus(shipModal.id, '已完成');
-    setShipModal(null);
+    const orderId = shipModal.id;
+    void (async () => {
+      const raw = rawList.find((o) => o.id === orderId);
+      if (
+        raw &&
+        pickingOrderId === orderId &&
+        !orderLineQtyMapsEqual(pickingLines, raw.lines)
+      ) {
+        setPickingPersistStatus('saving');
+        const res = await persistPickingLines(orderId, pickingLines);
+        if (!res.ok) return;
+      }
+      setStatus(orderId, '已完成');
+      setShipModal(null);
+    })();
   };
 
   const applyRevertPending = () => {
@@ -873,11 +892,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const persistPickingLines = useCallback(
     async (orderId: string, lines: OrderHistoryLine[]): Promise<UpdateEditableOrderLinesResult> => {
       const res = await ordersApi.updateEditableOrderLinesById(orderId, lines);
-      if (getRemoteSyncStatus() === 'version_conflict') {
-        setPickingError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
-        setPickingPersistStatus('error');
-        return { ok: false, reason: 'not_found' };
-      }
       if (!res.ok) {
         setPickingError(pickingErrorMessage(res));
         setPickingPersistStatus('error');
@@ -923,6 +937,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     );
     setPickingLines(lines.map((l) => ({ ...l })));
     setPickingOriginal(lines.map((l) => ({ ...l })));
+    pickingStorageUpdatedAtRef.current = getOrderStorageRevisionMs(orderId);
     setPickingPersistStatus('saved');
   };
 
@@ -935,11 +950,50 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     })();
   };
 
+  /** 雲端同步拉回較新訂單時，更新調整中 UI，避免舊 state 自動寫回覆蓋 */
+  useEffect(() => {
+    if (!pickingOrderId) return;
+    const raw = rawList.find((o) => o.id === pickingOrderId);
+    if (!raw) return;
+    const rawMs = getOrderStorageRevisionMs(pickingOrderId);
+    if (rawMs <= pickingStorageUpdatedAtRef.current) return;
+    pickingStorageUpdatedAtRef.current = rawMs;
+    const orderRow = ordersData.find((o) => o.id === pickingOrderId);
+    if (!orderRow) return;
+    const lines = buildOrderExpandedDetailLines(
+      orderRow,
+      raw,
+      catalogItemsForOrderDetail,
+      supplyRetailView,
+    );
+    setPickingLines(lines.map((l) => ({ ...l })));
+    setPickingOriginal(lines.map((l) => ({ ...l })));
+    setPickingPersistStatus('saved');
+    setPickingError(null);
+  }, [
+    pickingOrderId,
+    rawList,
+    ordersData,
+    catalogItemsForOrderDetail,
+    supplyRetailView,
+  ]);
+
+  useEffect(() => {
+    const onImported = () => void syncOrders();
+    window.addEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, onImported);
+    return () => window.removeEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, onImported);
+  }, [syncOrders]);
+
   /** 調整實出後自動寫入訂單，避免未按「儲存貨量」就離開導致回溯 */
   useEffect(() => {
     if (!pickingOrderId) return;
     const raw = rawList.find((o) => o.id === pickingOrderId);
     if (!raw) return;
+
+    const rawMs = getOrderStorageRevisionMs(pickingOrderId);
+    if (rawMs > pickingStorageUpdatedAtRef.current) {
+      return;
+    }
 
     if (orderLineQtyMapsEqual(pickingLines, raw.lines)) {
       setPickingPersistStatus((s) => (s === 'saving' ? s : 'saved'));
@@ -951,10 +1005,16 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     const timer = window.setTimeout(() => {
       void (async () => {
         if (pickingAutosaveGenRef.current !== gen) return;
+        const latest = rawList.find((o) => o.id === pickingOrderId);
+        if (!latest) return;
+        if (getOrderStorageRevisionMs(pickingOrderId) > pickingStorageUpdatedAtRef.current) return;
         setPickingPersistStatus('saving');
         const res = await persistPickingLines(pickingOrderId, pickingLines);
         if (pickingAutosaveGenRef.current !== gen) return;
-        if (res.ok) setPickingPersistStatus('saved');
+        if (res.ok) {
+          pickingStorageUpdatedAtRef.current = getOrderStorageRevisionMs(pickingOrderId);
+          setPickingPersistStatus('saved');
+        }
       })();
     }, PICKING_AUTOSAVE_MS);
 
@@ -976,10 +1036,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     setPriceAdjustError(null);
     void (async () => {
       const res = await ordersApi.adminPatchOrderLineUnitPricesById(orderId, priceAdjustLines);
-      if (getRemoteSyncStatus() === 'version_conflict') {
-        setPriceAdjustError('已存於本機，但與雲端衝突。請重新整理，系統會還原您剛才的資料。');
-        return;
-      }
       if (res.ok === true) {
         exitPriceAdjust();
         syncOrders();

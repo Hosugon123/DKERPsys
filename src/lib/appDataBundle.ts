@@ -2,6 +2,7 @@
  * 全站本機資料匯出／匯入（標準 JSON），供備份與 AI 工具分析。
  * 內容為 localStorage 鍵值快照，不經過畫面層。
  */
+import { isMultiDeviceRecordMergeKey, mergeStorageKeyRecords } from './bundleRecordMerge';
 
 export const DONGSHAN_DATA_BUNDLE_VERSION = 1;
 export const DONGSHAN_APP_ID = 'dongshan-ya-to';
@@ -143,4 +144,57 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
 
 export function parseBundleJson(text: string): unknown {
   return JSON.parse(text) as unknown;
+}
+
+/** 比對兩次序列化快照，找出有變更的 localStorage 鍵（供雲端衝突合併時保留本機剛改欄位）。 */
+export function storageKeysChangedBetweenBundleTexts(
+  beforeText: string,
+  afterText: string,
+): DongshanStorageKey[] {
+  try {
+    const b1 = parseBundleJson(beforeText) as DongshanDataBundleV1;
+    const b2 = parseBundleJson(afterText) as DongshanDataBundleV1;
+    const changed: DongshanStorageKey[] = [];
+    for (const k of DONGSHAN_EXPORT_STORAGE_KEYS) {
+      if ((b1.keys?.[k] ?? null) !== (b2.keys?.[k] ?? null)) changed.push(k);
+    }
+    return changed;
+  } catch {
+    return [...DONGSHAN_EXPORT_STORAGE_KEYS];
+  }
+}
+
+/**
+ * 雲端與本機合併：訂單／流水帳等依 id union（較新 updatedAt 優先），避免多機整包覆蓋丟單；
+ * 其餘鍵：本輪 dirty 以本機為準，否則以雲端為準並補本機獨有鍵。
+ */
+export function mergeDongshanBundlesLocalWinsDirty(
+  local: DongshanDataBundleV1,
+  cloud: DongshanDataBundleV1,
+  dirtyStorageKeys: Iterable<DongshanStorageKey>,
+): DongshanDataBundleV1 {
+  const dirty = new Set(dirtyStorageKeys);
+  const keys: Partial<Record<DongshanStorageKey, string | null>> = {
+    ...(cloud.keys ?? {}),
+  };
+  for (const k of DONGSHAN_EXPORT_STORAGE_KEYS) {
+    if (isMultiDeviceRecordMergeKey(k)) {
+      const merged = mergeStorageKeyRecords(k, local.keys?.[k], cloud.keys?.[k]);
+      if (merged != null) keys[k] = merged;
+      continue;
+    }
+    if (dirty.has(k)) {
+      if (local.keys?.[k] !== undefined) keys[k] = local.keys[k] ?? null;
+    } else if ((keys[k] == null || keys[k] === '') && local.keys?.[k] != null) {
+      keys[k] = local.keys[k] ?? null;
+    }
+  }
+  return {
+    bundleVersion: DONGSHAN_DATA_BUNDLE_VERSION,
+    app: DONGSHAN_APP_ID,
+    format: 'dongshan-localStorage-snapshot-v1',
+    exportedAt: new Date().toISOString(),
+    updatedAt: Date.now(),
+    keys,
+  };
 }
