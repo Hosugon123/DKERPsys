@@ -18,8 +18,10 @@ import {
   aggregateStallKpis,
   computeLine,
   isStallRemainEntryValid,
+  parseMoneyInputForLedgerGap,
   roundProcurementQty,
 } from '../lib/stallMath';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry, UpdateStallSnapshotResult } from '../lib/orderHistoryStorage';
@@ -29,6 +31,10 @@ import {
   displayOrderStallCountCompletedByLabel,
   effectiveOrderDateYmd,
   getOrderStorageRevisionMs,
+  orderIsFranchiseBusinessScoped,
+  readMergedOrderByIdFromStores,
+  resolveOrderDataScopeId,
+  stallCountSnapshotPersistedMatches,
 } from '../lib/orderHistoryStorage';
 import {
   formatSlashDateTimeWithWeekdayFromIso,
@@ -66,9 +72,9 @@ function procurementStatusDisplay(s: '待出貨' | '已完成' | '已取消') {
   return s === '已完成' ? '已出貨' : s;
 }
 
-/** 加盟主下單 → 加盟；總部／直營店員下單 → 直營 */
+/** 加盟店體系訂單 → 加盟；總部直營範圍 → 直營（含隸屬加盟之店員單，不以 actorRole 單欄判斷）。 */
 function orderSalesOutletChannel(o: OrderHistoryEntry): 'franchise' | 'direct' {
-  return o.actorRole === 'franchisee' ? 'franchise' : 'direct';
+  return orderIsFranchiseBusinessScoped(o) ? 'franchise' : 'direct';
 }
 
 type OutletFilter = 'all' | 'direct' | 'franchise';
@@ -115,7 +121,8 @@ function resolveRecordSnapshot(order: OrderHistoryEntry) {
     return mergeSalesRecordWithCatalog(order.stallCountSnapshot);
   }
   if (order.stallCountBasisYmd) {
-    const day = getSalesRecord(order.stallCountBasisYmd);
+    const scopeId = resolveOrderDataScopeId(order);
+    const day = getSalesRecord(order.stallCountBasisYmd, scopeId);
     return day ? mergeSalesRecordWithCatalog(day) : null;
   }
   return null;
@@ -147,10 +154,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   const [orderDateDraftYmd, setOrderDateDraftYmd] = useState('');
   const [orderDateError, setOrderDateError] = useState<string | null>(null);
   const [orderDateSaving, setOrderDateSaving] = useState(false);
+  const [stallSaveBusy, setStallSaveBusy] = useState(false);
   const [page, setPage] = useState(1);
 
-  const refreshOrders = useCallback(() => {
-    void ordersApi.listOrdersWithStallCountCompleted().then(setOrders);
+  const refreshOrders = useCallback(async () => {
+    const list = await ordersApi.listOrdersWithStallCountCompleted();
+    setOrders(list);
+    return list;
   }, []);
 
   useEffect(() => {
@@ -270,6 +280,12 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   );
   const stallIds = useMemo(() => stallDisplayItems.map((i) => i.id), [stallDisplayItems]);
 
+  const debouncedEditActualRevenue = useDebouncedValue(
+    stallEditDraft?.actualRevenue ?? '',
+    600,
+    stallEditId !== null,
+  );
+
   useUnsavedWorkBlock(
     WORK_DRAFT_IDS.salesRecordStallEdit,
     stallEditId !== null,
@@ -292,7 +308,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   );
 
   const { canWriteWithoutStaleOverwrite, noteWriteSucceeded } = useStorageRevisionGuard({
-    active: stallEditId !== null,
+    active: stallEditId !== null && !stallSaveBusy,
     readRevisionMs: readStallEditRevisionMs,
     onStorageNewer: () => {
       if (!stallEditId) return;
@@ -370,18 +386,37 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
       revenueGapReason: (stallEditDraft.revenueGapReason ?? '').trim(),
       updatedAt: new Date().toISOString(),
     };
+    setStallSaveBusy(true);
     void (async () => {
-      const res: UpdateStallSnapshotResult = await ordersApi.updateStallCountSnapshotByOrderId(orderId, next);
-      switch (res.ok) {
-        case true:
-          noteWriteSucceeded();
-          exitStallEdit();
-          refreshOrders();
-          break;
-        case false:
+      try {
+        const res: UpdateStallSnapshotResult = await ordersApi.updateStallCountSnapshotByOrderId(orderId, next);
+        if (!res.ok) {
           if (res.reason === 'not_found') setStallEditError('找不到此訂單。');
           else setStallEditError('此單無盤點押記，無法儲存。');
-          break;
+          return;
+        }
+        const saved = readMergedOrderByIdFromStores(orderId)?.stallCountSnapshot;
+        if (!stallCountSnapshotPersistedMatches(saved, next)) {
+          setStallEditError('儲存後讀回資料不一致，請重新整理後再試。');
+          return;
+        }
+        const mergedNext = mergeSalesRecordWithCatalog(next);
+        noteWriteSucceeded();
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === orderId
+              ? {
+                  ...o,
+                  stallCountSnapshot: mergedNext,
+                  updatedAt: new Date().toISOString(),
+                }
+              : o,
+          ),
+        );
+        await refreshOrders();
+        exitStallEdit();
+      } finally {
+        setStallSaveBusy(false);
       }
     })();
   };
@@ -534,7 +569,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           const displayWholesaleSold =
             getStallDisplayShouldRevenue(order, supplyRetailView) ?? wholesaleKpi.shouldRevenue;
           const actualRev = displaySnap ? num(displaySnap.actualRevenue) : 0;
-          const refLedgerGap = actualRev - displayRetailSold;
+          const actualForGap = isStallEditThis
+            ? parseMoneyInputForLedgerGap(debouncedEditActualRevenue)
+            : parseMoneyInputForLedgerGap(displaySnap?.actualRevenue);
+          const refLedgerGap =
+            actualForGap === null ? null : actualForGap - displayRetailSold;
           const tableRows = displaySnap
             ? stallDisplayItems
                 .map((item) => {
@@ -719,16 +758,20 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                 <span
                                   className={cn(
                                     'tabular-nums font-medium',
-                                    refLedgerGap < 0
-                                      ? 'text-rose-400/90'
-                                      : refLedgerGap > 0
-                                        ? 'text-emerald-300/90'
-                                        : 'text-zinc-300',
+                                    refLedgerGap === null
+                                      ? 'text-zinc-500'
+                                      : refLedgerGap < 0
+                                        ? 'text-rose-400/90'
+                                        : refLedgerGap > 0
+                                          ? 'text-emerald-300/90'
+                                          : 'text-zinc-300',
                                   )}
                                 >
-                                  {refLedgerGap === 0
-                                    ? '$0'
-                                    : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
+                                  {refLedgerGap === null
+                                    ? '輸入完成後顯示'
+                                    : refLedgerGap === 0
+                                      ? '$0'
+                                      : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
                                 </span>
                               </p>
                               <div>
@@ -768,16 +811,20 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                 <span
                                   className={cn(
                                     'tabular-nums font-medium',
-                                    refLedgerGap < 0
-                                      ? 'text-rose-400/90'
-                                      : refLedgerGap > 0
-                                        ? 'text-emerald-300/90'
-                                        : 'text-zinc-300',
+                                    refLedgerGap === null
+                                      ? 'text-zinc-500'
+                                      : refLedgerGap < 0
+                                        ? 'text-rose-400/90'
+                                        : refLedgerGap > 0
+                                          ? 'text-emerald-300/90'
+                                          : 'text-zinc-300',
                                   )}
                                 >
-                                  {refLedgerGap === 0
-                                    ? '$0'
-                                    : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
+                                  {refLedgerGap === null
+                                    ? '—'
+                                    : refLedgerGap === 0
+                                      ? '$0'
+                                      : `${refLedgerGap < 0 ? '−' : '+'}$${money(Math.abs(refLedgerGap))}`}
                                 </span>
                               </p>
                               {displaySnap.revenueGapAmount?.trim() ? (
@@ -896,10 +943,11 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
+                              disabled={stallSaveBusy}
                               onClick={() => saveStallEdit(order.id)}
-                              className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500"
+                              className="py-2 px-4 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500 disabled:opacity-50"
                             >
-                              儲存盤點
+                              {stallSaveBusy ? '儲存中…' : '儲存盤點'}
                             </button>
                             <button
                               type="button"

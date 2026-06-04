@@ -11,6 +11,7 @@ import {
   type ItemCategory,
   type SupplyItem,
 } from '../lib/supplyCatalog';
+import { resolveFranchiseeRetailOwnerUserId } from '../lib/dataScope';
 import { loadFranchiseeRetailByItemId, setFranchiseeRetailPieceForItem } from '../lib/franchiseeRetailState';
 import { isCustomItemId, type ItemOverride } from '../lib/userCatalogState';
 import { products } from '../services/apiService';
@@ -202,15 +203,17 @@ function makeDraftSupplyItem(draftKey: string): SupplyItem {
 
 /** 加盟主「本店零售價」專用寫入，與總部 `userCatalog` 的零售覆寫分庫。 */
 function applyRetailForItemOnly(item: SupplyItem, retailStr: string) {
+  const ownerId = resolveFranchiseeRetailOwnerUserId();
+  if (!ownerId) return;
   const defaultR = defaultRetailPerPieceFromWholesale(item);
   const n = Math.min(1_000_000, Math.round((Number.parseFloat(retailStr) || 0) * 100) / 100);
   if (n < 0) return;
-  const fr = loadFranchiseeRetailByItemId() as Record<string, number | undefined>;
+  const fr = loadFranchiseeRetailByItemId(ownerId) as Record<string, number | undefined>;
   const hadRetail = fr[item.id] != null;
   if (Math.abs(n - defaultR) < 0.0001) {
-    if (hadRetail) setFranchiseeRetailPieceForItem(item.id, null);
+    if (hadRetail) setFranchiseeRetailPieceForItem(ownerId, item.id, null);
   } else {
-    setFranchiseeRetailPieceForItem(item.id, n);
+    setFranchiseeRetailPieceForItem(ownerId, item.id, n);
   }
 }
 

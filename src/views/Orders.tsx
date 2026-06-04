@@ -24,6 +24,7 @@ import {
   displayOrderStallCountCompletedByLabel,
   effectiveOrderDateYmd,
   orderHasStallCountCompleted,
+  resolveOrderDataScopeId,
   type FranchiseManagementOrder,
   type OrderHistoryEntry,
   type OrderHistoryLine,
@@ -227,7 +228,13 @@ function mergeOrderStallSnapshot(raw: RawOrder) {
     return mergeSalesRecordWithCatalog(raw.stallCountSnapshot);
   }
   if (raw.stallCountBasisYmd) {
-    const day = getSalesRecord(raw.stallCountBasisYmd);
+    const scopeId =
+      'scopeId' in raw && raw.scopeId
+        ? raw.scopeId
+        : resolveOrderDataScopeId(
+            raw as Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>,
+          );
+    const day = getSalesRecord(raw.stallCountBasisYmd, scopeId);
     return day ? mergeSalesRecordWithCatalog(day) : null;
   }
   return null;

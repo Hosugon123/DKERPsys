@@ -54,6 +54,32 @@ describe('mergeArraysById', () => {
     expect(merged.map((o) => o.id).sort()).toEqual(['0012026060301', '0012026060302']);
   });
 
+  it('盤點快照依 snapshot.updatedAt 合併，訂單 updatedAt 較新也不會蓋掉剛儲存的調整', () => {
+    const stamp = '2026-06-03T08:00:00.000Z';
+    const withNewSnap = {
+      ...orderRow('0012026060301', 1, '2026-06-03T14:00:00.000Z'),
+      stallCountCompletedAt: stamp,
+      stallCountBasisYmd: '2026-06-03',
+      stallCountSnapshot: {
+        actualRevenue: '8945',
+        updatedAt: '2026-06-03T14:00:00.000Z',
+        lines: {},
+      },
+    };
+    const withOldSnap = {
+      ...orderRow('0012026060301', 1, '2026-06-03T16:00:00.000Z'),
+      stallCountCompletedAt: stamp,
+      stallCountBasisYmd: '2026-06-03',
+      stallCountSnapshot: {
+        actualRevenue: '100',
+        updatedAt: '2026-06-03T09:00:00.000Z',
+        lines: {},
+      },
+    };
+    const merged = mergeOrderLikeRecord(withOldSnap, withNewSnap);
+    expect((merged.stallCountSnapshot as { actualRevenue?: string }).actualRevenue).toBe('8945');
+  });
+
   it('已出貨＋新數量優先於僅時間戳較新的待出貨舊數量（電腦誤寫回防護）', () => {
     const shippedNew = orderRow('0012026060301', 7, '2026-06-03T10:00:00.000Z');
     shippedNew.status = '已完成';

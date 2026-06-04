@@ -1,6 +1,7 @@
 /**
  * 攤上叫貨品項；單位與自訂品見 userCatalogState。
  */
+import { getDataScopeContext, resolveFranchiseeRetailOwnerUserId } from './dataScope';
 import { loadFranchiseeRetailByItemId } from './franchiseeRetailState';
 import { loadUserCatalogState, isCustomItemId, type ItemOverride } from './userCatalogState';
 
@@ -192,20 +193,35 @@ export function getActiveSupplyRetailView(): SupplyRetailView {
   return activeSupplyRetailView;
 }
 
+/**
+ * 依目前登入者資料範圍決定零售參考視角（與流水帳 scope 一致）。
+ * 加盟店員隸屬 `scope:franchisee:*`，應讀加盟主專庫而非總部直營價。
+ */
+export function resolveSupplyRetailViewForSession(): SupplyRetailView {
+  const ctx = getDataScopeContext();
+  if (ctx.scopeId.startsWith('scope:franchisee:')) return 'franchisee';
+  return 'headquarter';
+}
+
 export function userRoleToSupplyRetailView(
-  r: 'admin' | 'franchisee' | 'employee'
+  r: 'admin' | 'franchisee' | 'employee',
 ): SupplyRetailView {
-  return r === 'franchisee' ? 'franchisee' : 'headquarter';
+  if (r === 'franchisee') return 'franchisee';
+  if (r === 'employee') return resolveSupplyRetailViewForSession();
+  return 'headquarter';
 }
 
 function applyRetailToItem(
   item: SupplyItem,
   id: string,
   st: ReturnType<typeof loadUserCatalogState>,
-  view: SupplyRetailView
+  view: SupplyRetailView,
+  franchiseeOwnerUserId?: string,
 ): SupplyItem {
   if (view === 'franchisee') {
-    const m = loadFranchiseeRetailByItemId() as Record<string, number>;
+    const ownerId = resolveFranchiseeRetailOwnerUserId(franchiseeOwnerUserId);
+    if (!ownerId) return { ...item, retailPerPiece: undefined };
+    const m = loadFranchiseeRetailByItemId(ownerId);
     const v = m[id];
     if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
       return { ...item, retailPerPiece: Math.min(1_000_000, Math.round(v * 100) / 100) };
@@ -230,34 +246,38 @@ function applyRetailToItem(
 /** 含本機覆寫、隱藏、自訂品；叫貨／盤點用此。 */
 export function getSupplyItem(
   id: string,
-  view: SupplyRetailView = activeSupplyRetailView
+  view: SupplyRetailView = activeSupplyRetailView,
+  franchiseeOwnerUserId?: string,
 ): SupplyItem | undefined {
   const st = loadUserCatalogState();
   if (isCustomItemId(id)) {
     const it = st.customItems.find((x) => x.id === id);
     if (!it) return undefined;
     const n = { ...it, category: normalizeItemCategory(String(it.category), 'tofu') };
-    return applyRetailToItem(n, id, st, view);
+    return applyRetailToItem(n, id, st, view, franchiseeOwnerUserId);
   }
   const b = getBaseSupplyItem(id);
   if (!b) return undefined;
   if (st.hiddenBaseIds.includes(id)) return undefined;
   const merged = mergeWithOverrides(b, st.overrides[id]);
-  return applyRetailToItem(merged, id, st, view);
+  return applyRetailToItem(merged, id, st, view, franchiseeOwnerUserId);
 }
 
-export function getAllSupplyItems(view: SupplyRetailView = activeSupplyRetailView): SupplyItem[] {
+export function getAllSupplyItems(
+  view: SupplyRetailView = activeSupplyRetailView,
+  franchiseeOwnerUserId?: string,
+): SupplyItem[] {
   const st = loadUserCatalogState();
   const list: SupplyItem[] = [];
   for (const b of BASE_SUPPLY_ITEMS) {
     if (st.hiddenBaseIds.includes(b.id)) continue;
     const merged = mergeWithOverrides(b, st.overrides[b.id]);
-    list.push(applyRetailToItem(merged, b.id, st, view));
+    list.push(applyRetailToItem(merged, b.id, st, view, franchiseeOwnerUserId));
   }
   list.push(
     ...st.customItems.map((c) => {
       const cN = { ...c, category: normalizeItemCategory(String(c.category), 'tofu') };
-      return applyRetailToItem(cN, c.id, st, view);
+      return applyRetailToItem(cN, c.id, st, view, franchiseeOwnerUserId);
     })
   );
   return list;

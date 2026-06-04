@@ -11,6 +11,7 @@ import {
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
 } from './orderHistoryStorage';
+import { HQ_SCOPE_ID } from './dataScope';
 import {
   getSalesRecord,
   listSalesRecordMeta,
@@ -52,7 +53,7 @@ function gapNoteFromSnapshot(snap: SalesRecordDaySnapshot): string {
 }
 
 function gapNoteFromSalesRecord(ymd: string): string {
-  const snap = getSalesRecord(ymd);
+  const snap = getSalesRecord(ymd, HQ_SCOPE_ID);
   if (!snap) return '';
   return gapNoteFromSnapshot(snap);
 }
@@ -79,7 +80,7 @@ function resolveGapSnapshotFromOrder(
   if (opts?.orderSnapshotOnly) return null;
   const basis = o.stallCountBasisYmd?.trim();
   if (!basis) return null;
-  const day = getSalesRecord(basis);
+  const day = getSalesRecord(basis, resolveOrderDataScopeId(o));
   return day ? mergeSalesRecordWithCatalog(day) : null;
 }
 
@@ -177,9 +178,9 @@ export function buildDirectStallEconomicsByYmd(
   }
 
   const directStallYmds = stallSalesBoardYmdsForPredicate(orders, matchesDirect);
-  for (const { ymd } of listSalesRecordMeta()) {
+  for (const { ymd } of listSalesRecordMeta(HQ_SCOPE_ID)) {
     if (map.has(ymd) || !directStallYmds.has(ymd)) continue;
-    const snap = getSalesRecord(ymd);
+    const snap = getSalesRecord(ymd, HQ_SCOPE_ID);
     if (!snap) continue;
     const econ = computeRetailEconomicsFromMergedSnapshot(snap, retailView);
     if (!econ) continue;

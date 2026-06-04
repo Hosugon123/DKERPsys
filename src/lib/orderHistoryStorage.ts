@@ -2,7 +2,7 @@ import { mergeOrderLikeRecord, recordUpdatedAtMs } from './bundleRecordMerge';
 import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
-import { getDataScopeContext, HQ_SCOPE_ID } from './dataScope';
+import { getDataScopeContext, HQ_SCOPE_ID, resolveFranchiseeRetailOwnerUserId } from './dataScope';
 import { listSystemUsers } from './systemUsersStorage';
 import { getStoreCode3, normalizeStoreCode3Digits } from './storeCodeStorage';
 import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessionActorDisplayName';
@@ -632,11 +632,25 @@ function roundMoney(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-function calculateSelfSuppliedCostAmount(lines: OrderHistoryLine[], actorRole: OrderActorRole): number {
+function franchiseeRetailOwnerIdForOrder(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>,
+): string | null {
+  const scope = resolveOrderDataScopeId(row);
+  const fromScope = scope?.match(/^scope:franchisee:(.+)$/)?.[1]?.trim();
+  if (fromScope) return fromScope;
+  return row.actorRole === 'franchisee' ? row.actorUserId?.trim() || null : null;
+}
+
+function calculateSelfSuppliedCostAmount(
+  lines: OrderHistoryLine[],
+  actorRole: OrderActorRole,
+  franchiseeOwnerUserId?: string | null,
+): number {
   if (actorRole !== 'franchisee') return 0;
+  const ownerId = resolveFranchiseeRetailOwnerUserId(franchiseeOwnerUserId ?? undefined);
   return roundMoney(
     lines.reduce((s, l) => {
-      const item = getSupplyItem(l.productId, 'franchisee');
+      const item = getSupplyItem(l.productId, 'franchisee', ownerId ?? undefined);
       if (!isFranchiseeSelfSuppliedItem(item)) return s;
       return s + l.unitPrice * l.qty;
     }, 0)
@@ -765,7 +779,11 @@ function patchOrderLinesInEitherStore(
     if (block) blockers.add(block);
     else {
       const payableAmount = totalAmount;
-      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(lines, histHit.actorRole);
+      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(
+        lines,
+        histHit.actorRole,
+        franchiseeRetailOwnerIdForOrder(histHit),
+      );
       const patched = patchOrderHistoryById(id, (row) => ({
         ...row,
         lines,
@@ -908,7 +926,11 @@ export function adminPatchOrderLineUnitPricesById(
     const who = persistableActorDisplayName();
     const res = tryPatch(histHit, (tot) => {
       const payableAmount = tot.totalAmount;
-      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(tot.lines, histHit.actorRole);
+      const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(
+        tot.lines,
+        histHit.actorRole,
+        franchiseeRetailOwnerIdForOrder(histHit),
+      );
       patchOrderHistoryById(id, (row) => ({
         ...row,
         lines: tot.lines,
@@ -992,7 +1014,15 @@ export function appendProcurementOrderEntry(params: {
     source: 'procurement',
     totalAmount,
     payableAmount: payableAmount ?? totalAmount,
-    selfSuppliedCostAmount: selfSuppliedCostAmount ?? calculateSelfSuppliedCostAmount(lines, actorRole),
+    selfSuppliedCostAmount:
+      selfSuppliedCostAmount ??
+      calculateSelfSuppliedCostAmount(
+        lines,
+        actorRole,
+        actorRole === 'franchisee'
+          ? ctx.userId
+          : ctx.scopeId.match(/^scope:franchisee:(.+)$/)?.[1]?.trim() || null,
+      ),
     itemCount,
     lines,
     actorRole,
@@ -1051,6 +1081,39 @@ export function setOrderStallCountStamp(
 
 export type UpdateStallSnapshotResult = { ok: true } | { ok: false; reason: 'not_found' | 'no_stamp' };
 
+function stallSnapshotLineQtyKey(
+  lines: SalesRecordDaySnapshot['lines'] | undefined,
+  itemId: string,
+  field: 'out' | 'remain',
+): string {
+  const raw = lines?.[itemId]?.[field];
+  const n = roundProcurementQty(Number(String(raw ?? '').trim() || '0'));
+  return Number.isFinite(n) ? String(n) : '0';
+}
+
+/** 儲存後驗證：比對盤點帳上關鍵欄位（不依賴 updatedAt 字串完全一致）。 */
+export function stallCountSnapshotPersistedMatches(
+  saved: SalesRecordDaySnapshot | undefined | null,
+  expected: SalesRecordDaySnapshot,
+): boolean {
+  if (!saved) return false;
+  const a = mergeSalesRecordWithCatalog(saved);
+  const b = mergeSalesRecordWithCatalog(expected);
+  if (String(a.actualRevenue ?? '').trim() !== String(b.actualRevenue ?? '').trim()) return false;
+  if (String(a.revenueGapAmount ?? '').trim() !== String(b.revenueGapAmount ?? '').trim()) return false;
+  if (String(a.revenueGapReason ?? '').trim() !== String(b.revenueGapReason ?? '').trim()) return false;
+  const ids = new Set([...Object.keys(a.lines ?? {}), ...Object.keys(b.lines ?? {})]);
+  for (const id of ids) {
+    if (stallSnapshotLineQtyKey(a.lines, id, 'out') !== stallSnapshotLineQtyKey(b.lines, id, 'out')) {
+      return false;
+    }
+    if (stallSnapshotLineQtyKey(a.lines, id, 'remain') !== stallSnapshotLineQtyKey(b.lines, id, 'remain')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export type UpdateOrderDateYmdResult =
   | { ok: true }
   | { ok: false; reason: 'not_found' | 'invalid_date' };
@@ -1070,12 +1133,13 @@ export function updateStallCountSnapshotByOrderId(
   const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === orderId);
   const histHit = loadOrderHistoryAllEntries().find((o) => o.id === orderId);
   if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
-  if (mgmtHit && !mgmtHit.stallCountCompletedAt && (!histHit || !histHit.stallCountCompletedAt)) {
-    return { ok: false, reason: 'no_stamp' };
-  }
+  const hasStamp = Boolean(
+    mgmtHit?.stallCountCompletedAt?.trim() || histHit?.stallCountCompletedAt?.trim(),
+  );
+  if (!hasStamp) return { ok: false, reason: 'no_stamp' };
 
   let wrote = false;
-  if (mgmtHit?.stallCountCompletedAt) {
+  if (mgmtHit) {
     wrote =
       patchFranchiseManagementOrderById(orderId, (row) => ({
         ...row,
@@ -1084,7 +1148,7 @@ export function updateStallCountSnapshotByOrderId(
         ...(who ? { lastUpdatedByName: who } : {}),
       })) || wrote;
   }
-  if (histHit?.stallCountCompletedAt) {
+  if (histHit) {
     wrote =
       patchOrderHistoryById(orderId, (row) => ({
         ...row,

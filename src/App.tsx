@@ -26,7 +26,8 @@ import StallInventory from './views/StallInventory';
 import SalesRecord from './views/SalesRecord';
 import Accounting from './views/Accounting';
 import DataHub from './views/DataHub';
-import { setSupplyCatalogRetailView, userRoleToSupplyRetailView } from './lib/supplyCatalog';
+import { migrateLegacyFranchiseeRetailToAllOwners } from './lib/franchiseeRetailState';
+import { resolveSupplyRetailViewForSession, setSupplyCatalogRetailView } from './lib/supplyCatalog';
 import {
   AUTH_SESSION_CHANGED_EVENT,
   clearSession,
@@ -133,8 +134,9 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
-    setSupplyCatalogRetailView(userRoleToSupplyRetailView(userRole));
-  }, [userRole]);
+    migrateLegacyFranchiseeRetailToAllOwners();
+    setSupplyCatalogRetailView(resolveSupplyRetailViewForSession());
+  }, [userRole, session?.userId]);
 
   useEffect(() => {
     const onPageRefresh = () => setPageRefreshKey((k) => k + 1);

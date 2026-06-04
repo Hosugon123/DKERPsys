@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getAllSupplyItems, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
+import { getAllSupplyItems, resolveSupplyRetailViewForSession, userRoleToSupplyRetailView } from '../lib/supplyCatalog';
 import type { UserRole } from '../views/Orders';
 
 /** 品名／單價有本機覆寫時會隨事件更新；零售參考依身分與加盟專庫分開。 */
@@ -10,6 +10,9 @@ export function useSupplyCatalogItems(userRole: UserRole) {
     window.addEventListener('supplyCatalogUpdated', h);
     return () => window.removeEventListener('supplyCatalogUpdated', h);
   }, []);
-  const view = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
+  const view = useMemo(
+    () => (userRole === 'employee' ? resolveSupplyRetailViewForSession() : userRoleToSupplyRetailView(userRole)),
+    [userRole],
+  );
   return useMemo(() => getAllSupplyItems(view), [tick, view]);
 }

@@ -19,6 +19,7 @@ import {
   getStallDisplaySoldAtRetail,
 } from './orderStallDisplayRevenue';
 import type { SupplyRetailView } from './supplyCatalog';
+import { resolveOrderStallStorageScopeId } from './scopedStallDateKey';
 import { getSalesRecord, mergeSalesRecordWithCatalog } from './salesRecordStorage';
 import { num } from './stallMath';
 import { resolveOrderStoreLabel } from './orderStoreLabel';
@@ -198,7 +199,7 @@ const PROCUREMENT_LABEL = '進貨成本（直營／總部叫貨）';
 function resolveStallSnapshotForGap(o: OrderHistoryEntry) {
   if (o.stallCountSnapshot) return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
   if (o.stallCountBasisYmd) {
-    const day = getSalesRecord(o.stallCountBasisYmd);
+    const day = getSalesRecord(o.stallCountBasisYmd, resolveOrderStallStorageScopeId(o));
     return day ? mergeSalesRecordWithCatalog(day) : null;
   }
   return null;

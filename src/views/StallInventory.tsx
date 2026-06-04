@@ -24,7 +24,14 @@ import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
-import { num, computeLine, aggregateStallKpis, isStallRemainEntryValid } from '../lib/stallMath';
+import {
+  num,
+  computeLine,
+  aggregateStallKpis,
+  isStallRemainEntryValid,
+  parseMoneyInputForLedgerGap,
+} from '../lib/stallMath';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   ymd,
   loadDay,
@@ -38,6 +45,7 @@ import {
 import { orders as ordersApi, withRemoteStorageWrite } from '../services/apiService';
 import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { saveSalesRecord } from '../lib/salesRecordStorage';
+import { resolveOrderStallStorageScopeId } from '../lib/scopedStallDateKey';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
@@ -210,8 +218,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     });
   }, []);
 
-  const actualNum = num(snap.actualRevenue);
-
   /** 盤點畫面不顯示分類「消耗品」，採買用耗材請在批貨與下單；資料仍併入同一庫，叫貨扣庫不變 */
   const stallDisplayItems = useMemo(
     () => supplyItems.filter((i) => !isConsumableItem(i)),
@@ -229,7 +235,9 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     [snap.lines, stallDisplayItems, supplyRetailView]
   );
 
-  const diff = actualNum - dayKpi.shouldRevenue;
+  const debouncedActualRevenue = useDebouncedValue(snap.actualRevenue, 600, true);
+  const actualForGap = parseMoneyInputForLedgerGap(debouncedActualRevenue);
+  const ledgerGap = actualForGap === null ? null : actualForGap - dayKpi.shouldRevenue;
 
   /** 供選單：盤點日起往前提煉內多店多單，依單一筆一盤 */
   const ordersInWindow = useMemo(
@@ -360,9 +368,14 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         revenueGapAmount: next.revenueGapAmount,
         revenueGapReason: next.revenueGapReason,
       };
+      const stallScopeId = viewOrder ? resolveOrderStallStorageScopeId(viewOrder) : undefined;
       await withRemoteStorageWrite(() => {
-        saveDay(stampBasisYmd, dayToSave);
-        saveSalesRecord(stampBasisYmd, recordSnapAligned);
+        saveDay(stampBasisYmd, dayToSave, stallScopeId);
+        saveSalesRecord(
+          stampBasisYmd,
+          recordSnapAligned,
+          stallScopeId,
+        );
       });
       setStallListTick((n) => n + 1);
       stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
@@ -704,10 +717,20 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               <span
                 className={cn(
                   'text-base font-semibold tabular-nums tracking-tight leading-none',
-                  diff < 0 ? 'text-rose-400' : diff > 0 ? 'text-emerald-400' : 'text-zinc-200',
+                  ledgerGap === null
+                    ? 'text-zinc-500 text-sm font-normal'
+                    : ledgerGap < 0
+                      ? 'text-rose-400'
+                      : ledgerGap > 0
+                        ? 'text-emerald-400'
+                        : 'text-zinc-200',
                 )}
               >
-                {diff === 0 ? '$0' : `${diff < 0 ? '−' : '+'}$${money(Math.abs(diff))}`}
+                {ledgerGap === null
+                  ? '輸入完成後顯示'
+                  : ledgerGap === 0
+                    ? '$0'
+                    : `${ledgerGap < 0 ? '−' : '+'}$${money(Math.abs(ledgerGap))}`}
               </span>
             </div>
           </div>

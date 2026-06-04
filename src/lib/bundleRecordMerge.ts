@@ -3,6 +3,7 @@
  */
 import { orderLineQtyMapsEqual, type OrderHistoryLine } from './orderHistoryStorage';
 import type { DongshanStorageKey } from './appDataBundle';
+import { mergeFranchiseeRetailStoreJson } from './franchiseeRetailState';
 
 export type OrderLikeForMerge = {
   id: string;
@@ -23,6 +24,7 @@ export const MULTI_DEVICE_RECORD_MERGE_KEYS = [
   'dongshan_accounting_ledger_v1',
   'dongshan_sales_records_v1',
   'dongshan_stall_inventory_v1',
+  'dongshan_franchisee_retail_v1',
   'dongshan_order_seq_v1',
 ] as const satisfies readonly DongshanStorageKey[];
 
@@ -69,6 +71,24 @@ function pickMergedOrderStatus(a: OrderLikeForMerge, b: OrderLikeForMerge): stri
   return b.status ?? a.status;
 }
 
+type StallSnapshotLike = { updatedAt?: string };
+
+function stallSnapshotUpdatedAtMs(order: OrderLikeForMerge): number {
+  const snap = order.stallCountSnapshot as StallSnapshotLike | null | undefined;
+  if (!snap || typeof snap !== 'object') return 0;
+  return recordUpdatedAtMs({ updatedAt: snap.updatedAt });
+}
+
+/** 盤點帳上快照以 snapshot.updatedAt 為準（調整盤點不會改 stallCountCompletedAt）。 */
+function pickNewerStallCountSnapshot(a: OrderLikeForMerge, b: OrderLikeForMerge): unknown | undefined {
+  const aSnap = a.stallCountSnapshot;
+  const bSnap = b.stallCountSnapshot;
+  if (aSnap == null && bSnap == null) return undefined;
+  if (aSnap == null) return bSnap;
+  if (bSnap == null) return aSnap;
+  return stallSnapshotUpdatedAtMs(b) >= stallSnapshotUpdatedAtMs(a) ? bSnap : aSnap;
+}
+
 /**
  * 合併同一單號兩份訂單：狀態取較進階（已完成優先於待出貨），
  * 品項數量衝突時優先採用「已出貨」方之 lines，避免僅更新時間戳的舊本機蓋回已出貨調整結果。
@@ -105,18 +125,27 @@ export function mergeOrderLikeRecord<T extends OrderLikeForMerge>(a: T, b: T): T
     stampSource = bStampMs >= aStampMs ? b : a;
   }
 
+  const mergedSnapshot = pickNewerStallCountSnapshot(a, b);
+
   return {
     ...lineSource,
     status: status ?? lineSource.status,
     lines: lineSource.lines,
     updatedAt,
-    ...(stampSource.stallCountCompletedAt
+    ...(stampSource.stallCountCompletedAt || mergedSnapshot != null
       ? {
-          stallCountBasisYmd: stampSource.stallCountBasisYmd,
+          stallCountBasisYmd:
+            stampSource.stallCountBasisYmd ?? a.stallCountBasisYmd ?? b.stallCountBasisYmd,
           stallCountCompletedAt: stampSource.stallCountCompletedAt,
-          stallCountSnapshot: stampSource.stallCountSnapshot,
-          stallCountCompletedByName: stampSource.stallCountCompletedByName,
-          stallCountCompletedByUserId: stampSource.stallCountCompletedByUserId,
+          ...(mergedSnapshot != null ? { stallCountSnapshot: mergedSnapshot } : {}),
+          stallCountCompletedByName:
+            stampSource.stallCountCompletedByName ??
+            a.stallCountCompletedByName ??
+            b.stallCountCompletedByName,
+          stallCountCompletedByUserId:
+            stampSource.stallCountCompletedByUserId ??
+            a.stallCountCompletedByUserId ??
+            b.stallCountCompletedByUserId,
         }
       : {}),
   };
@@ -246,6 +275,8 @@ export function mergeStorageKeyRecords(
     case 'dongshan_sales_records_v1':
     case 'dongshan_stall_inventory_v1':
       return mergeByDateStore(localRaw, cloudRaw);
+    case 'dongshan_franchisee_retail_v1':
+      return mergeFranchiseeRetailStoreJson(localRaw, cloudRaw);
     case 'dongshan_order_seq_v1':
       return mergeOrderSeqMap(localRaw, cloudRaw);
     default:

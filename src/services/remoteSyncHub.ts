@@ -375,6 +375,11 @@ export async function syncRemoteAfterDirectLocalMutation(): Promise<void> {
   await pushChain;
 }
 
+/** 等待目前排程中的雲端推送（含去抖動與推送前合併）完成。 */
+export async function awaitRemotePushIdle(): Promise<void> {
+  await pushChain;
+}
+
 export async function withRemoteStorageRead<T>(fn: () => T | Promise<T>): Promise<T> {
   await storageTick();
   return await Promise.resolve(fn());

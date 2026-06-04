@@ -3,6 +3,22 @@ import { listSystemUsers, type SystemUser } from './systemUsersStorage';
 
 export const HQ_SCOPE_ID = 'scope:hq';
 
+/** 從 `scope:franchisee:{userId}` 取出加盟主 user.id。 */
+export function franchiseeOwnerUserIdFromScopeId(scopeId: string | undefined): string | null {
+  const m = /^scope:franchisee:(.+)$/.exec(String(scopeId ?? '').trim());
+  return m?.[1]?.trim() || null;
+}
+
+/**
+ * 目前登入者應使用的加盟零售價表擁有者（加盟主本人或其店員之 parent）。
+ * 總部直營回傳 null。
+ */
+export function resolveFranchiseeRetailOwnerUserId(explicitOwnerId?: string): string | null {
+  const direct = explicitOwnerId?.trim();
+  if (direct) return direct;
+  return franchiseeOwnerUserIdFromScopeId(getDataScopeContext().scopeId);
+}
+
 export type DataScopeContext = {
   isAdmin: boolean;
   scopeId: string;

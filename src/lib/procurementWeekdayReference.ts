@@ -1,6 +1,7 @@
+import { getDataScopeContext } from './dataScope';
 import { addDaysYmd, parseYmd, ymd } from './stallInventoryStorage';
 import { stallSalesBoardRowYmd } from './financeLib';
-import { orderCountsTowardStallEconomics, type OrderHistoryEntry } from './orderHistoryStorage';
+import { orderCountsTowardStallEconomics, resolveOrderDataScopeId, type OrderHistoryEntry } from './orderHistoryStorage';
 import {
   getSalesRecord,
   listSalesRecordMeta,
@@ -14,7 +15,7 @@ function resolveStallSnapshotFromOrder(o: OrderHistoryEntry): SalesRecordDaySnap
   if (o.stallCountSnapshot) return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
   const basis = o.stallCountBasisYmd?.trim();
   if (!basis) return null;
-  const day = getSalesRecord(basis);
+  const day = getSalesRecord(basis, resolveOrderDataScopeId(o));
   return day ? mergeSalesRecordWithCatalog(day) : null;
 }
 
@@ -123,7 +124,7 @@ function soldMapForYmd(
   }
 
   if (!fromOrders) {
-    const raw = getSalesRecord(ymdDash);
+    const raw = getSalesRecord(ymdDash, getDataScopeContext().scopeId);
     if (raw) {
       accumulateSoldQtyByProductFromSnapshot(
         soldByProductId,
@@ -133,7 +134,7 @@ function soldMapForYmd(
     }
   }
 
-  const hasData = fromOrders || getSalesRecord(ymdDash) !== null;
+  const hasData = fromOrders || getSalesRecord(ymdDash, getDataScopeContext().scopeId) !== null;
   return { map: soldByProductId, hasData };
 }
 
@@ -149,7 +150,7 @@ function listSameWeekdayYmdsBefore(orderDateYmd: string, orders: OrderHistoryEnt
     ymdSet.add(rowYmd);
   }
 
-  for (const { ymd: recordYmd } of listSalesRecordMeta()) {
+  for (const { ymd: recordYmd } of listSalesRecordMeta(getDataScopeContext().scopeId)) {
     if (recordYmd >= orderDateYmd) continue;
     if (weekdayIdxMon0FromYmd(recordYmd) !== targetWd) continue;
     ymdSet.add(recordYmd);

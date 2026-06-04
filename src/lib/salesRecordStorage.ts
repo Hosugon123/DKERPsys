@@ -1,3 +1,10 @@
+import { HQ_SCOPE_ID } from './dataScope';
+import {
+  isLegacyBareStallDateKey,
+  parseScopedStallDateKey,
+  resolveStallStorageScopeId,
+  scopedStallDateKey,
+} from './scopedStallDateKey';
 import { getAllSupplyItems } from './supplyCatalog';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
 import { num, roundProcurementQty } from './stallMath';
@@ -24,6 +31,7 @@ type Row = { completedAt: string; completedByName?: string; snapshot: SalesRecor
 
 type StoreV1 = {
   version: 1;
+  /** 鍵為 `scopeId|YYYY-MM-DD`；舊版僅 `YYYY-MM-DD` 視為總部直營。 */
   byDate: Record<string, Row>;
 };
 
@@ -31,15 +39,43 @@ function loadStore(): StoreV1 {
   try {
     const r = localStorage.getItem(SALES_KEY);
     if (!r) return { version: 1, byDate: {} };
-    return JSON.parse(r) as StoreV1;
+    const s = JSON.parse(r) as StoreV1;
+    if (!s.byDate || typeof s.byDate !== 'object') return { version: 1, byDate: {} };
+    return migrateLegacyBareDateKeys(s);
   } catch {
     return { version: 1, byDate: {} };
   }
 }
 
+function migrateLegacyBareDateKeys(s: StoreV1): StoreV1 {
+  const next: Record<string, Row> = { ...s.byDate };
+  for (const [key, row] of Object.entries(s.byDate)) {
+    if (!isLegacyBareStallDateKey(key)) continue;
+    const scoped = scopedStallDateKey(HQ_SCOPE_ID, key);
+    if (!next[scoped]) next[scoped] = row;
+  }
+  return { version: 1, byDate: next };
+}
+
 function saveStore(s: StoreV1) {
   localStorage.setItem(SALES_KEY, JSON.stringify(s));
   window.dispatchEvent(new Event('salesRecordUpdated'));
+}
+
+function readRow(s: StoreV1, ymd: string, scopeId?: string): Row | undefined {
+  const scope = resolveStallStorageScopeId(scopeId);
+  const scopedKey = scopedStallDateKey(scope, ymd);
+  if (s.byDate[scopedKey]) return s.byDate[scopedKey];
+  if (scope === HQ_SCOPE_ID && s.byDate[ymd]) return s.byDate[ymd];
+  return undefined;
+}
+
+function writeRow(s: StoreV1, ymd: string, row: Row, scopeId?: string): void {
+  const key = scopedStallDateKey(resolveStallStorageScopeId(scopeId), ymd);
+  s.byDate[key] = row;
+  if (isLegacyBareStallDateKey(ymd) && key !== ymd) {
+    delete s.byDate[ymd];
+  }
 }
 
 function mergeSnapshotWithCatalog(snap: SalesRecordDaySnapshot): SalesRecordDaySnapshot {
@@ -56,26 +92,27 @@ export function mergeSalesRecordWithCatalog(snap: SalesRecordDaySnapshot): Sales
 }
 
 /**
- * 盤點完成時寫入；覆寫同營業日之舊銷售紀錄。
+ * 盤點完成時寫入；覆寫同資料範圍、同營業日之舊銷售紀錄。
+ * @param scopeId 未傳則用目前登入者資料範圍；訂單同步時應傳該單之 {@link resolveOrderDataScopeId}。
  */
-export function saveSalesRecord(ymd: string, snapshot: SalesRecordDaySnapshot) {
+export function saveSalesRecord(ymd: string, snapshot: SalesRecordDaySnapshot, scopeId?: string) {
   const s = loadStore();
   const completedAt = new Date().toISOString();
   const snapshotMerged = mergeSnapshotWithCatalog(snapshot);
   const who = getSessionActorDisplayName();
-  s.byDate[ymd] = {
+  writeRow(s, ymd, {
     completedAt,
     ...(who ? { completedByName: who } : {}),
     snapshot: { ...snapshotMerged, updatedAt: completedAt },
-  };
+  }, scopeId);
   saveStore(s);
 }
 
 /** 僅更新落差備註；無該日紀錄時建立最小快照（與 Dashboard 表格連動）。 */
-export function patchSalesRecordRevenueGapReason(ymd: string, reason: string) {
+export function patchSalesRecordRevenueGapReason(ymd: string, reason: string, scopeId?: string) {
   const trimmed = reason.trim();
   const s = loadStore();
-  const row = s.byDate[ymd];
+  const row = readRow(s, ymd, scopeId);
   const now = new Date().toISOString();
   const prev = row
     ? mergeSnapshotWithCatalog(row.snapshot)
@@ -85,28 +122,32 @@ export function patchSalesRecordRevenueGapReason(ymd: string, reason: string) {
         updatedAt: '',
       });
   const who = getSessionActorDisplayName();
-  s.byDate[ymd] = {
-    completedAt: row?.completedAt ?? now,
-    ...(row?.completedByName ? { completedByName: row.completedByName } : who ? { completedByName: who } : {}),
-    snapshot: {
-      ...prev,
-      revenueGapReason: trimmed,
-      updatedAt: now,
+  writeRow(
+    s,
+    ymd,
+    {
+      completedAt: row?.completedAt ?? now,
+      ...(row?.completedByName ? { completedByName: row.completedByName } : who ? { completedByName: who } : {}),
+      snapshot: {
+        ...prev,
+        revenueGapReason: trimmed,
+        updatedAt: now,
+      },
     },
-  };
+    scopeId,
+  );
   saveStore(s);
 }
 
-export function getSalesRecord(ymd: string): SalesRecordDaySnapshot | null {
+export function getSalesRecord(ymd: string, scopeId?: string): SalesRecordDaySnapshot | null {
   const s = loadStore();
-  const row = s.byDate[ymd];
+  const row = readRow(s, ymd, scopeId);
   if (!row) return null;
   return mergeSnapshotWithCatalog(row.snapshot);
 }
 
 /**
  * 僅在該筆訂單有「盤點完成」押記時視為已盤點。
- * （舊版曾以「訂單建立日＝盤點日之銷售紀錄」推斷，會使同日多筆訂單或僅導入頁面就誤顯示已盤點，已移除。）
  */
 export function isOrderStallCountDone(
   _createdAtIso: string,
@@ -115,23 +156,49 @@ export function isOrderStallCountDone(
   return Boolean(stallCountCompletedAt);
 }
 
-export function listSalesRecordMeta(): { ymd: string; completedAt: string; completedByName?: string }[] {
+export function listSalesRecordMeta(scopeId?: string): {
+  ymd: string;
+  completedAt: string;
+  completedByName?: string;
+  scopeId: string;
+}[] {
   const s = loadStore();
-  return Object.keys(s.byDate)
-    .sort((a, b) => b.localeCompare(a))
-    .map((d) => ({
-      ymd: d,
-      completedAt: s.byDate[d].completedAt,
-      completedByName: s.byDate[d].completedByName,
-    }));
+  const scopeFilter = scopeId?.trim();
+  const out: { ymd: string; completedAt: string; completedByName?: string; scopeId: string }[] = [];
+  for (const [key, row] of Object.entries(s.byDate)) {
+    let sid = HQ_SCOPE_ID;
+    let ymd = key;
+    const parsed = parseScopedStallDateKey(key);
+    if (parsed) {
+      sid = parsed.scopeId;
+      ymd = parsed.ymd;
+    } else if (isLegacyBareStallDateKey(key)) {
+      sid = HQ_SCOPE_ID;
+      ymd = key;
+    } else {
+      continue;
+    }
+    if (scopeFilter && sid !== scopeFilter) continue;
+    out.push({
+      ymd,
+      completedAt: row.completedAt,
+      completedByName: row.completedByName,
+      scopeId: sid,
+    });
+  }
+  return out.sort((a, b) => b.ymd.localeCompare(a.ymd));
 }
 
 /**
  * 與攤上扣庫相同邏輯，同步更新銷售紀錄內之「剩餘」（若該日有紀錄）。
  */
-export function applySalesRecordOrderDeduction(ymdStr: string, deductions: Record<string, number>) {
+export function applySalesRecordOrderDeduction(
+  ymdStr: string,
+  deductions: Record<string, number>,
+  scopeId?: string,
+) {
   const s = loadStore();
-  const row = s.byDate[ymdStr];
+  const row = readRow(s, ymdStr, scopeId);
   if (!row) return;
   const prev = mergeSnapshotWithCatalog(row.snapshot);
   const lines: SalesRecordDaySnapshot['lines'] = { ...prev.lines };
@@ -147,9 +214,14 @@ export function applySalesRecordOrderDeduction(ymdStr: string, deductions: Recor
     lines[id] = { ...lines[id], remain: String(next) };
   }
   const now = new Date().toISOString();
-  s.byDate[ymdStr] = {
-    ...row,
-    snapshot: { ...prev, lines, updatedAt: now },
-  };
+  writeRow(
+    s,
+    ymdStr,
+    {
+      ...row,
+      snapshot: { ...prev, lines, updatedAt: now },
+    },
+    scopeId,
+  );
   saveStore(s);
 }

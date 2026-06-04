@@ -80,7 +80,7 @@ import {
   buildFranchiseStallEconomicsByYmd,
   type DirectStallDayEconomics,
 } from '../lib/directStallDayEconomics';
-import { getDataScopeContext } from '../lib/dataScope';
+import { getDataScopeContext, HQ_SCOPE_ID } from '../lib/dataScope';
 import {
   clearRevenueBaselineTarget,
   getRevenueBaselineTarget,
@@ -404,7 +404,7 @@ function stallSnapshotMergedFromOrder(o: OrderHistoryEntry) {
   if (o.stallCountSnapshot) return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
   const b = o.stallCountBasisYmd?.trim();
   if (b) {
-    const rec = getSalesRecord(b);
+    const rec = getSalesRecord(b, resolveOrderDataScopeId(o));
     if (rec) return mergeSalesRecordWithCatalog(rec);
   }
   return null;
@@ -414,9 +414,10 @@ function accumulateSoldQtyByProductFromSnapshot(
   dayMap: Map<string, number>,
   snap: ReturnType<typeof mergeSalesRecordWithCatalog>,
   retailView: SupplyRetailView,
+  franchiseeOwnerUserId?: string,
 ) {
   for (const id of Object.keys(snap.lines)) {
-    const item = getSupplyItem(id, retailView);
+    const item = getSupplyItem(id, retailView, franchiseeOwnerUserId);
     if (!item || isConsumableItem(item)) continue;
     const line = snap.lines[id] ?? { out: '', remain: '' };
     const c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
@@ -984,7 +985,7 @@ function DirectStallGapReasonCell({
   scopedNotesOnly?: boolean;
 }) {
   const snap = useMemo(
-    () => (scopedNotesOnly ? null : getSalesRecord(ymd)),
+    () => (scopedNotesOnly ? null : getSalesRecord(ymd, HQ_SCOPE_ID)),
     [ymd, syncKey, scopedNotesOnly],
   );
   const snapReason = scopedNotesOnly ? '' : snap?.revenueGapReason?.trim() ?? '';
@@ -1031,7 +1032,7 @@ function DirectStallGapReasonCell({
         onChange={(e) => setVal(e.target.value)}
         onBlur={() => {
           if (val.trim() === seedReason.trim()) return;
-          patchSalesRecordRevenueGapReason(ymd, val);
+          patchSalesRecordRevenueGapReason(ymd, val, scopedNotesOnly ? undefined : HQ_SCOPE_ID);
         }}
       />
       {amountLine ? (
@@ -1577,16 +1578,17 @@ export default function Dashboard({
         dayMap = new Map();
         perDay.set(ymd, dayMap);
       }
-      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView);
+      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView, franchiseId ?? undefined);
     }
 
     for (const ymd of qualifyingYmds) {
       if (perDay.has(ymd)) continue;
-      const raw = getSalesRecord(ymd);
+      const salesScope = franchiseId ? `scope:franchisee:${franchiseId}` : HQ_SCOPE_ID;
+      const raw = getSalesRecord(ymd, salesScope);
       if (!raw) continue;
       const snap = mergeSalesRecordWithCatalog(raw);
       const dayMap = new Map<string, number>();
-      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView);
+      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView, franchiseId ?? undefined);
       if (dayMap.size > 0) perDay.set(ymd, dayMap);
     }
 
@@ -1598,7 +1600,7 @@ export default function Dashboard({
     const n = qualifyingYmds.length;
     const rows: { id: string; name: string; avg: number; max: number; min: number }[] = [];
     for (const id of allIds) {
-      const item = getSupplyItem(id, retailView);
+      const item = getSupplyItem(id, retailView, franchiseId ?? undefined);
       const name = item?.name ?? id;
       const series = qualifyingYmds.map((ymd) => perDay.get(ymd)?.get(id) ?? 0);
       const sum = series.reduce((s, v) => s + v, 0);
@@ -1608,7 +1610,7 @@ export default function Dashboard({
       rows.push({ id, name, avg, max, min });
     }
     const catalogOrderIndex = new Map<string, number>();
-    getAllSupplyItems(retailView)
+    getAllSupplyItems(retailView, franchiseId ?? undefined)
       .filter((item) => !isConsumableItem(item))
       .forEach((item, index) => catalogOrderIndex.set(item.id, index));
     rows.sort((a, b) => {

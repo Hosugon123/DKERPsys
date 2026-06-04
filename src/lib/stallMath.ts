@@ -13,6 +13,16 @@ export function num(s: string | undefined) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * 實收欄位用於「帳面落差」顯示：空白或無效時回傳 null，避免輸入中途（如先打 89）算出誤導性大落差。
+ */
+export function parseMoneyInputForLedgerGap(raw: string | undefined): number | null {
+  const t = String(raw ?? '').replace(/,/g, '').trim();
+  if (t === '' || t === '-' || t === '.' || t === '-.') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function soldFromRow(out: number, remain: number) {
   return Math.max(0, out - remain);
 }

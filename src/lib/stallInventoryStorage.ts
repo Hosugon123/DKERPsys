@@ -5,10 +5,17 @@ import {
   loadOrderHistory,
   listOrdersWithStallCountCompleted,
   effectiveOrderDateYmd,
+  readMergedOrderByIdFromStores,
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
 } from './orderHistoryStorage';
-import { getDataScopeContext } from './dataScope';
+import { HQ_SCOPE_ID, getDataScopeContext } from './dataScope';
+import {
+  isLegacyBareStallDateKey,
+  resolveOrderStallStorageScopeId,
+  resolveStallStorageScopeId,
+  scopedStallDateKey,
+} from './scopedStallDateKey';
 import {
   getSalesRecord,
   applySalesRecordOrderDeduction,
@@ -73,11 +80,38 @@ function loadAll(): StoreV1 {
   try {
     const r = localStorage.getItem(KEY);
     if (!r) return { version: 1, byDate: {} };
-    return JSON.parse(r) as StoreV1;
+    const s = JSON.parse(r) as StoreV1;
+    if (!s.byDate || typeof s.byDate !== 'object') return { version: 1, byDate: {} };
+    return migrateLegacyStallDayKeys(s);
   } catch {
     return { version: 1, byDate: {} };
   }
+}
 
+function migrateLegacyStallDayKeys(s: StoreV1): StoreV1 {
+  const next: Record<string, DaySnapshot> = { ...s.byDate };
+  for (const [key, row] of Object.entries(s.byDate)) {
+    if (!isLegacyBareStallDateKey(key)) continue;
+    const scoped = scopedStallDateKey(HQ_SCOPE_ID, key);
+    if (!next[scoped]) next[scoped] = row;
+  }
+  return { version: 1, byDate: next };
+}
+
+function readStallDay(s: StoreV1, ymdStr: string, scopeId?: string): DaySnapshot | undefined {
+  const scope = resolveStallStorageScopeId(scopeId);
+  const scopedKey = scopedStallDateKey(scope, ymdStr);
+  if (s.byDate[scopedKey]) return s.byDate[scopedKey];
+  if (scope === HQ_SCOPE_ID && s.byDate[ymdStr]) return s.byDate[ymdStr];
+  return undefined;
+}
+
+function writeStallDay(s: StoreV1, ymdStr: string, snap: DaySnapshot, scopeId?: string): void {
+  const key = scopedStallDateKey(resolveStallStorageScopeId(scopeId), ymdStr);
+  s.byDate[key] = snap;
+  if (isLegacyBareStallDateKey(ymdStr) && key !== ymdStr) {
+    delete s.byDate[ymdStr];
+  }
 }
 
 function saveAll(s: StoreV1) {
@@ -101,9 +135,9 @@ function mergeDayWithCurrentCatalog(snap: DaySnapshot): DaySnapshot {
   };
 }
 
-export function loadDay(ymdStr: string): DaySnapshot {
+export function loadDay(ymdStr: string, scopeId?: string): DaySnapshot {
   const s = loadAll();
-  const base = s.byDate[ymdStr] ?? emptyDay();
+  const base = readStallDay(s, ymdStr, scopeId) ?? emptyDay();
   return mergeDayWithCurrentCatalog(base);
 }
 
@@ -124,23 +158,32 @@ export function stallDaySnapshotFingerprint(snap: DaySnapshot): string {
   ].join('\n');
 }
 
-export function saveDay(ymdStr: string, snap: DaySnapshot) {
+export function saveDay(ymdStr: string, snap: DaySnapshot, scopeId?: string) {
   const s = loadAll();
   const editor = getSessionActorDisplayName();
-  s.byDate[ymdStr] = {
-    ...snap,
-    updatedAt: new Date().toISOString(),
-    ...(editor ? { lastSavedByName: editor } : {}),
-  };
+  writeStallDay(
+    s,
+    ymdStr,
+    {
+      ...snap,
+      updatedAt: new Date().toISOString(),
+      ...(editor ? { lastSavedByName: editor } : {}),
+    },
+    scopeId,
+  );
   saveAll(s);
 }
 
 /**
  * 叫貨送出時自「盤點日」的剩餘量扣除（不會低於 0；該日尚無盤點則從空表建立欄位）。
  */
-export function applyOrderDeductionToDayRemain(ymdStr: string, deductions: Record<string, number>) {
+export function applyOrderDeductionToDayRemain(
+  ymdStr: string,
+  deductions: Record<string, number>,
+  scopeId?: string,
+) {
   const s = loadAll();
-  const prev = s.byDate[ymdStr] ?? emptyDay();
+  const prev = readStallDay(s, ymdStr, scopeId) ?? emptyDay();
   const lines = { ...prev.lines } as DaySnapshot['lines'];
   for (const it of getAllSupplyItems()) {
     if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
@@ -158,17 +201,18 @@ export function applyOrderDeductionToDayRemain(ymdStr: string, deductions: Recor
     lines,
     updatedAt: new Date().toISOString(),
   };
-  saveDay(ymdStr, snap);
-  applySalesRecordOrderDeduction(ymdStr, deductions);
+  saveDay(ymdStr, snap, scopeId);
+  applySalesRecordOrderDeduction(ymdStr, deductions, scopeId);
 }
 
 /**
  * 批貨、扣庫與參攤上「剩餘」讀取用：若該盤點日已有「銷售紀錄」（盤點完成），
  * **收攤剩餘 (remain)** 以銷售紀錄為準（送單扣庫會與攤上同步寫入），**帶出、實收** 仍以攤上即時資料為準。
  */
-export function loadDayForProcurement(ymdStr: string): DaySnapshot {
-  const work = loadDay(ymdStr);
-  const sales = getSalesRecord(ymdStr);
+export function loadDayForProcurement(ymdStr: string, scopeId?: string): DaySnapshot {
+  const scope = resolveStallStorageScopeId(scopeId);
+  const work = loadDay(ymdStr, scope);
+  const sales = getSalesRecord(ymdStr, scope);
   if (!sales) return work;
   const lines: DaySnapshot['lines'] = { ...work.lines };
   for (const it of getAllSupplyItems()) {
@@ -218,12 +262,35 @@ export function getOrderStallCountBasisYmdForDeduction(orderId: string): string 
   return o?.stallCountBasisYmd ?? null;
 }
 
-function findOrderByIdInStores(orderId: string) {
-  return (
-    loadFranchiseManagementOrders().find((x) => x.id === orderId) ??
-    loadOrderHistory().find((x) => x.id === orderId) ??
-    null
-  );
+function findOrderByIdInStores(orderId: string): OrderHistoryEntry | null {
+  const merged = readMergedOrderByIdFromStores(orderId);
+  if (!merged) return null;
+  return 'actorRole' in merged
+    ? merged
+    : {
+        id: merged.id,
+        createdAt: merged.createdAt,
+        orderDateYmd: merged.orderDateYmd,
+        updatedAt: merged.updatedAt ?? merged.createdAt,
+        source: merged.source,
+        totalAmount: merged.totalAmount,
+        payableAmount: merged.payableAmount ?? merged.totalAmount,
+        selfSuppliedCostAmount: merged.selfSuppliedCostAmount ?? 0,
+        itemCount: merged.itemCount,
+        lines: merged.lines,
+        storeLabel: merged.storeLabel,
+        status: merged.status,
+        actorRole: 'admin',
+        scopeId: merged.scopeId,
+        actorUserId: merged.actorUserId,
+        createdByName: merged.createdByName,
+        stallCountCompletedByName: merged.stallCountCompletedByName,
+        stallCountCompletedByUserId: merged.stallCountCompletedByUserId,
+        lastUpdatedByName: merged.lastUpdatedByName,
+        stallCountBasisYmd: merged.stallCountBasisYmd,
+        stallCountCompletedAt: merged.stallCountCompletedAt,
+        stallCountSnapshot: merged.stallCountSnapshot,
+      };
 }
 
 /**
@@ -431,25 +498,34 @@ export function syncBasisDayFromOrderSnapshot(orderId: string): void {
   if (!o || !basisYmd || !snap) return;
 
   const merged = mergeSalesRecordWithCatalog(snap as SalesRecordDaySnapshot);
-  saveSalesRecord(basisYmd, {
-    lines: merged.lines,
-    actualRevenue: merged.actualRevenue,
-    updatedAt: merged.updatedAt,
-    revenueGapAmount: merged.revenueGapAmount,
-    revenueGapReason: merged.revenueGapReason,
-    frozenRetailUnitPriceByItem: merged.frozenRetailUnitPriceByItem,
-    frozenWholesaleUnitPriceByItem: merged.frozenWholesaleUnitPriceByItem,
-  });
+  const scopeId = resolveOrderStallStorageScopeId(o);
+  saveSalesRecord(
+    basisYmd,
+    {
+      lines: merged.lines,
+      actualRevenue: merged.actualRevenue,
+      updatedAt: merged.updatedAt,
+      revenueGapAmount: merged.revenueGapAmount,
+      revenueGapReason: merged.revenueGapReason,
+      frozenRetailUnitPriceByItem: merged.frozenRetailUnitPriceByItem,
+      frozenWholesaleUnitPriceByItem: merged.frozenWholesaleUnitPriceByItem,
+    },
+    scopeId,
+  );
 
-  const work = loadDay(basisYmd);
-  saveDay(basisYmd, {
+  const work = loadDay(basisYmd, scopeId);
+  saveDay(
+    basisYmd,
+    {
     ...work,
     lines: merged.lines,
     actualRevenue: merged.actualRevenue ?? work.actualRevenue,
     revenueGapAmount: merged.revenueGapAmount ?? work.revenueGapAmount,
     revenueGapReason: merged.revenueGapReason ?? work.revenueGapReason,
     updatedAt: merged.updatedAt,
-  });
+    },
+    scopeId,
+  );
 }
 
 export type StallOrderForDateRow = {

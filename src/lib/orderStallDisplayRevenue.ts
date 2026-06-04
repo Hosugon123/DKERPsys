@@ -1,4 +1,5 @@
 import type { FranchiseManagementOrder, OrderHistoryEntry } from './orderHistoryStorage';
+import { resolveOrderStallStorageScopeId } from './scopedStallDateKey';
 import { getAllSupplyItems, getSupplyItem, isConsumableItem, type SupplyRetailView } from './supplyCatalog';
 import { aggregateStallKpis, num } from './stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
@@ -14,7 +15,7 @@ function resolveStallSnapshotForOrder(o: StallFields): SalesRecordDaySnapshot | 
     return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
   }
   if (o.stallCountBasisYmd) {
-    const day = getSalesRecord(o.stallCountBasisYmd);
+    const day = getSalesRecord(o.stallCountBasisYmd, resolveOrderStallStorageScopeId(o));
     return day ? mergeSalesRecordWithCatalog(day) : null;
   }
   return null;

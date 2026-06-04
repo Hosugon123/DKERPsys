@@ -6,7 +6,7 @@
  * - remote：啟動時由 {@link initRemoteSyncOnAppLoad} 先 GET 覆蓋本地；每次寫入後自動推送整包。
  */
 import { getStorageMode, type StorageMode } from './storageMode';
-import { withRemoteStorageRead, withRemoteStorageWrite } from './remoteSyncHub';
+import { awaitRemotePushIdle, withRemoteStorageRead, withRemoteStorageWrite } from './remoteSyncHub';
 import * as accountingLedger from '../lib/accountingLedgerStorage';
 import * as orderHistory from '../lib/orderHistoryStorage';
 import * as stallInventory from '../lib/stallInventoryStorage';
@@ -154,17 +154,21 @@ export const orders = {
       snapshot: import('../lib/salesRecordStorage').SalesRecordDaySnapshot;
     },
   ): Promise<boolean> {
-    return withRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields));
+    const ok = await withRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields));
+    if (ok && getStorageMode() === 'remote') await awaitRemotePushIdle();
+    return ok;
   },
   async updateStallCountSnapshotByOrderId(
     orderId: string,
     snapshot: import('../lib/salesRecordStorage').SalesRecordDaySnapshot,
   ): Promise<orderHistory.UpdateStallSnapshotResult> {
-    return withRemoteStorageWrite(() => {
-      const res = orderHistory.updateStallCountSnapshotByOrderId(orderId, snapshot);
-      if (res.ok) stallInventory.syncBasisDayFromOrderSnapshot(orderId);
-      return res;
+    const res = await withRemoteStorageWrite(() => {
+      const inner = orderHistory.updateStallCountSnapshotByOrderId(orderId, snapshot);
+      if (inner.ok) stallInventory.syncBasisDayFromOrderSnapshot(orderId);
+      return inner;
     });
+    if (res.ok && getStorageMode() === 'remote') await awaitRemotePushIdle();
+    return res;
   },
   async updateOrderDateYmdByOrderId(
     orderId: string,
