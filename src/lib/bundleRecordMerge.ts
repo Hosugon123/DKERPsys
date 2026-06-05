@@ -54,6 +54,63 @@ function pickNewerByUpdatedAt<T extends { updatedAt?: string; createdAt?: string
   return recordUpdatedAtMs(b) >= recordUpdatedAtMs(a) ? b : a;
 }
 
+type DeletedOrderIdsStore = { version: 1; byId: Record<string, string> };
+
+function parseDeletedOrderIdsStore(raw: string | null | undefined): DeletedOrderIdsStore {
+  const p = safeParseJson(raw);
+  if (
+    p &&
+    typeof p === 'object' &&
+    'byId' in p &&
+    typeof (p as DeletedOrderIdsStore).byId === 'object'
+  ) {
+    return { version: 1, byId: { ...(p as DeletedOrderIdsStore).byId } };
+  }
+  return { version: 1, byId: {} };
+}
+
+/** 合併兩端已刪除訂單墓碑（同 id 取較新 deletedAt）。 */
+export function mergeDeletedOrderIdsStore(
+  localRaw: string | null | undefined,
+  cloudRaw: string | null | undefined,
+): string {
+  const local = parseDeletedOrderIdsStore(localRaw);
+  const cloud = parseDeletedOrderIdsStore(cloudRaw);
+  const byId: Record<string, string> = { ...cloud.byId };
+  for (const [id, deletedAt] of Object.entries(local.byId)) {
+    const cid = id.trim();
+    if (!cid || !deletedAt?.trim()) continue;
+    const prev = byId[cid];
+    if (
+      !prev ||
+      recordUpdatedAtMs({ createdAt: deletedAt }) >= recordUpdatedAtMs({ createdAt: prev })
+    ) {
+      byId[cid] = deletedAt;
+    }
+  }
+  return JSON.stringify({ version: 1, byId });
+}
+
+/** 從訂單陣列 JSON 排除墓碑中的 id。 */
+export function filterOrderArrayJsonByTombstones(
+  ordersJson: string,
+  tombstonesJson: string,
+): string {
+  const tombstones = parseDeletedOrderIdsStore(tombstonesJson);
+  const tombstoneIds = new Set(
+    Object.keys(tombstones.byId).map((id) => id.trim()).filter(Boolean),
+  );
+  if (tombstoneIds.size === 0) return ordersJson;
+  const arr = safeParseJson(ordersJson);
+  if (!Array.isArray(arr)) return ordersJson;
+  const filtered = arr.filter((x) => {
+    if (x == null || typeof x !== 'object') return true;
+    const id = (x as { id?: string }).id?.trim();
+    return !id || !tombstoneIds.has(id);
+  });
+  return JSON.stringify(filtered);
+}
+
 const ORDER_STATUS_RANK: Record<string, number> = {
   已完成: 3,
   待出貨: 2,

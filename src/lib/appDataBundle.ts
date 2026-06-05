@@ -2,7 +2,12 @@
  * 全站本機資料匯出／匯入（標準 JSON），供備份與 AI 工具分析。
  * 內容為 localStorage 鍵值快照，不經過畫面層。
  */
-import { isMultiDeviceRecordMergeKey, mergeStorageKeyRecords } from './bundleRecordMerge';
+import {
+  filterOrderArrayJsonByTombstones,
+  isMultiDeviceRecordMergeKey,
+  mergeDeletedOrderIdsStore,
+  mergeStorageKeyRecords,
+} from './bundleRecordMerge';
 
 export const DONGSHAN_DATA_BUNDLE_VERSION = 1;
 export const DONGSHAN_APP_ID = 'dongshan-ya-to';
@@ -12,6 +17,7 @@ export const DONGSHAN_EXPORT_STORAGE_KEYS = [
   'dongshan_accounting_ledger_v1',
   'dongshan_order_history_v1',
   'dongshan_franchise_mgmt_orders_v1',
+  'dongshan_deleted_order_ids_v1',
   'dongshan_stall_inventory_v1',
   'dongshan_store_code_v1',
   'dongshan_user_catalog_v2',
@@ -177,9 +183,22 @@ export function mergeDongshanBundlesLocalWinsDirty(
   const keys: Partial<Record<DongshanStorageKey, string | null>> = {
     ...(cloud.keys ?? {}),
   };
+  const mergedTombstones = mergeDeletedOrderIdsStore(
+    local.keys?.dongshan_deleted_order_ids_v1,
+    cloud.keys?.dongshan_deleted_order_ids_v1,
+  );
+  keys.dongshan_deleted_order_ids_v1 = mergedTombstones;
+
   for (const k of DONGSHAN_EXPORT_STORAGE_KEYS) {
+    if (k === 'dongshan_deleted_order_ids_v1') continue;
     if (isMultiDeviceRecordMergeKey(k)) {
-      const merged = mergeStorageKeyRecords(k, local.keys?.[k], cloud.keys?.[k]);
+      let merged = mergeStorageKeyRecords(k, local.keys?.[k], cloud.keys?.[k]);
+      if (
+        merged != null &&
+        (k === 'dongshan_order_history_v1' || k === 'dongshan_franchise_mgmt_orders_v1')
+      ) {
+        merged = filterOrderArrayJsonByTombstones(merged, mergedTombstones);
+      }
       if (merged != null) keys[k] = merged;
       continue;
     }

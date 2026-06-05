@@ -91,7 +91,11 @@ export const orders = {
     return withRemoteStorageRead(() => orderHistory.loadCompletedOrderHistoryListForRole(role));
   },
   async deleteOrderByIdFromAnyStore(orderId: string): Promise<boolean> {
-    return withRemoteStorageWrite(() => orderHistory.deleteOrderByIdFromAnyStore(orderId));
+    const ok = await withRemoteStorageWrite(() =>
+      orderHistory.deleteOrderByIdFromAnyStore(orderId),
+    );
+    if (ok && getStorageMode() === 'remote') await awaitRemotePushIdle();
+    return ok;
   },
   async updateFranchiseManagementOrderStatus(
     id: string,

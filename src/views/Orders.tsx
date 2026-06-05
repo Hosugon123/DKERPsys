@@ -554,6 +554,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [revertModal, setRevertModal] = useState<null | { id: string }>(null);
   const [cancelModal, setCancelModal] = useState<null | { id: string }>(null);
   const [deleteModal, setDeleteModal] = useState<null | { id: string }>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   /** 調整貨量：一次僅編輯一單的實出數量（可增可減） */
   const [pickingOrderId, setPickingOrderId] = useState<string | null>(null);
   const [pickingLines, setPickingLines] = useState<OrderHistoryLine[]>([]);
@@ -1085,13 +1086,17 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const applyDeleteOrder = () => {
     if (!deleteModal) return;
     const id = deleteModal.id;
+    setDeleteError(null);
     void (async () => {
       if (await ordersApi.deleteOrderByIdFromAnyStore(id)) {
         if (expandedOrderId === id) setExpandedOrderId(null);
         if (pickingOrderId === id) exitPickingEdit();
         if (priceAdjustOrderId === id) exitPriceAdjust();
         setDeleteModal(null);
+        setDeleteError(null);
         syncOrders();
+      } else {
+        setDeleteError('無法刪除此訂單，可能無權限或訂單已不存在。');
       }
     })();
   };
@@ -1648,7 +1653,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (isHeadquarters) setDeleteModal({ id: order.id });
+                                      if (isHeadquarters) {
+                                        setDeleteError(null);
+                                        setDeleteModal({ id: order.id });
+                                      }
                                       else setCancelModal({ id: order.id });
                                     }}
                                     disabled={orderEditLocked}
@@ -1682,7 +1690,10 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (isHeadquarters) setDeleteModal({ id: order.id });
+                                      if (isHeadquarters) {
+                                        setDeleteError(null);
+                                        setDeleteModal({ id: order.id });
+                                      }
                                       else setCancelModal({ id: order.id });
                                     }}
                                     disabled={orderEditLocked}
@@ -2363,14 +2374,17 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         </div>
       )}
 
-      {deleteModal && deleteModalOrder && (
+      {deleteModal && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70"
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-order-dialog-title"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setDeleteModal(null);
+            if (e.target === e.currentTarget) {
+              setDeleteModal(null);
+              setDeleteError(null);
+            }
           }}
         >
           <div
@@ -2381,15 +2395,28 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
               永久刪除訂單
             </h3>
             <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
-              訂單 <span className="font-mono text-zinc-300">{deleteModalOrder.id}</span> 將從本機完全移除；歷史訂單、銷售紀錄若出現同單也會一併刪除。此操作無法還原。是否確定？
+              訂單 <span className="font-mono text-zinc-300">{deleteModal.id}</span> 將從本機完全移除；歷史訂單、銷售紀錄若出現同單也會一併刪除。此操作無法還原。是否確定？
             </p>
-            <p className="mt-2 text-sm text-zinc-500">
-              合計 <span className="text-amber-500/90 font-medium tabular-nums">$ {deleteModalOrder.totalAmount.toLocaleString()}</span>
-            </p>
+            {deleteModalOrder && (
+              <p className="mt-2 text-sm text-zinc-500">
+                合計{' '}
+                <span className="text-amber-500/90 font-medium tabular-nums">
+                  $ {deleteModalOrder.totalAmount.toLocaleString()}
+                </span>
+              </p>
+            )}
+            {deleteError && (
+              <p className="mt-3 text-sm text-rose-400" role="alert">
+                {deleteError}
+              </p>
+            )}
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setDeleteModal(null)}
+                onClick={() => {
+                  setDeleteModal(null);
+                  setDeleteError(null);
+                }}
                 className="px-4 py-2.5 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 text-sm font-medium"
               >
                 關閉

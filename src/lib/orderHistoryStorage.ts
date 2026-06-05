@@ -89,6 +89,33 @@ export type OrderHistoryEntry = {
 
 const STORAGE_KEY = 'dongshan_order_history_v1';
 const FRANCHISE_MGMT_KEY = 'dongshan_franchise_mgmt_orders_v1';
+/** 已永久刪除之訂單 id（雲端合併時過濾，避免 union 還原） */
+export const DELETED_ORDER_IDS_KEY = 'dongshan_deleted_order_ids_v1';
+
+type DeletedOrderIdsStore = { version: 1; byId: Record<string, string> };
+
+function loadDeletedOrderIdsStore(): DeletedOrderIdsStore {
+  try {
+    const raw = localStorage.getItem(DELETED_ORDER_IDS_KEY);
+    if (!raw) return { version: 1, byId: {} };
+    const p = JSON.parse(raw) as Partial<DeletedOrderIdsStore>;
+    if (p && typeof p === 'object' && p.byId && typeof p.byId === 'object') {
+      return { version: 1, byId: { ...p.byId } };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { version: 1, byId: {} };
+}
+
+/** 記錄訂單已刪除（多機同步時以墓碑排除該 id）。 */
+export function tombstoneDeletedOrderId(orderId: string): void {
+  const id = orderId.trim();
+  if (!id) return;
+  const store = loadDeletedOrderIdsStore();
+  store.byId[id] = new Date().toISOString();
+  localStorage.setItem(DELETED_ORDER_IDS_KEY, JSON.stringify(store));
+}
 
 export type FranchiseManagementOrder = {
   id: string;
@@ -541,20 +568,20 @@ function patchFranchiseManagementOrderById(
 export function deleteOrderByIdFromAnyStore(orderId: string): boolean {
   const ctx = getDataScopeContext();
   const mgmtAll = loadFranchiseManagementOrdersAll();
-  const mgmtHit = mgmtAll.find((o) => o.id === orderId);
-  if (mgmtHit) {
-    if (!canAccessOrder(mgmtHit, ctx)) return false;
-    saveFranchiseManagementOrders(mgmtAll.filter((o) => o.id !== orderId));
-    return true;
-  }
   const histAll = loadOrderHistoryAllEntries();
+  const mgmtHit = mgmtAll.find((o) => o.id === orderId);
   const histHit = histAll.find((o) => o.id === orderId);
-  if (histHit) {
-    if (!canAccessOrder(histHit, ctx)) return false;
-    saveOrderHistory(histAll.filter((o) => o.id !== orderId));
-    return true;
+  if (!mgmtHit && !histHit) return false;
+  if (mgmtHit && !canAccessOrder(mgmtHit, ctx)) return false;
+  if (histHit && !canAccessOrder(histHit, ctx)) return false;
+  if (mgmtHit) {
+    saveFranchiseManagementOrders(mgmtAll.filter((o) => o.id !== orderId));
   }
-  return false;
+  if (histHit) {
+    saveOrderHistory(histAll.filter((o) => o.id !== orderId));
+  }
+  tombstoneDeletedOrderId(orderId);
+  return true;
 }
 
 function appendFranchiseManagementOrderInternal(params: {
