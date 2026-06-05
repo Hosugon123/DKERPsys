@@ -1,22 +1,67 @@
 @import "tailwindcss";
 
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --ds-bg-root: #0d0d0d;
+  --ds-bg-sidebar: #0f0f0f;
+  --ds-bg-topbar: #111111;
+  --ds-bg-surface: #18181b;
+  --ds-bg-surface-hover: #27272a;
+  --ds-bg-input: #09090b;
+  --ds-bg-muted: #141414;
+  --ds-border: #27272a;
+  --ds-border-muted: #3f3f46;
+  --ds-text-primary: #f5f2ed;
+  --ds-text-muted: #71717a;
+  --ds-text-subtle: #a1a1aa;
+  --ds-overlay: rgb(0 0 0 / 0.5);
+  --ds-scrollbar-thumb: #27272a;
+  --ds-scrollbar-thumb-hover: #3f3f46;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --ds-bg-root: #f0ebe3;
+  --ds-bg-sidebar: #faf8f5;
+  --ds-bg-topbar: #ffffff;
+  --ds-bg-surface: #ffffff;
+  --ds-bg-surface-hover: #ebe6de;
+  --ds-bg-input: #ffffff;
+  --ds-bg-muted: #f5f0e8;
+  --ds-bg-subtle: #ebe6de;
+  --ds-shadow-color: rgb(28 25 23 / 0.08);
+  --ds-amber-tint: #fef9ec;
+  --ds-rose-tint: #fff1f2;
+  --ds-sky-tint: #f0f9ff;
+  --ds-amber-text: #b45309;
+  --ds-amber-text-strong: #92400e;
+  --ds-rose-text: #e11d48;
+  --ds-border: #d6d0c4;
+  --ds-border-muted: #c4bdb0;
+  --ds-text-primary: #1c1917;
+  --ds-text-muted: #57534e;
+  --ds-text-subtle: #78716c;
+  --ds-overlay: rgb(28 25 23 / 0.32);
+  --ds-scrollbar-thumb: #c4bdb0;
+  --ds-scrollbar-thumb-hover: #a8a29e;
+}
+
 @layer base {
   /* 全系統字級 +15%（rem／em 與 Tailwind 字級階層會跟著縮放） */
   html {
     font-size: 115%;
     height: 100%;
-    /* 與 App 主題一致；避免載入中／#root 尚未撐滿時出現整片預設白底 */
-    background-color: #0d0d0d;
-    color: #f5f2ed;
-    /* 減少 iOS 橡皮筋穿透外層 */
+    background-color: var(--ds-bg-root);
+    color: var(--ds-text-primary);
     overscroll-behavior-y: none;
   }
 
   body {
     margin: 0;
     min-height: 100%;
-    background-color: #0d0d0d;
-    color: #f5f2ed;
+    background-color: var(--ds-bg-root);
+    color: var(--ds-text-primary);
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
   }
@@ -24,6 +69,53 @@
   #root {
     min-height: 100%;
     min-height: 100dvh;
+  }
+}
+
+@layer utilities {
+  .bg-ds-root {
+    background-color: var(--ds-bg-root);
+  }
+
+  .bg-ds-sidebar {
+    background-color: var(--ds-bg-sidebar);
+  }
+
+  .bg-ds-topbar {
+    background-color: var(--ds-bg-topbar);
+  }
+
+  .bg-ds-surface {
+    background-color: var(--ds-bg-surface);
+  }
+
+  .bg-ds-muted {
+    background-color: var(--ds-bg-muted);
+  }
+
+  .text-ds-primary {
+    color: var(--ds-text-primary);
+  }
+
+  .text-ds-muted {
+    color: var(--ds-text-muted);
+  }
+
+  .text-ds-subtle {
+    color: var(--ds-text-subtle);
+  }
+
+  .border-ds {
+    border-color: var(--ds-border);
+  }
+
+  /** 手機 sticky 列（批貨分類等）：跟隨主題底色半透明 */
+  .bg-ds-sticky-bar {
+    background-color: color-mix(in srgb, var(--ds-bg-root) 95%, transparent);
+  }
+
+  .border-ds-soft {
+    border-color: color-mix(in srgb, var(--ds-border) 80%, transparent);
   }
 }
 
@@ -42,14 +134,14 @@
   }
 
   .cost-table-scroll::-webkit-scrollbar-track {
-    background: #09090b;
+    background: var(--ds-bg-muted);
     border-radius: 9999px;
   }
 
   .cost-table-scroll::-webkit-scrollbar-thumb {
     background: #a16207;
     border-radius: 9999px;
-    border: 2px solid #09090b;
+    border: 2px solid var(--ds-bg-muted);
   }
 
   .cost-table-scroll::-webkit-scrollbar-thumb:hover {
@@ -231,26 +323,26 @@
   }
 }
 
-/* Custom Scrollbar for Dark Theme */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent; 
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a; 
+  background: var(--ds-scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46; 
+  background: var(--ds-scrollbar-thumb-hover);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #27272a transparent;
+  scrollbar-color: var(--ds-scrollbar-thumb) transparent;
 }

@@ -250,7 +250,7 @@ export default function Topbar({
   return (
     <>
       <header
-        className="sticky top-0 z-30 border-b border-zinc-800 bg-[#111111] pt-[env(safe-area-inset-top)]"
+        className="sticky top-0 z-30 border-b border-ds bg-ds-topbar pt-[env(safe-area-inset-top)]"
         onTouchStart={sidebarSwipe?.onTouchStart}
         onTouchMove={sidebarSwipe?.onTouchMove}
         onTouchEnd={sidebarSwipe?.onTouchEnd}

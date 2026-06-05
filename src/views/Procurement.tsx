@@ -1053,7 +1053,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         )}
       </div>
 
-      <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-2 bg-[#0d0d0d]/95 backdrop-blur-sm border-b border-zinc-800/80 sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-none sm:pb-0 sm:pt-0">
+      <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-2 bg-ds-sticky-bar backdrop-blur-sm border-b border-ds-soft sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-none sm:pb-0 sm:pt-0">
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none touch-pan-x">
           {CATEGORY_CHIPS.map((c) => (
             <button

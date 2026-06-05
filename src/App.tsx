@@ -251,7 +251,7 @@ export default function App() {
   if (!authReady) {
     return (
       <>
-        <div className="flex min-h-[100dvh] items-center justify-center bg-[#0d0d0d] text-zinc-500">
+        <div className="flex min-h-[100dvh] items-center justify-center bg-ds-root text-ds-muted">
           載入中…
         </div>
         <DeployUpdateBanner />
@@ -274,7 +274,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 bg-[#0d0d0d] font-sans text-[#f5f2ed] overflow-hidden selection:bg-amber-600/30">
+    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 bg-ds-root font-sans text-ds-primary overflow-hidden selection:bg-amber-600/30">
       <Sidebar
         currentView={currentView}
         setCurrentView={setCurrentView}

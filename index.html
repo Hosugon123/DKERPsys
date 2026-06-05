@@ -13,6 +13,14 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>DKERPsys 達客東山鴨頭</title>
     <script>
+      try {
+        var storedTheme = localStorage.getItem('dongshan_color_theme_v1');
+        var theme = storedTheme === 'light' || storedTheme === 'dark' ? storedTheme : 'dark';
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      } catch (e) {}
+    </script>
+    <script>
       // Prevent polyfills (like whatwg-fetch) from crashing the app in iframe environments
       // where window.fetch is a getter-only property.
       (function() {

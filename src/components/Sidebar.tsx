@@ -24,6 +24,7 @@ import {
 } from '../lib/sidebarNavOrderStorage';
 import { cn } from '../lib/utils';
 import type { MobileSidebarSwipeHandlers } from '../hooks/useMobileSidebarSwipe';
+import ThemeToggleButton from './ThemeToggleButton';
 
 interface SidebarProps {
   currentView: string;
@@ -176,22 +177,23 @@ export default function Sidebar({
       <aside
         id="app-sidebar-drawer"
         className={cn(
-          'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 flex w-64 max-md:max-w-[85vw] flex-col border-r border-zinc-800 bg-[#0f0f0f] py-6 transition-transform duration-200 ease-in-out max-md:overscroll-y-contain max-md:pl-[env(safe-area-inset-left)] md:static md:shrink-0',
+          'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 flex w-64 max-md:max-w-[85vw] flex-col border-r border-ds bg-ds-sidebar py-6 transition-transform duration-200 ease-in-out max-md:overscroll-y-contain max-md:pl-[env(safe-area-inset-left)] md:static md:shrink-0',
           isOpen ? 'translate-x-0' : 'max-md:-translate-x-full',
         )}
       >
         <div className="flex items-center gap-3 px-4 mb-3">
-          <div className="w-10 h-10 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 shadow-lg shadow-black/30">
+          <div className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border border-ds bg-ds-surface shadow-lg shadow-black/10">
             <img
               src="/brand-logo-v2.png"
               alt="達客東山鴨頭 Logo"
               className="h-full w-full object-cover"
             />
           </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-wide">達客東山鴨頭</h1>
-            <p className="text-[0.625rem] text-zinc-500 uppercase tracking-widest">職人數據管理</p>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-semibold tracking-wide text-ds-primary">達客東山鴨頭</h1>
+            <p className="text-[0.625rem] text-ds-muted uppercase tracking-widest">職人數據管理</p>
           </div>
+          <ThemeToggleButton />
         </div>
 
         <div className="px-4 mb-2 flex items-center justify-between gap-2 min-h-8">
