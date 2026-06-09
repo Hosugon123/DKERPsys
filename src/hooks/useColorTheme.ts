@@ -13,7 +13,7 @@ function subscribeColorTheme(onStoreChange: () => void): () => void {
 }
 
 export function useColorTheme() {
-  const theme = useSyncExternalStore(subscribeColorTheme, getColorTheme, () => 'dark' as ColorTheme);
+  const theme = useSyncExternalStore(subscribeColorTheme, getColorTheme, () => 'light' as ColorTheme);
   const toggleTheme = useCallback(() => {
     toggleColorTheme();
   }, []);

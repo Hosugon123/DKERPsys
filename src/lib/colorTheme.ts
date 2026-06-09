@@ -8,17 +8,26 @@ const THEME_COLORS: Record<ColorTheme, string> = {
   light: '#f4f1eb',
 };
 
+function normalizeTheme(raw: unknown): ColorTheme | null {
+  return raw === 'light' || raw === 'dark' ? raw : null;
+}
+
+function readDocumentTheme(): ColorTheme | null {
+  if (typeof document === 'undefined') return null;
+  return normalizeTheme(document.documentElement.dataset.theme);
+}
+
 function readStoredTheme(): ColorTheme {
   try {
-    const raw = localStorage.getItem(COLOR_THEME_STORAGE_KEY);
-    if (raw === 'light' || raw === 'dark') return raw;
+    const stored = normalizeTheme(localStorage.getItem(COLOR_THEME_STORAGE_KEY));
+    if (stored) return stored;
   } catch {
     /* ignore */
   }
-  return 'dark';
+  return readDocumentTheme() ?? 'light';
 }
 
-let cachedTheme: ColorTheme = 'dark';
+let cachedTheme: ColorTheme = readDocumentTheme() ?? 'light';
 
 export function getColorTheme(): ColorTheme {
   return cachedTheme;
@@ -34,6 +43,7 @@ export function applyColorTheme(theme: ColorTheme): void {
 }
 
 export function setColorTheme(theme: ColorTheme): void {
+  cachedTheme = theme;
   try {
     localStorage.setItem(COLOR_THEME_STORAGE_KEY, theme);
   } catch {

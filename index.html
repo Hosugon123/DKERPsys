@@ -13,12 +13,17 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>DKERPsys 達客東山鴨頭</title>
     <script>
-      try {
-        var storedTheme = localStorage.getItem('dongshan_color_theme_v1');
-        var theme = storedTheme === 'light' || storedTheme === 'dark' ? storedTheme : 'dark';
+      (function() {
+        var theme = 'light';
+        try {
+          var storedTheme = localStorage.getItem('dongshan_color_theme_v1');
+          if (storedTheme === 'light' || storedTheme === 'dark') theme = storedTheme;
+        } catch (e) {}
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;
-      } catch (e) {}
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', theme === 'light' ? '#f4f1eb' : '#0d0d0d');
+      })();
     </script>
     <script>
       // Prevent polyfills (like whatwg-fetch) from crashing the app in iframe environments
