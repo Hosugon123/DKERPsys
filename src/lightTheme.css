@@ -122,7 +122,11 @@
 
 /* ——— Amber 語意區塊（提示、打底、view-as 橫幅） ——— */
 [data-theme="light"] #root .bg-amber-950\/10,
-[data-theme="light"] #root .bg-amber-950\/15 {
+[data-theme="light"] #root .bg-amber-950\/15,
+[data-theme="light"] #root .bg-amber-950\/20,
+[data-theme="light"] #root .bg-amber-950\/25,
+[data-theme="light"] #root .bg-amber-950\/30,
+[data-theme="light"] #root .bg-amber-950\/40 {
   background-color: var(--ds-amber-tint) !important;
 }
 
@@ -132,6 +136,15 @@
 [data-theme="light"] #root .border-amber-900\/40,
 [data-theme="light"] #root .border-amber-900\/50 {
   border-color: #e9b949 !important;
+}
+
+[data-theme="light"] #root .border-amber-800\/55,
+[data-theme="light"] #root .border-amber-900\/45 {
+  border-color: #d8a23a !important;
+}
+
+[data-theme="light"] #root .divide-amber-900\/40 > :not(:last-child) {
+  border-color: #ddc7a4 !important;
 }
 
 [data-theme="light"] #root .text-amber-100,
@@ -194,10 +207,19 @@
   --tw-shadow-color: var(--ds-shadow-color) !important;
 }
 
+[data-theme="light"] .bg-black\/25,
+[data-theme="light"] .bg-black\/35,
 [data-theme="light"] .bg-black\/50,
+[data-theme="light"] #root .bg-black\/25,
+[data-theme="light"] #root .bg-black\/35,
 [data-theme="light"] #root .bg-black\/50,
 [data-theme="light"] #root .bg-black\/70 {
   background-color: var(--ds-overlay) !important;
+}
+
+[data-theme="light"] #root .bg-black\/25,
+[data-theme="light"] #root .bg-black\/35 {
+  background-color: color-mix(in srgb, var(--ds-bg-surface) 86%, var(--ds-amber-tint)) !important;
 }
 
 [data-theme="light"] #root .shadow-\[0_8px_24px_rgba\(0\,0\,0\,0\.35\)\] {
