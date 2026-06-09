@@ -881,7 +881,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         onPointerDown={preventAdjacentInputBlurActivate}
                         onTouchStart={preventAdjacentInputBlurActivate}
                         onClick={() => setLine(item.id, 'remain', '0')}
-                        className="inline-flex shrink-0 h-9 items-center justify-center whitespace-nowrap rounded border border-zinc-600 bg-zinc-800/60 px-1.5 text-xs leading-normal text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
+                        className="stall-sold-out-button inline-flex shrink-0 h-9 items-center justify-center whitespace-nowrap rounded border border-zinc-600 bg-zinc-800/60 px-1.5 text-xs leading-normal text-zinc-400 hover:border-amber-600/50 hover:text-amber-200/90"
                       >
                         已售完
                       </button>

@@ -187,6 +187,19 @@
   background-image: linear-gradient(to top, rgb(247 244 239 / 0.84), rgb(247 244 239 / 0)) !important;
 }
 
+[data-theme="light"] #root .stall-sold-out-button {
+  background-color: #f4ede3 !important;
+  border-color: #d6c5ad !important;
+  color: #756858 !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72);
+}
+
+[data-theme="light"] #root .stall-sold-out-button:hover {
+  background-color: #fff7e8 !important;
+  border-color: #d5953f !important;
+  color: #9a5a12 !important;
+}
+
 [data-theme="light"] #root .hover\:text-amber-200:hover,
 [data-theme="light"] #root .hover\:text-amber-300:hover {
   color: var(--ds-amber-text) !important;
