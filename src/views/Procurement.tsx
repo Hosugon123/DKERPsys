@@ -781,7 +781,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
           </div>
         )}
         {basisOrders.length === 0 && (
-          <p className="text-xs text-amber-200/80 border border-amber-800/50 rounded-lg px-2.5 py-2 bg-amber-950/30">
+          <p className="procurement-empty-basis-note text-xs text-amber-200/80 border border-amber-800/50 rounded-lg px-2.5 py-2 bg-amber-950/30">
             尚無「已完成盤點」的叫貨單。請在「攤上盤點」完成一筆後，此處才會出現可扣餘貨的訂單。
           </p>
         )}
@@ -1145,7 +1145,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                   </>
                 )}
               </div>
-              <div className="mt-1.5 rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-2 py-1.5 text-[0.6875rem] sm:text-[0.72rem] text-zinc-400 space-y-0.5">
+              <div className="procurement-product-ref-panel mt-1.5 rounded-lg border border-zinc-800/80 bg-zinc-950/50 px-2 py-1.5 text-[0.6875rem] sm:text-[0.72rem] text-zinc-400 space-y-0.5">
                 <div className="flex items-center justify-between gap-2">
                   <span>昨日剩貨</span>
                   <span className="tabular-nums text-zinc-300">
@@ -1293,7 +1293,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       <div
         ref={checkoutDockRef}
         className={cn(
-          'fixed left-0 right-0 lg:left-64 z-40 pointer-events-none bg-gradient-to-t from-[#0a0a0a] to-transparent',
+          'procurement-checkout-dock fixed left-0 right-0 lg:left-64 z-40 pointer-events-none bg-gradient-to-t from-[#0a0a0a] to-transparent',
           dockCompact
             ? 'px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-0.5'
             : 'px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2'
