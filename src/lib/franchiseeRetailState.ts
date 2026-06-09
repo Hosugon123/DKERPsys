@@ -9,6 +9,8 @@ const LEGACY_OWNER_KEY = '__legacy_v1__';
 type OwnerBucket = {
   byId: Record<string, number>;
   updatedAt: string;
+  updatedAtByItem?: Record<string, string>;
+  deletedAtByItem?: Record<string, string>;
 };
 
 type StoreV1 = {
@@ -26,14 +28,28 @@ function notify() {
 }
 
 function emptyBucket(): OwnerBucket {
-  return { byId: {}, updatedAt: new Date(0).toISOString() };
+  return {
+    byId: {},
+    updatedAt: new Date(0).toISOString(),
+    updatedAtByItem: {},
+    deletedAtByItem: {},
+  };
 }
 
 function normalizeStore(raw: unknown): StoreV2 {
   if (!raw || typeof raw !== 'object') return { version: 2, byOwnerId: {} };
-  const s = raw as Partial<StoreV1 & StoreV2>;
+  const s = raw as Partial<StoreV1> & Partial<StoreV2>;
   if (s.version === 2 && s.byOwnerId && typeof s.byOwnerId === 'object') {
-    return { version: 2, byOwnerId: { ...s.byOwnerId } };
+    const byOwnerId: Record<string, OwnerBucket> = {};
+    for (const [ownerId, bucket] of Object.entries(s.byOwnerId)) {
+      byOwnerId[ownerId] = {
+        byId: { ...(bucket.byId ?? {}) },
+        updatedAt: bucket.updatedAt || new Date(0).toISOString(),
+        updatedAtByItem: { ...(bucket.updatedAtByItem ?? {}) },
+        deletedAtByItem: { ...(bucket.deletedAtByItem ?? {}) },
+      };
+    }
+    return { version: 2, byOwnerId };
   }
   const byId = (s as StoreV1).byId;
   if (s.version === 1 && byId && typeof byId === 'object' && Object.keys(byId).length > 0) {
@@ -43,6 +59,8 @@ function normalizeStore(raw: unknown): StoreV2 {
         [LEGACY_OWNER_KEY]: {
           byId: { ...byId },
           updatedAt: new Date().toISOString(),
+          updatedAtByItem: {},
+          deletedAtByItem: {},
         },
       },
     };
@@ -100,28 +118,70 @@ export function setFranchiseeRetailPieceForItem(
   const s = loadStore();
   const prev = readBucket(s, owner);
   const byId = { ...prev.byId };
+  const updatedAtByItem = { ...(prev.updatedAtByItem ?? {}) };
+  const deletedAtByItem = { ...(prev.deletedAtByItem ?? {}) };
+  const now = new Date().toISOString();
   if (value == null) {
     delete byId[id];
+    delete updatedAtByItem[id];
+    deletedAtByItem[id] = now;
   } else {
     const n = Math.min(1_000_000, Math.round(value * 100) / 100);
     if (n < 0) return;
     byId[id] = n;
+    updatedAtByItem[id] = now;
+    delete deletedAtByItem[id];
   }
-  s.byOwnerId[owner] = { byId, updatedAt: new Date().toISOString() };
+  s.byOwnerId[owner] = { byId, updatedAt: now, updatedAtByItem, deletedAtByItem };
   if (owner !== LEGACY_OWNER_KEY && s.byOwnerId[LEGACY_OWNER_KEY] && Object.keys(byId).length > 0) {
     delete s.byOwnerId[LEGACY_OWNER_KEY];
   }
   saveStore(s);
 }
 
+function tsMs(s: string | undefined): number {
+  const ms = Date.parse(s || '');
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function mergeOwnerBuckets(a: OwnerBucket, b: OwnerBucket): OwnerBucket {
-  const aMs = Date.parse(a.updatedAt) || 0;
-  const bMs = Date.parse(b.updatedAt) || 0;
-  const newer = bMs >= aMs ? b : a;
-  const older = bMs >= aMs ? a : b;
-  const byId = { ...older.byId, ...newer.byId };
+  const aMs = tsMs(a.updatedAt);
+  const bMs = tsMs(b.updatedAt);
+  const itemIds = new Set([
+    ...Object.keys(a.byId),
+    ...Object.keys(b.byId),
+    ...Object.keys(a.updatedAtByItem ?? {}),
+    ...Object.keys(b.updatedAtByItem ?? {}),
+    ...Object.keys(a.deletedAtByItem ?? {}),
+    ...Object.keys(b.deletedAtByItem ?? {}),
+  ]);
+  const byId: Record<string, number> = {};
+  const updatedAtByItem: Record<string, string> = {};
+  const deletedAtByItem: Record<string, string> = {};
+
+  for (const id of itemIds) {
+    const candidates = [
+      { kind: 'value' as const, value: a.byId[id], at: a.updatedAtByItem?.[id] ?? a.updatedAt },
+      { kind: 'value' as const, value: b.byId[id], at: b.updatedAtByItem?.[id] ?? b.updatedAt },
+      { kind: 'delete' as const, value: undefined, at: a.deletedAtByItem?.[id] },
+      { kind: 'delete' as const, value: undefined, at: b.deletedAtByItem?.[id] },
+    ]
+      .filter((x) => (x.kind === 'delete' ? Boolean(x.at) : x.value !== undefined))
+      .sort((x, y) => tsMs(y.at) - tsMs(x.at));
+    const latest = candidates[0];
+    if (!latest) continue;
+    if (latest.kind === 'delete') {
+      deletedAtByItem[id] = latest.at!;
+      continue;
+    }
+    byId[id] = Number(latest.value);
+    updatedAtByItem[id] = latest.at || new Date(0).toISOString();
+  }
+
   return {
     byId,
+    updatedAtByItem,
+    deletedAtByItem,
     updatedAt: new Date(Math.max(aMs, bMs)).toISOString(),
   };
 }

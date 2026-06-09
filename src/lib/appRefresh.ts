@@ -33,7 +33,7 @@ export async function refreshAppPageData(options?: RefreshAppPageOptions): Promi
   if (getStorageMode() === 'remote') {
     const bundle = await fetchRemoteBundle();
     const result = importDongshanDataBundle(bundle);
-    if (!result.ok) {
+    if (result.ok === false) {
       throw new Error(result.error);
     }
   } else {

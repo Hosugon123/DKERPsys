@@ -8,7 +8,6 @@ import {
   buildDongshanDataBundle,
   buildDongshanDataBundleForPush,
   importDongshanDataBundle,
-  isRemoteBundleEffectivelyEmpty,
   mergeDongshanBundlesLocalWinsDirty,
   parseBundleJson,
   serializeDongshanDataBundle,
@@ -200,7 +199,7 @@ async function mergeCloudWithLocalDirty(
   const local = parseBundleJson(localBundleText) as DongshanDataBundleV1;
   const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys);
   const result = importDongshanDataBundle(merged);
-  if (!result.ok) {
+  if (result.ok === false) {
     throw new Error(result.error);
   }
   noteRemoteBundleUpdatedAt(cloud);
@@ -216,7 +215,7 @@ async function reconcileLocalBundleWithCloudBeforePush(
   const local = parseBundleJson(bundleText) as DongshanDataBundleV1;
   const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys);
   const result = importDongshanDataBundle(merged);
-  if (!result.ok) throw new Error(result.error);
+  if (result.ok === false) throw new Error(result.error);
   noteRemoteBundleUpdatedAt(cloud);
   return JSON.stringify(merged);
 }
@@ -309,7 +308,7 @@ export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
     const local = buildDongshanDataBundle();
     const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, []);
     const result = importDongshanDataBundle(merged);
-    if (!result.ok) throw new Error(result.error);
+    if (result.ok === false) throw new Error(result.error);
     noteRemoteBundleUpdatedAt(cloud);
     dispatchStatus('ok');
   } catch (e) {
@@ -333,7 +332,7 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
       const local = buildDongshanDataBundle();
       const merged = mergeDongshanBundlesLocalWinsDirty(local, bundle, []);
       const result = importDongshanDataBundle(merged);
-      if (!result.ok) {
+      if (result.ok === false) {
         dispatchStatus('error');
         return;
       }

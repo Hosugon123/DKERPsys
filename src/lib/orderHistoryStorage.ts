@@ -24,6 +24,8 @@ export type OrderHistoryLine = {
   unitPrice: number;
   qty: number;
   unit: string;
+  /** Internal merge timestamp for this product line. */
+  updatedAt?: string;
 };
 
 /** 訂單明細中「消耗品」分類之列小計加總（代訂固定成本，不計入總部營收／加盟排行）。 */
@@ -613,7 +615,7 @@ function appendFranchiseManagementOrderInternal(params: {
     payableAmount: payableAmount ?? totalAmount,
     selfSuppliedCostAmount: selfSuppliedCostAmount ?? 0,
     itemCount,
-    lines,
+    lines: lines.map((line) => ({ ...line, updatedAt: now })),
     storeLabel: '直營店',
     status: '待出貨',
     scopeId: getDataScopeContext().scopeId,
@@ -699,6 +701,38 @@ export function aggregateOrderLinesForSave(lines: OrderHistoryLine[]) {
   return { lines: kept, itemCount, totalAmount };
 }
 
+function orderLineRevisionKey(l: OrderHistoryLine): string {
+  return [
+    l.productId,
+    roundProcurementQty(Number(l.qty) || 0),
+    roundMoney(Number(l.unitPrice) || 0),
+    l.name,
+    l.unit,
+  ].join('\u001f');
+}
+
+function stampChangedOrderLines(
+  nextLines: OrderHistoryLine[],
+  previousLines: OrderHistoryLine[],
+  now: string,
+  previousOrderUpdatedAt?: string,
+): OrderHistoryLine[] {
+  const previousByProductId = new Map<string, OrderHistoryLine>();
+  for (const line of previousLines) {
+    if (!line.productId) continue;
+    previousByProductId.set(line.productId, line);
+  }
+
+  return nextLines.map((line) => {
+    const prev = previousByProductId.get(line.productId);
+    const unchanged = prev && orderLineRevisionKey(prev) === orderLineRevisionKey(line);
+    return {
+      ...line,
+      updatedAt: unchanged ? prev.updatedAt ?? previousOrderUpdatedAt ?? now : now,
+    };
+  });
+}
+
 /** 各品項實出量（qty>0 合計），供比對調整貨量是否已寫入訂單。 */
 export function orderLineQtyByProductId(lines: OrderHistoryLine[]): Map<string, number> {
   const m = new Map<string, number>();
@@ -779,7 +813,7 @@ function patchOrderLinesInEitherStore(
 
   const now = new Date().toISOString();
   const who = persistableActorDisplayName();
-  const { lines, itemCount, totalAmount } = totals;
+  const { itemCount, totalAmount } = totals;
   let wrote = false;
   const blockers = new Set<LinePatchBlockReason>();
 
@@ -787,6 +821,7 @@ function patchOrderLinesInEitherStore(
     const block = linePatchBlockReason(mgmtHit, mode);
     if (block) blockers.add(block);
     else {
+      const lines = stampChangedOrderLines(totals.lines, mgmtHit.lines, now, mgmtHit.updatedAt);
       const patched = patchFranchiseManagementOrderById(id, (row) => ({
         ...row,
         lines,
@@ -805,6 +840,7 @@ function patchOrderLinesInEitherStore(
     const block = linePatchBlockReason(histHit, mode);
     if (block) blockers.add(block);
     else {
+      const lines = stampChangedOrderLines(totals.lines, histHit.lines, now, histHit.updatedAt);
       const payableAmount = totalAmount;
       const selfSuppliedCostAmount = calculateSelfSuppliedCostAmount(
         lines,
@@ -842,7 +878,12 @@ export type UpdateLinesResult =
 export function updatePendingOrderLinesById(id: string, nextLines: OrderHistoryLine[]): UpdateLinesResult {
   const totals = aggregateOrderLinesForSave(nextLines);
   if (totals.lines.length === 0) return { ok: false, reason: 'empty' };
-  return patchOrderLinesInEitherStore(id, totals, 'pending');
+  const res = patchOrderLinesInEitherStore(id, totals, 'pending');
+  if (res.ok === true) return res;
+  if (res.reason === 'canceled') return { ok: false, reason: 'not_pending' };
+  if (res.reason === 'not_found') return { ok: false, reason: 'not_found' };
+  if (res.reason === 'not_pending') return { ok: false, reason: 'not_pending' };
+  return { ok: false, reason: 'stall_count_locked' };
 }
 
 export type UpdateEditableOrderLinesResult =
@@ -984,7 +1025,12 @@ export function updateEditableOrderLinesById(
 ): UpdateEditableOrderLinesResult {
   const totals = aggregateOrderLinesForSave(nextLines);
   if (totals.lines.length === 0) return { ok: false, reason: 'empty' };
-  return patchOrderLinesInEitherStore(id, totals, 'editable');
+  const res = patchOrderLinesInEitherStore(id, totals, 'editable');
+  if (res.ok === true) return res;
+  if (res.reason === 'not_pending') return { ok: false, reason: 'not_found' };
+  if (res.reason === 'not_found') return { ok: false, reason: 'not_found' };
+  if (res.reason === 'canceled') return { ok: false, reason: 'canceled' };
+  return { ok: false, reason: 'stall_count_locked' };
 }
 
 /**
@@ -1051,7 +1097,7 @@ export function appendProcurementOrderEntry(params: {
           : ctx.scopeId.match(/^scope:franchisee:(.+)$/)?.[1]?.trim() || null,
       ),
     itemCount,
-    lines,
+    lines: lines.map((line) => ({ ...line, updatedAt: now })),
     actorRole,
     storeLabel,
     status: '待出貨',

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Mail, X, KeyRound, ArrowLeft } from 'lucide-react';
-import { accounts } from '../services/apiService';
+import { passwordReset } from '../services/apiService';
 import { shouldRevealResetCodeInUi } from '../lib/passwordResetOtp';
 
 type ForgotPasswordModalProps = {
@@ -41,8 +41,8 @@ export default function ForgotPasswordModal({ open, onClose }: ForgotPasswordMod
     setBusy(true);
     setRevealCode(null);
     try {
-      const r = await accounts.passwordReset.requestCode(email);
-      if (!r.ok) {
+      const r = await passwordReset.requestCode(email);
+      if (r.ok === false) {
         setError(r.message);
         return;
       }
@@ -65,8 +65,8 @@ export default function ForgotPasswordModal({ open, onClose }: ForgotPasswordMod
     }
     setBusy(true);
     try {
-      const r = await accounts.passwordReset.confirm(email, code, newPassword);
-      if (!r.ok) {
+      const r = await passwordReset.confirm(email, code, newPassword);
+      if (r.ok === false) {
         setError(r.message);
         return;
       }

@@ -20,7 +20,7 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
     setBusy(true);
     const r = tryLogin(loginId, password);
     setBusy(false);
-    if (r.ok) onSuccess();
+    if (r.ok === true) onSuccess();
     else setError(r.message);
   };
 

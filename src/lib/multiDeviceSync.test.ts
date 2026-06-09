@@ -11,6 +11,7 @@ import {
   mergeDongshanBundlesLocalWinsDirty,
   type DongshanDataBundleV1,
 } from './appDataBundle';
+import type { FranchiseOrderStatus } from './orderHistoryStorage';
 
 const baseBundle = (): DongshanDataBundleV1 => ({
   bundleVersion: 1,
@@ -43,6 +44,40 @@ function orderRow(id: string, qty: number, updatedAt: string) {
     ],
     storeLabel: '直營店',
     scopeId: 'scope:hq',
+  };
+}
+
+function twoLineOrder(
+  id: string,
+  qtyA: number,
+  qtyB: number,
+  updatedAt: string,
+  lineUpdatedA = updatedAt,
+  lineUpdatedB = updatedAt,
+) {
+  return {
+    ...orderRow(id, qtyA + qtyB, updatedAt),
+    totalAmount: qtyA * 100 + qtyB * 200,
+    payableAmount: qtyA * 100 + qtyB * 200,
+    itemCount: qtyA + qtyB,
+    lines: [
+      {
+        productId: 'p1',
+        name: '品項A',
+        unitPrice: 100,
+        qty: qtyA,
+        unit: '隻',
+        updatedAt: lineUpdatedA,
+      },
+      {
+        productId: 'p2',
+        name: '品項B',
+        unitPrice: 200,
+        qty: qtyB,
+        unit: '包',
+        updatedAt: lineUpdatedB,
+      },
+    ],
   };
 }
 
@@ -81,13 +116,43 @@ describe('mergeArraysById', () => {
   });
 
   it('已出貨＋新數量優先於僅時間戳較新的待出貨舊數量（電腦誤寫回防護）', () => {
-    const shippedNew = orderRow('0012026060301', 7, '2026-06-03T10:00:00.000Z');
-    shippedNew.status = '已完成';
-    const stalePending = orderRow('0012026060301', 10, '2026-06-03T12:00:00.000Z');
-    stalePending.status = '待出貨';
+    const shippedNew: Omit<ReturnType<typeof orderRow>, 'status'> & { status: FranchiseOrderStatus } = {
+      ...orderRow('0012026060301', 7, '2026-06-03T10:00:00.000Z'),
+      status: '已完成',
+    };
+    const stalePending: Omit<ReturnType<typeof orderRow>, 'status'> & { status: FranchiseOrderStatus } = {
+      ...orderRow('0012026060301', 10, '2026-06-03T12:00:00.000Z'),
+      status: '待出貨',
+    };
     const merged = mergeOrderLikeRecord(shippedNew, stalePending);
     expect(merged.status).toBe('已完成');
     expect(merged.lines[0]!.qty).toBe(7);
+  });
+
+  it('同一待出貨單多人調整不同品項時逐品項合併，不用整組 lines 互蓋', () => {
+    const baseLineTs = '2026-06-03T10:00:00.000Z';
+    const machineA = twoLineOrder(
+      '0012026060301',
+      7,
+      10,
+      '2026-06-03T11:00:00.000Z',
+      '2026-06-03T11:00:00.000Z',
+      baseLineTs,
+    );
+    const machineB = twoLineOrder(
+      '0012026060301',
+      10,
+      4,
+      '2026-06-03T11:05:00.000Z',
+      baseLineTs,
+      '2026-06-03T11:05:00.000Z',
+    );
+
+    const merged = mergeOrderLikeRecord(machineA, machineB);
+    expect(merged.lines.find((l) => l.productId === 'p1')?.qty).toBe(7);
+    expect(merged.lines.find((l) => l.productId === 'p2')?.qty).toBe(4);
+    expect(merged.itemCount).toBe(11);
+    expect(merged.totalAmount).toBe(1500);
   });
 
   it('同單號以較新 updatedAt 為準（揀貨調整不會被舊雲端蓋回）', () => {
@@ -107,6 +172,123 @@ describe('mergeStorageKeyRecords (franchise mgmt orders)', () => {
     const out = mergeStorageKeyRecords('dongshan_franchise_mgmt_orders_v1', local, cloud);
     const arr = JSON.parse(out ?? '[]') as { id: string }[];
     expect(arr.map((x) => x.id).sort()).toEqual(['0012026060301', '0012026060302']);
+  });
+
+  it('攤上盤點同一天多人更新不同品項時逐品項合併', () => {
+    const local = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          updatedAt: '2026-06-03T11:00:00.000Z',
+          actualRevenue: '1000',
+          lines: {
+            p1: { out: '7', remain: '1', updatedAt: '2026-06-03T11:00:00.000Z' },
+            p2: { out: '10', remain: '2', updatedAt: '2026-06-03T10:00:00.000Z' },
+          },
+        },
+      },
+    });
+    const cloud = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          updatedAt: '2026-06-03T11:05:00.000Z',
+          actualRevenue: '1000',
+          lines: {
+            p1: { out: '5', remain: '1', updatedAt: '2026-06-03T10:00:00.000Z' },
+            p2: { out: '4', remain: '0', updatedAt: '2026-06-03T11:05:00.000Z' },
+          },
+        },
+      },
+    });
+    const out = mergeStorageKeyRecords('dongshan_stall_inventory_v1', local, cloud);
+    const store = JSON.parse(out ?? '{}') as {
+      byDate: Record<string, { lines: Record<string, { out: string; remain: string }> }>;
+    };
+    const lines = store.byDate['scope:hq|2026-06-03']!.lines;
+    expect(lines.p1).toMatchObject({ out: '7', remain: '1' });
+    expect(lines.p2).toMatchObject({ out: '4', remain: '0' });
+  });
+
+  it('銷售紀錄同一天多人更新不同品項時逐品項合併', () => {
+    const local = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          completedAt: '2026-06-03T09:00:00.000Z',
+          snapshot: {
+            updatedAt: '2026-06-03T11:00:00.000Z',
+            actualRevenue: '1000',
+            lines: {
+              p1: { out: '7', remain: '1', updatedAt: '2026-06-03T11:00:00.000Z' },
+              p2: { out: '10', remain: '2', updatedAt: '2026-06-03T10:00:00.000Z' },
+            },
+          },
+        },
+      },
+    });
+    const cloud = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          completedAt: '2026-06-03T09:00:00.000Z',
+          snapshot: {
+            updatedAt: '2026-06-03T11:05:00.000Z',
+            actualRevenue: '1000',
+            lines: {
+              p1: { out: '5', remain: '1', updatedAt: '2026-06-03T10:00:00.000Z' },
+              p2: { out: '4', remain: '0', updatedAt: '2026-06-03T11:05:00.000Z' },
+            },
+          },
+        },
+      },
+    });
+    const out = mergeStorageKeyRecords('dongshan_sales_records_v1', local, cloud);
+    const store = JSON.parse(out ?? '{}') as {
+      byDate: Record<string, { snapshot: { lines: Record<string, { out: string; remain: string }> } }>;
+    };
+    const lines = store.byDate['scope:hq|2026-06-03']!.snapshot.lines;
+    expect(lines.p1).toMatchObject({ out: '7', remain: '1' });
+    expect(lines.p2).toMatchObject({ out: '4', remain: '0' });
+  });
+
+  it('同一天實收與落差原因分別更新時逐欄合併', () => {
+    const local = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          updatedAt: '2026-06-03T11:00:00.000Z',
+          actualRevenue: '1200',
+          revenueGapReason: '舊原因',
+          fieldUpdatedAt: {
+            actualRevenue: '2026-06-03T11:00:00.000Z',
+            revenueGapReason: '2026-06-03T10:00:00.000Z',
+          },
+          lines: {},
+        },
+      },
+    });
+    const cloud = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          updatedAt: '2026-06-03T11:05:00.000Z',
+          actualRevenue: '1000',
+          revenueGapReason: '請客',
+          fieldUpdatedAt: {
+            actualRevenue: '2026-06-03T10:00:00.000Z',
+            revenueGapReason: '2026-06-03T11:05:00.000Z',
+          },
+          lines: {},
+        },
+      },
+    });
+    const out = mergeStorageKeyRecords('dongshan_stall_inventory_v1', local, cloud);
+    const row = (JSON.parse(out ?? '{}') as {
+      byDate: Record<string, { actualRevenue: string; revenueGapReason: string }>;
+    }).byDate['scope:hq|2026-06-03']!;
+    expect(row.actualRevenue).toBe('1200');
+    expect(row.revenueGapReason).toBe('請客');
   });
 });
 

@@ -350,7 +350,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     void (async () => {
       const res = await ordersApi.updateOrderDateYmdByOrderId(orderId, orderDateDraftYmd);
       setOrderDateSaving(false);
-      if (res.ok) {
+      if (res.ok === true) {
         setOrderDatePickerOpen(false);
         refreshOrders();
         return;
@@ -390,7 +390,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     void (async () => {
       try {
         const res: UpdateStallSnapshotResult = await ordersApi.updateStallCountSnapshotByOrderId(orderId, next);
-        if (!res.ok) {
+        if (res.ok === false) {
           if (res.reason === 'not_found') setStallEditError('找不到此訂單。');
           else setStallEditError('此單無盤點押記，無法儲存。');
           return;

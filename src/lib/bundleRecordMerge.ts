@@ -11,6 +11,9 @@ export type OrderLikeForMerge = {
   createdAt: string;
   status?: string;
   lines?: OrderHistoryLine[];
+  itemCount?: number;
+  totalAmount?: number;
+  payableAmount?: number;
   stallCountCompletedAt?: string;
   stallCountBasisYmd?: string;
   stallCountSnapshot?: unknown;
@@ -146,6 +149,55 @@ function pickNewerStallCountSnapshot(a: OrderLikeForMerge, b: OrderLikeForMerge)
   return stallSnapshotUpdatedAtMs(b) >= stallSnapshotUpdatedAtMs(a) ? bSnap : aSnap;
 }
 
+function orderLineUpdatedAtMs(line: OrderHistoryLine, order: OrderLikeForMerge): number {
+  return recordUpdatedAtMs({
+    updatedAt: line.updatedAt ?? order.updatedAt,
+    createdAt: order.createdAt,
+  });
+}
+
+function orderLinesHaveLineTimestamps(lines: OrderHistoryLine[]): boolean {
+  return lines.some((line) => Boolean(line.updatedAt?.trim()));
+}
+
+function mergeOrderLinesByProduct(a: OrderLikeForMerge, b: OrderLikeForMerge): OrderHistoryLine[] {
+  const aLines = a.lines ?? [];
+  const bLines = b.lines ?? [];
+  const byProductId = new Map<string, { line: OrderHistoryLine; order: OrderLikeForMerge }>();
+  const orderIds: string[] = [];
+
+  for (const order of [a, b]) {
+    for (const line of order.lines ?? []) {
+      const id = line.productId?.trim();
+      if (!id) continue;
+      if (!byProductId.has(id)) orderIds.push(id);
+      const prev = byProductId.get(id);
+      if (!prev || orderLineUpdatedAtMs(line, order) >= orderLineUpdatedAtMs(prev.line, prev.order)) {
+        byProductId.set(id, { line, order });
+      }
+    }
+  }
+
+  const sourceOrder = recordUpdatedAtMs(b) >= recordUpdatedAtMs(a) ? bLines : aLines;
+  const sourceIds = sourceOrder
+    .map((line) => line.productId?.trim())
+    .filter((id): id is string => Boolean(id));
+  const sortedIds = [
+    ...sourceIds,
+    ...orderIds.filter((id) => !sourceIds.includes(id)),
+  ];
+
+  return sortedIds
+    .map((id) => byProductId.get(id)?.line)
+    .filter((line): line is OrderHistoryLine => Boolean(line));
+}
+
+function summarizeOrderLines(lines: OrderHistoryLine[]) {
+  const itemCount = Math.round(lines.reduce((s, l) => s + (Number(l.qty) || 0), 0) * 1000) / 1000;
+  const totalAmount = Math.round(lines.reduce((s, l) => s + (Number(l.unitPrice) || 0) * (Number(l.qty) || 0), 0) * 100) / 100;
+  return { itemCount, totalAmount };
+}
+
 /**
  * 合併同一單號兩份訂單：狀態取較進階（已完成優先於待出貨），
  * 品項數量衝突時優先採用「已出貨」方之 lines，避免僅更新時間戳的舊本機蓋回已出貨調整結果。
@@ -158,6 +210,7 @@ export function mergeOrderLikeRecord<T extends OrderLikeForMerge>(a: T, b: T): T
   const linesEqual = orderLineQtyMapsEqual(aLines, bLines);
 
   let lineSource: T;
+  let mergedLines: OrderHistoryLine[] | undefined;
   if (linesEqual) {
     lineSource = bMs >= aMs ? b : a;
   } else {
@@ -165,11 +218,18 @@ export function mergeOrderLikeRecord<T extends OrderLikeForMerge>(a: T, b: T): T
     const bDone = b.status === '已完成';
     if (aDone && !bDone) lineSource = a;
     else if (bDone && !aDone) lineSource = b;
-    else lineSource = bMs >= aMs ? b : a;
+    else {
+      lineSource = bMs >= aMs ? b : a;
+      if (orderLinesHaveLineTimestamps(aLines) || orderLinesHaveLineTimestamps(bLines)) {
+        mergedLines = mergeOrderLinesByProduct(a, b);
+      }
+    }
   }
 
   const status = pickMergedOrderStatus(a, b);
   const updatedAt = new Date(Math.max(aMs, bMs)).toISOString();
+  const lines = mergedLines ?? lineSource.lines;
+  const lineTotals = lines ? summarizeOrderLines(lines) : null;
 
   const aStamped = Boolean(a.stallCountCompletedAt?.trim());
   const bStamped = Boolean(b.stallCountCompletedAt?.trim());
@@ -187,7 +247,13 @@ export function mergeOrderLikeRecord<T extends OrderLikeForMerge>(a: T, b: T): T
   return {
     ...lineSource,
     status: status ?? lineSource.status,
-    lines: lineSource.lines,
+    lines,
+    ...(lineTotals
+      ? {
+          itemCount: lineTotals.itemCount,
+          totalAmount: lineTotals.totalAmount,
+        }
+      : {}),
     updatedAt,
     ...(stampSource.stallCountCompletedAt || mergedSnapshot != null
       ? {
@@ -270,6 +336,137 @@ type ByDateStore = {
   byDate?: Record<string, { updatedAt?: string; snapshot?: { updatedAt?: string } }>;
 };
 
+type DayLineLike = { out?: string; remain?: string; updatedAt?: string };
+type DaySnapshotLike = {
+  updatedAt?: string;
+  lines?: Record<string, DayLineLike>;
+  actualRevenue?: string;
+  revenueGapAmount?: string;
+  revenueGapReason?: string;
+  fieldUpdatedAt?: Record<string, string>;
+};
+type ByDateRowLike = DaySnapshotLike & {
+  completedAt?: string;
+  snapshot?: DaySnapshotLike;
+};
+
+function snapshotForByDateRow(row: unknown): DaySnapshotLike | null {
+  if (!row || typeof row !== 'object') return null;
+  const r = row as ByDateRowLike;
+  if (r.snapshot && typeof r.snapshot === 'object') return r.snapshot;
+  return r;
+}
+
+function byDateLineUpdatedAtMs(line: DayLineLike, fallback: { updatedAt?: string; createdAt?: string }): number {
+  return recordUpdatedAtMs({
+    updatedAt: line.updatedAt ?? fallback.updatedAt,
+    createdAt: fallback.createdAt,
+  });
+}
+
+function byDateLinesHaveTimestamps(lines: Record<string, DayLineLike> | undefined): boolean {
+  return Object.values(lines ?? {}).some((line) => Boolean(line.updatedAt?.trim()));
+}
+
+function mergeDayLines(
+  aLines: Record<string, DayLineLike> | undefined,
+  bLines: Record<string, DayLineLike> | undefined,
+  aFallback: { updatedAt?: string; createdAt?: string },
+  bFallback: { updatedAt?: string; createdAt?: string },
+): Record<string, DayLineLike> {
+  const out: Record<string, DayLineLike> = {};
+  const ids = new Set([...Object.keys(aLines ?? {}), ...Object.keys(bLines ?? {})]);
+  for (const id of ids) {
+    const aLine = aLines?.[id];
+    const bLine = bLines?.[id];
+    if (!aLine) {
+      if (bLine) out[id] = bLine;
+      continue;
+    }
+    if (!bLine) {
+      out[id] = aLine;
+      continue;
+    }
+    out[id] =
+      byDateLineUpdatedAtMs(bLine, bFallback) >= byDateLineUpdatedAtMs(aLine, aFallback)
+        ? bLine
+        : aLine;
+  }
+  return out;
+}
+
+function mergeDayEditableFields(
+  target: DaySnapshotLike,
+  aSnap: DaySnapshotLike,
+  bSnap: DaySnapshotLike,
+): DaySnapshotLike {
+  if (!aSnap.fieldUpdatedAt && !bSnap.fieldUpdatedAt) return target;
+  const next: DaySnapshotLike = { ...target, fieldUpdatedAt: { ...(target.fieldUpdatedAt ?? {}) } };
+  for (const field of ['actualRevenue', 'revenueGapAmount', 'revenueGapReason'] as const) {
+    const aAt = aSnap.fieldUpdatedAt?.[field] ?? aSnap.updatedAt;
+    const bAt = bSnap.fieldUpdatedAt?.[field] ?? bSnap.updatedAt;
+    if (recordUpdatedAtMs({ updatedAt: bAt }) >= recordUpdatedAtMs({ updatedAt: aAt })) {
+      next[field] = bSnap[field];
+      next.fieldUpdatedAt![field] = bAt ?? '';
+    } else {
+      next[field] = aSnap[field];
+      next.fieldUpdatedAt![field] = aAt ?? '';
+    }
+  }
+  return next;
+}
+
+function mergeByDateRow(l: unknown, c: unknown): unknown {
+  const lSnap = snapshotForByDateRow(l);
+  const cSnap = snapshotForByDateRow(c);
+  const lMs = recordUpdatedAtMs({
+    updatedAt: lSnap?.updatedAt ?? (l as { updatedAt?: string })?.updatedAt,
+    createdAt: (l as { completedAt?: string })?.completedAt,
+  });
+  const cMs = recordUpdatedAtMs({
+    updatedAt: cSnap?.updatedAt ?? (c as { updatedAt?: string })?.updatedAt,
+    createdAt: (c as { completedAt?: string })?.completedAt,
+  });
+  const newer = cMs >= lMs ? c : l;
+
+  if (!lSnap || !cSnap) {
+    return newer;
+  }
+  const hasLineTimestamps = byDateLinesHaveTimestamps(lSnap.lines) || byDateLinesHaveTimestamps(cSnap.lines);
+  const hasFieldTimestamps = Boolean(lSnap.fieldUpdatedAt || cSnap.fieldUpdatedAt);
+  if (!hasLineTimestamps && !hasFieldTimestamps) return newer;
+
+  const newerSnap = snapshotForByDateRow(newer);
+  const mergedLines = hasLineTimestamps
+    ? mergeDayLines(
+        lSnap.lines,
+        cSnap.lines,
+        { updatedAt: lSnap.updatedAt, createdAt: (l as { completedAt?: string })?.completedAt },
+        { updatedAt: cSnap.updatedAt, createdAt: (c as { completedAt?: string })?.completedAt },
+      )
+    : newerSnap?.lines;
+
+  if (newer && typeof newer === 'object' && 'snapshot' in newer) {
+    const row = newer as ByDateRowLike;
+    const snapshot = mergeDayEditableFields(
+      { ...(row.snapshot ?? {}), lines: mergedLines },
+      lSnap,
+      cSnap,
+    );
+    return {
+      ...row,
+      snapshot,
+    };
+  }
+  if (newer && typeof newer === 'object') {
+    return mergeDayEditableFields({
+      ...(newer as DaySnapshotLike),
+      lines: mergedLines,
+    }, lSnap, cSnap);
+  }
+  return newer;
+}
+
 function mergeByDateStore(localRaw: string | null | undefined, cloudRaw: string | null | undefined): string {
   const local = (safeParseJson(localRaw) as ByDateStore | null) ?? { version: 1, byDate: {} };
   const cloud = (safeParseJson(cloudRaw) as ByDateStore | null) ?? { version: 1, byDate: {} };
@@ -288,15 +485,7 @@ function mergeByDateStore(localRaw: string | null | undefined, cloudRaw: string 
       byDate[dk] = l;
       continue;
     }
-    const lMs = recordUpdatedAtMs({
-      updatedAt: (l as { updatedAt?: string }).updatedAt ?? (l as { snapshot?: { updatedAt?: string } }).snapshot?.updatedAt,
-      createdAt: (l as { completedAt?: string }).completedAt,
-    });
-    const cMs = recordUpdatedAtMs({
-      updatedAt: (c as { updatedAt?: string }).updatedAt ?? (c as { snapshot?: { updatedAt?: string } }).snapshot?.updatedAt,
-      createdAt: (c as { completedAt?: string }).completedAt,
-    });
-    byDate[dk] = cMs >= lMs ? c : l;
+    byDate[dk] = mergeByDateRow(l, c);
   }
   return JSON.stringify({ version: local.version ?? cloud.version ?? 1, byDate });
 }

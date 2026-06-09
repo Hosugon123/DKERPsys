@@ -31,6 +31,7 @@ const KEY = 'dongshan_stall_inventory_v1';
 export type DayLine = {
   out: string;
   remain: string;
+  updatedAt?: string;
 };
 
 export type DaySnapshot = {
@@ -43,6 +44,8 @@ export type DaySnapshot = {
   revenueGapReason?: string;
   /** 最近一次儲存攤上盤點表之操作者姓名 */
   lastSavedByName?: string;
+  /** Internal merge timestamps for top-level editable fields. */
+  fieldUpdatedAt?: Record<string, string>;
 };
 
 type StoreV1 = {
@@ -119,6 +122,40 @@ function saveAll(s: StoreV1) {
   window.dispatchEvent(new Event('stallInventoryUpdated'));
 }
 
+function dayLineRevisionKey(l: DayLine | undefined): string {
+  return `${String(l?.out ?? '').trim()}\u001f${String(l?.remain ?? '').trim()}`;
+}
+
+function stampChangedDayLines(
+  nextLines: DaySnapshot['lines'],
+  prevLines: DaySnapshot['lines'] | undefined,
+  now: string,
+): DaySnapshot['lines'] {
+  const stamped: DaySnapshot['lines'] = {};
+  for (const [id, line] of Object.entries(nextLines)) {
+    const prev = prevLines?.[id];
+    const unchanged = prev && dayLineRevisionKey(prev) === dayLineRevisionKey(line);
+    stamped[id] = {
+      ...line,
+      updatedAt: unchanged ? prev.updatedAt ?? now : now,
+    };
+  }
+  return stamped;
+}
+
+function stampChangedDayFields(
+  next: DaySnapshot,
+  prev: DaySnapshot | undefined,
+  now: string,
+): Record<string, string> {
+  const out = { ...(prev?.fieldUpdatedAt ?? {}) };
+  for (const field of ['actualRevenue', 'revenueGapAmount', 'revenueGapReason'] as const) {
+    const changed = String(next[field] ?? '').trim() !== String(prev?.[field] ?? '').trim();
+    if (changed || !out[field]) out[field] = changed ? now : prev?.fieldUpdatedAt?.[field] ?? now;
+  }
+  return out;
+}
+
 /**
  * 合併目前目錄中新增之品項欄位（帶出／剩餘空列），讓攤上盤點與品項變更連動
  */
@@ -161,12 +198,16 @@ export function stallDaySnapshotFingerprint(snap: DaySnapshot): string {
 export function saveDay(ymdStr: string, snap: DaySnapshot, scopeId?: string) {
   const s = loadAll();
   const editor = getSessionActorDisplayName();
+  const prev = readStallDay(s, ymdStr, scopeId);
+  const now = new Date().toISOString();
   writeStallDay(
     s,
     ymdStr,
     {
       ...snap,
-      updatedAt: new Date().toISOString(),
+      lines: stampChangedDayLines(snap.lines, prev?.lines, now),
+      fieldUpdatedAt: stampChangedDayFields(snap, prev, now),
+      updatedAt: now,
       ...(editor ? { lastSavedByName: editor } : {}),
     },
     scopeId,
@@ -185,6 +226,7 @@ export function applyOrderDeductionToDayRemain(
   const s = loadAll();
   const prev = readStallDay(s, ymdStr, scopeId) ?? emptyDay();
   const lines = { ...prev.lines } as DaySnapshot['lines'];
+  const now = new Date().toISOString();
   for (const it of getAllSupplyItems()) {
     if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
   }
@@ -194,12 +236,12 @@ export function applyOrderDeductionToDayRemain(
     if (!lines[id]) lines[id] = { out: '', remain: '' };
     const cur = num(lines[id].remain);
     const next = roundProcurementQty(Math.max(0, cur - qty));
-    lines[id] = { ...lines[id], remain: String(next) };
+    lines[id] = { ...lines[id], remain: String(next), updatedAt: now };
   }
   const snap: DaySnapshot = {
     ...prev,
     lines,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
   };
   saveDay(ymdStr, snap, scopeId);
   applySalesRecordOrderDeduction(ymdStr, deductions, scopeId);

@@ -6,7 +6,11 @@ import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapsho
 
 type StallFields = Pick<
   FranchiseManagementOrder,
-  'stallCountSnapshot' | 'stallCountBasisYmd' | 'stallCountCompletedAt'
+  | 'stallCountSnapshot'
+  | 'stallCountBasisYmd'
+  | 'stallCountCompletedAt'
+  | 'scopeId'
+  | 'actorUserId'
 >;
 
 function resolveStallSnapshotForOrder(o: StallFields): SalesRecordDaySnapshot | null {

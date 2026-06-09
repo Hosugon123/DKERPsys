@@ -900,7 +900,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const persistPickingLines = useCallback(
     async (orderId: string, lines: OrderHistoryLine[]): Promise<UpdateEditableOrderLinesResult> => {
       const res = await ordersApi.updateEditableOrderLinesById(orderId, lines);
-      if (!res.ok) {
+      if (res.ok === false) {
         setPickingError(pickingErrorMessage(res));
         setPickingPersistStatus('error');
         return res;

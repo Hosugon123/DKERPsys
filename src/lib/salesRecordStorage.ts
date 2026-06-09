@@ -10,7 +10,7 @@ import { getSessionActorDisplayName } from './sessionActorDisplayName';
 import { num, roundProcurementQty } from './stallMath';
 
 /** 與 stallInventoryStorage 之 DaySnapshot 結構一致（此檔避免反向 import 造成循環） */
-export type SalesRecordDayLine = { out: string; remain: string };
+export type SalesRecordDayLine = { out: string; remain: string; updatedAt?: string };
 export type SalesRecordDaySnapshot = {
   lines: Record<string, SalesRecordDayLine>;
   actualRevenue: string;
@@ -23,6 +23,8 @@ export type SalesRecordDaySnapshot = {
   frozenRetailUnitPriceByItem?: Record<string, number>;
   /** 盤點完成當下凍結之批價單價（每品項，供成本參考） */
   frozenWholesaleUnitPriceByItem?: Record<string, number>;
+  /** Internal merge timestamps for top-level editable fields. */
+  fieldUpdatedAt?: Record<string, string>;
 };
 
 const SALES_KEY = 'dongshan_sales_records_v1';
@@ -86,6 +88,40 @@ function mergeSnapshotWithCatalog(snap: SalesRecordDaySnapshot): SalesRecordDayS
   return { ...snap, lines };
 }
 
+function salesLineRevisionKey(l: SalesRecordDayLine | undefined): string {
+  return `${String(l?.out ?? '').trim()}\u001f${String(l?.remain ?? '').trim()}`;
+}
+
+function stampChangedSalesLines(
+  nextLines: SalesRecordDaySnapshot['lines'],
+  prevLines: SalesRecordDaySnapshot['lines'] | undefined,
+  now: string,
+): SalesRecordDaySnapshot['lines'] {
+  const stamped: SalesRecordDaySnapshot['lines'] = {};
+  for (const [id, line] of Object.entries(nextLines)) {
+    const prev = prevLines?.[id];
+    const unchanged = prev && salesLineRevisionKey(prev) === salesLineRevisionKey(line);
+    stamped[id] = {
+      ...line,
+      updatedAt: unchanged ? prev.updatedAt ?? now : now,
+    };
+  }
+  return stamped;
+}
+
+function stampChangedSalesFields(
+  next: SalesRecordDaySnapshot,
+  prev: SalesRecordDaySnapshot | undefined,
+  now: string,
+): Record<string, string> {
+  const out = { ...(prev?.fieldUpdatedAt ?? {}) };
+  for (const field of ['actualRevenue', 'revenueGapAmount', 'revenueGapReason'] as const) {
+    const changed = String(next[field] ?? '').trim() !== String(prev?.[field] ?? '').trim();
+    if (changed || !out[field]) out[field] = changed ? now : prev?.fieldUpdatedAt?.[field] ?? now;
+  }
+  return out;
+}
+
 /** 供訂單內嵌快照或畫面顯示前與品項目錄合併。 */
 export function mergeSalesRecordWithCatalog(snap: SalesRecordDaySnapshot): SalesRecordDaySnapshot {
   return mergeSnapshotWithCatalog(snap);
@@ -98,12 +134,18 @@ export function mergeSalesRecordWithCatalog(snap: SalesRecordDaySnapshot): Sales
 export function saveSalesRecord(ymd: string, snapshot: SalesRecordDaySnapshot, scopeId?: string) {
   const s = loadStore();
   const completedAt = new Date().toISOString();
+  const prev = readRow(s, ymd, scopeId)?.snapshot;
   const snapshotMerged = mergeSnapshotWithCatalog(snapshot);
   const who = getSessionActorDisplayName();
   writeRow(s, ymd, {
     completedAt,
     ...(who ? { completedByName: who } : {}),
-    snapshot: { ...snapshotMerged, updatedAt: completedAt },
+    snapshot: {
+      ...snapshotMerged,
+      lines: stampChangedSalesLines(snapshotMerged.lines, prev?.lines, completedAt),
+      fieldUpdatedAt: stampChangedSalesFields(snapshotMerged, prev, completedAt),
+      updatedAt: completedAt,
+    },
   }, scopeId);
   saveStore(s);
 }
@@ -131,6 +173,12 @@ export function patchSalesRecordRevenueGapReason(ymd: string, reason: string, sc
       snapshot: {
         ...prev,
         revenueGapReason: trimmed,
+        lines: stampChangedSalesLines(prev.lines, row?.snapshot.lines, now),
+        fieldUpdatedAt: stampChangedSalesFields(
+          { ...prev, revenueGapReason: trimmed },
+          row?.snapshot,
+          now,
+        ),
         updatedAt: now,
       },
     },
@@ -202,6 +250,7 @@ export function applySalesRecordOrderDeduction(
   if (!row) return;
   const prev = mergeSnapshotWithCatalog(row.snapshot);
   const lines: SalesRecordDaySnapshot['lines'] = { ...prev.lines };
+  const now = new Date().toISOString();
   for (const it of getAllSupplyItems()) {
     if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
   }
@@ -211,9 +260,8 @@ export function applySalesRecordOrderDeduction(
     if (!lines[id]) lines[id] = { out: '', remain: '' };
     const cur = num(lines[id].remain);
     const next = roundProcurementQty(Math.max(0, cur - qty));
-    lines[id] = { ...lines[id], remain: String(next) };
+    lines[id] = { ...lines[id], remain: String(next), updatedAt: now };
   }
-  const now = new Date().toISOString();
   writeRow(
     s,
     ymdStr,

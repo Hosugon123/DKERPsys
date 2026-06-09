@@ -159,8 +159,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
 
   const procurementCartDirty = useMemo(
     () =>
-      Object.values(cart).some((q) => q > 0) ||
-      Object.values(qtyInputDraft).some((s) => String(s).trim() !== ''),
+      Object.values(cart as Record<string, number>).some((q) => Number(q) > 0) ||
+      Object.values(qtyInputDraft as Record<string, string>).some((s) => String(s).trim() !== ''),
     [cart, qtyInputDraft],
   );
   useUnsavedWorkBlock(WORK_DRAFT_IDS.procurement, procurementCartDirty, '批貨下單');
