@@ -131,7 +131,7 @@
 [data-theme="light"] #root .border-amber-900\/35,
 [data-theme="light"] #root .border-amber-900\/40,
 [data-theme="light"] #root .border-amber-900\/50 {
-  border-color: #fcd34d !important;
+  border-color: #e9b949 !important;
 }
 
 [data-theme="light"] #root .text-amber-100,
@@ -149,7 +149,7 @@
 
 [data-theme="light"] #root .text-amber-300,
 [data-theme="light"] #root .text-amber-300\/90 {
-  color: #d97706 !important;
+  color: #b45309 !important;
 }
 
 [data-theme="light"] #root .hover\:text-amber-200:hover,
@@ -165,7 +165,7 @@
 
 [data-theme="light"] #root .border-rose-900\/35,
 [data-theme="light"] #root .border-rose-900\/40 {
-  border-color: #fecdd3 !important;
+  border-color: #fda4af !important;
 }
 
 [data-theme="light"] #root .text-rose-200\/80 {
@@ -183,7 +183,7 @@
 }
 
 [data-theme="light"] #root .border-sky-900\/35 {
-  border-color: #bae6fd !important;
+  border-color: #93c5fd !important;
 }
 
 /* ——— 陰影與遮罩 ——— */
@@ -201,15 +201,15 @@
 }
 
 [data-theme="light"] #root .shadow-\[0_8px_24px_rgba\(0\,0\,0\,0\.35\)\] {
-  box-shadow: 0 8px 24px rgb(28 25 23 / 0.1) !important;
+  box-shadow: 0 10px 28px rgb(68 54 38 / 0.12) !important;
 }
 
 [data-theme="light"] #root .shadow-\[8px_0_10px_-10px_rgba\(0\,0\,0\,0\.85\)\] {
-  box-shadow: 8px 0 10px -10px rgb(28 25 23 / 0.12) !important;
+  box-shadow: 8px 0 12px -10px rgb(68 54 38 / 0.2) !important;
 }
 
 [data-theme="light"] #root .shadow-\[0_1px_0_0_rgb\(39\,39\,42\)\,0_4px_8px_-4px_rgba\(0\,0\,0\,0\.65\)\] {
-  box-shadow: 0 1px 0 0 var(--ds-border), 0 4px 8px -4px rgb(28 25 23 / 0.08) !important;
+  box-shadow: 0 1px 0 0 var(--ds-border), 0 6px 12px -8px rgb(68 54 38 / 0.18) !important;
 }
 
 /* ——— 表單：日期／數字輸入 ——— */
@@ -258,5 +258,29 @@
 
 [data-theme="light"] #root .border-emerald-500\/50,
 [data-theme="light"] #root .border-emerald-600\/25 {
-  border-color: #6ee7b7 !important;
+  border-color: #86d8b1 !important;
+}
+
+[data-theme="light"] #root .bg-amber-600 {
+  background-color: #d08812 !important;
+}
+
+[data-theme="light"] #root .hover\:bg-amber-500:hover {
+  background-color: #b8750f !important;
+}
+
+[data-theme="light"] #root .text-zinc-950 {
+  color: #241b13 !important;
+}
+
+[data-theme="light"] #root input,
+[data-theme="light"] #root select,
+[data-theme="light"] #root textarea {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72);
+}
+
+[data-theme="light"] #root input:focus,
+[data-theme="light"] #root select:focus,
+[data-theme="light"] #root textarea:focus {
+  box-shadow: 0 0 0 1px rgb(208 136 18 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.82);
 }

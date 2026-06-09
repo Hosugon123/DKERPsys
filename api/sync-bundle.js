@@ -37,10 +37,29 @@ function unauthorized(res) {
   return res.status(401).json({ ok: false, error: 'unauthorized' });
 }
 
+function forbidden(res) {
+  return res.status(403).json({ ok: false, error: 'forbidden origin' });
+}
+
 function readBearer(req) {
   const raw = String(req.headers.authorization || '');
   if (!raw.startsWith('Bearer ')) return '';
   return raw.slice('Bearer '.length).trim();
+}
+
+function allowedOrigins() {
+  const configured = String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const fromVercel = process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : [];
+  return new Set([...configured, ...fromVercel, 'https://dksys.vercel.app']);
+}
+
+function originAllowed(req) {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return true;
+  return allowedOrigins().has(origin);
 }
 
 function emptyBundle() {
@@ -101,6 +120,11 @@ function isCloudBundleEmpty(bundle) {
 
 export default async function handler(req, res) {
   try {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!originAllowed(req)) {
+      return forbidden(res);
+    }
+
     const redis = await getRedis();
     const expected = String(process.env.API_SYNC_TOKEN || '').trim();
     const got = readBearer(req);

@@ -2,8 +2,8 @@
  * 忘記密碼：以「註冊信箱」收取驗證碼後重設登入密碼（本機 localStorage）。
  *
  * - 驗證碼有效期限、嘗試次數見常數。
- * - 無郵件後端時：可經 VITE_SHOW_RESET_CODE 或開發模式在 UI 顯示驗證碼；上線請改 VITE_PASSWORD_RESET_EMAIL_URL 由後端寄信。
- * - POST JSON：`{ email, code, loginId, purpose: 'password-reset', expiresInMinutes }`；可選標頭 `VITE_PASSWORD_RESET_EMAIL_AUTH`（例如 `Bearer …`）。
+ * - 無郵件後端時：可經 VITE_SHOW_RESET_CODE 或開發模式在 UI 顯示驗證碼。
+ * - production 預設呼叫同網域 `/api/password-reset-email`，由 Vercel Function 讀取伺服器端寄信環境變數。
  */
 import * as credentialStorage from './credentialStorage';
 import { listSystemUsers } from './systemUsersStorage';
@@ -55,31 +55,30 @@ function generateOtp(): string {
   return String(n).padStart(CODE_LENGTH, '0');
 }
 
+function passwordResetEmailUrl(): string {
+  const configured = import.meta.env.VITE_PASSWORD_RESET_EMAIL_URL;
+  if (typeof configured === 'string' && configured.trim()) return configured.trim();
+  return import.meta.env.PROD ? '/api/password-reset-email' : '';
+}
+
 /** 是否在忘記密碼流程中於畫面顯示驗證碼（無郵件後端時） */
 export function shouldRevealResetCodeInUi(): boolean {
   const v = import.meta.env.VITE_SHOW_RESET_CODE;
   if (v === 'false') return false;
   if (v === 'true') return true;
-  const url = import.meta.env.VITE_PASSWORD_RESET_EMAIL_URL;
-  if (typeof url === 'string' && url.trim().length > 0) return false;
-  /** 未設定寄信 URL 時預設顯示（本機／純前端部署）；正式串後端寄信後請設 URL 並將 VITE_SHOW_RESET_CODE=false */
-  return true;
+  return !passwordResetEmailUrl();
 }
 
 async function deliverOtpToEmail(email: string, code: string, loginId: string): Promise<void> {
-  const url = import.meta.env.VITE_PASSWORD_RESET_EMAIL_URL;
-  if (typeof url !== 'string' || !url.trim()) return;
+  const url = passwordResetEmailUrl();
+  if (!url) return;
 
-  const auth = import.meta.env.VITE_PASSWORD_RESET_EMAIL_AUTH;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (typeof auth === 'string' && auth.trim()) {
-    headers.Authorization = auth.trim();
-  }
 
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), 20_000);
   try {
-    const res = await fetch(url.trim(), {
+    const res = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -98,7 +97,8 @@ async function deliverOtpToEmail(email: string, code: string, loginId: string): 
         if (typeof j.message === 'string' && j.message.trim()) errMsg = j.message.trim();
         else if (typeof j.error === 'string' && j.error.trim()) errMsg = j.error.trim();
       } catch {
-        if (res.status === 404) errMsg = '寄信 API 回傳 404，請檢查 VITE_PASSWORD_RESET_EMAIL_URL。';
+        if (res.status === 404) errMsg = '寄信 API 回傳 404，請檢查忘記密碼寄信 API 設定。';
+        if (res.status === 503) errMsg = '寄信服務尚未設定，請在 Vercel 設定 PASSWORD_RESET_EMAIL_URL。';
       }
       throw new Error(errMsg);
     }

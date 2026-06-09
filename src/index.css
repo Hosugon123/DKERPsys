@@ -22,29 +22,29 @@
 
 [data-theme="light"] {
   color-scheme: light;
-  --ds-bg-root: #f0ebe3;
-  --ds-bg-sidebar: #faf8f5;
-  --ds-bg-topbar: #ffffff;
-  --ds-bg-surface: #ffffff;
-  --ds-bg-surface-hover: #ebe6de;
-  --ds-bg-input: #ffffff;
-  --ds-bg-muted: #f5f0e8;
-  --ds-bg-subtle: #ebe6de;
-  --ds-shadow-color: rgb(28 25 23 / 0.08);
-  --ds-amber-tint: #fef9ec;
-  --ds-rose-tint: #fff1f2;
-  --ds-sky-tint: #f0f9ff;
-  --ds-amber-text: #b45309;
-  --ds-amber-text-strong: #92400e;
-  --ds-rose-text: #e11d48;
-  --ds-border: #d6d0c4;
-  --ds-border-muted: #c4bdb0;
-  --ds-text-primary: #1c1917;
-  --ds-text-muted: #57534e;
-  --ds-text-subtle: #78716c;
-  --ds-overlay: rgb(28 25 23 / 0.32);
-  --ds-scrollbar-thumb: #c4bdb0;
-  --ds-scrollbar-thumb-hover: #a8a29e;
+  --ds-bg-root: #f5f2ed;
+  --ds-bg-sidebar: #fffdf8;
+  --ds-bg-topbar: #fffefa;
+  --ds-bg-surface: #fffaf4;
+  --ds-bg-surface-hover: #eee7dd;
+  --ds-bg-input: #fffdf8;
+  --ds-bg-muted: #f1ebe2;
+  --ds-bg-subtle: #e7ded2;
+  --ds-shadow-color: rgb(68 54 38 / 0.11);
+  --ds-amber-tint: #fff6dd;
+  --ds-rose-tint: #fff0f2;
+  --ds-sky-tint: #eaf7ff;
+  --ds-amber-text: #a8550b;
+  --ds-amber-text-strong: #7c3f09;
+  --ds-rose-text: #be123c;
+  --ds-border: #d7cbbb;
+  --ds-border-muted: #bcae9b;
+  --ds-text-primary: #211c18;
+  --ds-text-muted: #5f554b;
+  --ds-text-subtle: #877a6b;
+  --ds-overlay: rgb(33 28 24 / 0.34);
+  --ds-scrollbar-thumb: #bcae9b;
+  --ds-scrollbar-thumb-hover: #9f8f7d;
 }
 
 @layer base {
