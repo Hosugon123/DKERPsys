@@ -7,12 +7,12 @@ export const PWA_ICON_UPDATED_EVENT = 'pwaIconUpdated';
 
 export const PWA_MANIFEST_STATIC = {
   name: '達客東山鴨頭',
-  short_name: '達客鴨頭',
-  description: 'DKERPsys 達客東山鴨頭門市管理',
+  short_name: '達客東山鴨頭',
+  description: '達客東山鴨頭門市管理',
   start_url: '/',
   display: 'standalone' as const,
-  background_color: '#facc15',
-  theme_color: '#0d0d0d',
+  background_color: '#f5f2ed',
+  theme_color: '#f4f1eb',
   lang: 'zh-Hant',
 };
 
