@@ -17,7 +17,9 @@
         var theme = 'light';
         try {
           var storedTheme = localStorage.getItem('dongshan_color_theme_v1');
-          if (storedTheme === 'light' || storedTheme === 'dark') theme = storedTheme;
+          var themeVersion = localStorage.getItem('dongshan_color_theme_version_v2');
+          if (storedTheme === 'light') theme = 'light';
+          if (storedTheme === 'dark' && themeVersion === '2') theme = 'dark';
         } catch (e) {}
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;

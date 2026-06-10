@@ -1,6 +1,7 @@
 export type ColorTheme = 'dark' | 'light';
 
 export const COLOR_THEME_STORAGE_KEY = 'dongshan_color_theme_v1';
+const COLOR_THEME_VERSION_STORAGE_KEY = 'dongshan_color_theme_version_v2';
 export const COLOR_THEME_CHANGE_EVENT = 'dongshanColorThemeChange';
 
 const THEME_COLORS: Record<ColorTheme, string> = {
@@ -73,6 +74,8 @@ function readDocumentTheme(): ColorTheme | null {
 function readStoredTheme(): ColorTheme {
   try {
     const stored = normalizeTheme(localStorage.getItem(COLOR_THEME_STORAGE_KEY));
+    const hasCurrentPreference = localStorage.getItem(COLOR_THEME_VERSION_STORAGE_KEY) === '2';
+    if (stored === 'dark' && !hasCurrentPreference) return 'light';
     if (stored) return stored;
   } catch {
     /* ignore */
@@ -84,6 +87,15 @@ let cachedTheme: ColorTheme = readDocumentTheme() ?? 'light';
 
 export function getColorTheme(): ColorTheme {
   return cachedTheme;
+}
+
+function persistColorThemePreference(theme: ColorTheme): void {
+  try {
+    localStorage.setItem(COLOR_THEME_STORAGE_KEY, theme);
+    localStorage.setItem(COLOR_THEME_VERSION_STORAGE_KEY, '2');
+  } catch {
+    /* ignore */
+  }
 }
 
 export function applyColorTheme(theme: ColorTheme): void {
@@ -111,11 +123,7 @@ export function repairColorThemeIfNeeded(): void {
 
 export function setColorTheme(theme: ColorTheme): void {
   cachedTheme = theme;
-  try {
-    localStorage.setItem(COLOR_THEME_STORAGE_KEY, theme);
-  } catch {
-    /* ignore */
-  }
+  persistColorThemePreference(theme);
   applyColorTheme(theme);
   window.dispatchEvent(new Event(COLOR_THEME_CHANGE_EVENT));
 }
@@ -128,5 +136,7 @@ export function toggleColorTheme(): ColorTheme {
 
 /** 應用啟動時呼叫，還原使用者上次選擇的主題。 */
 export function initColorTheme(): void {
-  applyColorTheme(readStoredTheme());
+  const theme = readStoredTheme();
+  applyColorTheme(theme);
+  persistColorThemePreference(theme);
 }
