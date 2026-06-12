@@ -29,7 +29,7 @@ function ymd8Local(d: Date): string {
  */
 function maxSeqFromIds(store3: string, ymd8: string, existingOrderIds: string[]): number {
   const esc = store3.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`^${esc}${ymd8}(\\d+)$`);
+  const re = new RegExp(`^${esc}${ymd8}(\\d+)(?:-.+)?$`);
   let max = 0;
   for (const id of existingOrderIds) {
     const m = id.match(re);
@@ -39,6 +39,17 @@ function maxSeqFromIds(store3: string, ymd8: string, existingOrderIds: string[])
     }
   }
   return max;
+}
+
+function randomOrderIdSuffix(): string {
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID().replace(/-/g, '').slice(0, 8);
+  if (cryptoObj?.getRandomValues) {
+    const bytes = new Uint8Array(4);
+    cryptoObj.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 }
 
 /**
@@ -63,5 +74,5 @@ export function allocateOrderSerialId(
   const next = Math.max(fromIds, last) + 1;
   map[counterKey] = next;
   writeSeqMap(map);
-  return `${store3}${ymd8}${next}`;
+  return `${store3}${ymd8}${next}-${randomOrderIdSuffix()}`;
 }

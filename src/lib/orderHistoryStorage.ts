@@ -64,6 +64,7 @@ export type OrderHistoryEntry = {
   storeLabel: string;
   /** 舊資料可能無此欄位，讀取時以 待出貨 帶入 */
   status: FranchiseOrderStatus;
+  statusUpdatedAt?: string;
   /** 攤上盤點按「盤點完成」押記：當日曆盤點日（本機 ymd） */
   stallCountBasisYmd?: string;
   /** 攤上盤點按「盤點完成」押記之時間（ISO） */
@@ -135,6 +136,7 @@ export type FranchiseManagementOrder = {
   lines: OrderHistoryLine[];
   storeLabel: string;
   status: FranchiseOrderStatus;
+  statusUpdatedAt?: string;
   /** 攤上盤點按「盤點完成」押記：當日曆盤點日（本機 ymd） */
   stallCountBasisYmd?: string;
   /** 攤上盤點按「盤點完成」押記之時間（ISO） */
@@ -220,6 +222,7 @@ function normalizeHistoryEntry(
   return {
     ...e,
     status: e.status ?? '待出貨',
+    ...(e.statusUpdatedAt ? { statusUpdatedAt: e.statusUpdatedAt } : {}),
     updatedAt: e.updatedAt ?? createdAt,
     payableAmount: e.payableAmount ?? e.totalAmount,
     selfSuppliedCostAmount:
@@ -415,6 +418,7 @@ function normalizeFranchiseManagementOrder(
   return {
     ...m,
     updatedAt: m.updatedAt ?? m.createdAt,
+    ...(m.statusUpdatedAt ? { statusUpdatedAt: m.statusUpdatedAt } : {}),
     payableAmount: m.payableAmount ?? m.totalAmount,
     selfSuppliedCostAmount: m.selfSuppliedCostAmount ?? 0,
   };
@@ -452,6 +456,7 @@ function franchiseMgmtToHistoryEntry(m: FranchiseManagementOrder): OrderHistoryE
     lines: m.lines,
     storeLabel: m.storeLabel,
     status: m.status,
+    statusUpdatedAt: m.statusUpdatedAt,
     actorRole: 'admin',
     scopeId: m.scopeId,
     actorUserId: m.actorUserId,
@@ -618,6 +623,7 @@ function appendFranchiseManagementOrderInternal(params: {
     lines: lines.map((line) => ({ ...line, updatedAt: now })),
     storeLabel: '直營店',
     status: '待出貨',
+    statusUpdatedAt: now,
     scopeId: getDataScopeContext().scopeId,
     actorUserId: getDataScopeContext().userId || undefined,
     createdByName: who,
@@ -634,7 +640,7 @@ export function updateFranchiseManagementOrderStatus(id: string, status: Franchi
   const who = persistableActorDisplayName();
   patchFranchiseManagementOrderById(id, (row) => {
     if (status === '待出貨' && orderHasStallCountCompleted(row)) return null;
-    return { ...row, status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
+    return { ...row, status, statusUpdatedAt: now, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
   });
 }
 
@@ -643,7 +649,7 @@ export function updateOrderHistoryStatus(id: string, status: FranchiseOrderStatu
   const who = persistableActorDisplayName();
   patchOrderHistoryById(id, (row) => {
     if (status === '待出貨' && orderHasStallCountCompleted(row)) return null;
-    return { ...row, status, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
+    return { ...row, status, statusUpdatedAt: now, updatedAt: now, ...(who ? { lastUpdatedByName: who } : {}) };
   });
 }
 
@@ -1101,6 +1107,7 @@ export function appendProcurementOrderEntry(params: {
     actorRole,
     storeLabel,
     status: '待出貨',
+    statusUpdatedAt: now,
     scopeId: ctx.scopeId,
     actorUserId: ctx.userId || undefined,
     createdByName: who,

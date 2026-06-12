@@ -147,6 +147,14 @@ export const orders = {
     procurementDeductionBasisOrderId?: string;
   }): Promise<void> {
     return withRemoteStorageWrite(() => {
+      const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(
+        params.procurementDeductionBasisOrderId ?? '',
+      );
+      if (basisYmd) {
+        const toDeduct: Record<string, number> = {};
+        for (const line of params.lines) toDeduct[line.productId] = line.qty;
+        stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct);
+      }
       orderHistory.appendProcurementOrderEntry(params);
     });
   },

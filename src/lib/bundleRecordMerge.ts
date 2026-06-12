@@ -10,6 +10,7 @@ export type OrderLikeForMerge = {
   updatedAt?: string;
   createdAt: string;
   status?: string;
+  statusUpdatedAt?: string;
   lines?: OrderHistoryLine[];
   itemCount?: number;
   totalAmount?: number;
@@ -125,10 +126,33 @@ function orderStatusRank(status: string | undefined): number {
 }
 
 function pickMergedOrderStatus(a: OrderLikeForMerge, b: OrderLikeForMerge): string | undefined {
-  const ar = orderStatusRank(a.status);
-  const br = orderStatusRank(b.status);
-  if (ar >= br) return a.status ?? b.status;
-  return b.status ?? a.status;
+  if (!a.statusUpdatedAt && !b.statusUpdatedAt) {
+    const ar = orderStatusRank(a.status);
+    const br = orderStatusRank(b.status);
+    if (ar === 3 || br === 3) return ar >= br ? a.status ?? b.status : b.status ?? a.status;
+    if (ar === 1 && br === 2) return a.status ?? b.status;
+    if (ar === 2 && br === 1) return b.status ?? a.status;
+    if (ar >= br) return a.status ?? b.status;
+    return b.status ?? a.status;
+  }
+  const aStatusMs = recordUpdatedAtMs({
+    updatedAt: a.statusUpdatedAt ?? a.updatedAt,
+    createdAt: a.createdAt,
+  });
+  const bStatusMs = recordUpdatedAtMs({
+    updatedAt: b.statusUpdatedAt ?? b.updatedAt,
+    createdAt: b.createdAt,
+  });
+  if (bStatusMs >= aStatusMs) return b.status ?? a.status;
+  return a.status ?? b.status;
+}
+
+function pickMergedStatusUpdatedAt(a: OrderLikeForMerge, b: OrderLikeForMerge): string | undefined {
+  const aAt = a.statusUpdatedAt ?? a.updatedAt ?? a.createdAt;
+  const bAt = b.statusUpdatedAt ?? b.updatedAt ?? b.createdAt;
+  return recordUpdatedAtMs({ updatedAt: bAt }) >= recordUpdatedAtMs({ updatedAt: aAt })
+    ? bAt
+    : aAt;
 }
 
 type StallSnapshotLike = { updatedAt?: string };
@@ -208,11 +232,15 @@ export function mergeOrderLikeRecord<T extends OrderLikeForMerge>(a: T, b: T): T
   const aLines = a.lines ?? [];
   const bLines = b.lines ?? [];
   const linesEqual = orderLineQtyMapsEqual(aLines, bLines);
+  const hasLineTimestamps = orderLinesHaveLineTimestamps(aLines) || orderLinesHaveLineTimestamps(bLines);
 
   let lineSource: T;
   let mergedLines: OrderHistoryLine[] | undefined;
   if (linesEqual) {
     lineSource = bMs >= aMs ? b : a;
+  } else if (hasLineTimestamps) {
+    lineSource = bMs >= aMs ? b : a;
+    mergedLines = mergeOrderLinesByProduct(a, b);
   } else {
     const aDone = a.status === '已完成';
     const bDone = b.status === '已完成';
@@ -247,6 +275,7 @@ export function mergeOrderLikeRecord<T extends OrderLikeForMerge>(a: T, b: T): T
   return {
     ...lineSource,
     status: status ?? lineSource.status,
+    statusUpdatedAt: pickMergedStatusUpdatedAt(a, b),
     lines,
     ...(lineTotals
       ? {

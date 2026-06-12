@@ -263,14 +263,21 @@ function scheduleDebouncedPush(beforeText: string, afterText: string): void {
     clearTimeout(debounceTimer);
   }
   debounceTimer = setTimeout(() => {
-    debounceTimer = null;
-    const text = pendingAfterText;
-    const dirty = [...pendingDirtyKeys];
-    pendingDirtyKeys.clear();
-    pendingAfterText = null;
-    if (!text) return;
-    pushChain = pushChain.then(() => flushDebouncedPush(text, dirty));
+    enqueuePendingPushNow();
   }, PUSH_DEBOUNCE_MS);
+}
+
+function enqueuePendingPushNow(): void {
+  if (debounceTimer != null) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  const text = pendingAfterText;
+  const dirty = [...pendingDirtyKeys];
+  pendingDirtyKeys.clear();
+  pendingAfterText = null;
+  if (!text) return;
+  pushChain = pushChain.then(() => flushDebouncedPush(text, dirty));
 }
 
 async function flushDebouncedPush(bundleText: string, dirtyKeys: DongshanStorageKey[]): Promise<void> {
@@ -362,20 +369,20 @@ export async function pushRemoteIfLocalBundleChangedSince(snapshot: string): Pro
   const now = serializeDongshanDataBundle();
   if (now === snapshot) return;
   scheduleDebouncedPush(snapshot, now);
-  await pushChain;
+  await awaitRemotePushIdle();
 }
 
 export async function syncRemoteAfterDirectLocalMutation(): Promise<void> {
   if (getStorageMode() !== 'remote') return;
-  const before = serializeDongshanDataBundle();
-  const after = serializeDongshanDataBundle();
-  if (after === before) return;
-  scheduleDebouncedPush(before, after);
-  await pushChain;
+  await pushBundleTextWithAutoMerge(
+    serializeDongshanDataBundle(),
+    [...DONGSHAN_EXPORT_STORAGE_KEYS],
+  );
 }
 
 /** 等待目前排程中的雲端推送（含去抖動與推送前合併）完成。 */
 export async function awaitRemotePushIdle(): Promise<void> {
+  enqueuePendingPushNow();
   await pushChain;
 }
 
@@ -396,6 +403,7 @@ export async function withRemoteStorageWrite<T>(fn: () => T | Promise<T>): Promi
 
   if (after !== before) {
     scheduleDebouncedPush(before, after);
+    await awaitRemotePushIdle();
   }
 
   return out;

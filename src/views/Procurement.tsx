@@ -51,11 +51,9 @@ import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { cn } from '../lib/utils';
 import {
   loadDayForProcurementFromOrder,
-  applyOrderDeductionToDayRemain,
   cartAfterDeductingStallRemainFromOrder,
   getPreferredProcurementBasisOrderId,
   setPreferredProcurementBasisOrderId,
-  getOrderStallCountBasisYmdForDeduction,
   formatYmdWithWeekday,
   ymd,
 } from '../lib/stallInventoryStorage';
@@ -511,13 +509,6 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       return s;
     }, 0);
     setSubmitModalOpen(false);
-
-    const toDeduct: Record<string, number> = {};
-    for (const l of lines) toDeduct[l.productId] = l.qty;
-    const basisYmd = getOrderStallCountBasisYmdForDeduction(stallBasisOrderId);
-    if (basisYmd) {
-      applyOrderDeductionToDayRemain(basisYmd, toDeduct);
-    }
 
     void (async () => {
       await ordersApi.appendProcurementOrderEntry({

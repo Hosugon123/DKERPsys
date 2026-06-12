@@ -11,7 +11,7 @@ const RECOVERY_KEY = 'dongshan_conflict_recovery_bundle_v1';
 
 export function stashLocalBundleForConflictRecovery(): void {
   try {
-    sessionStorage.setItem(RECOVERY_KEY, serializeDongshanDataBundle());
+    localStorage.setItem(RECOVERY_KEY, serializeDongshanDataBundle());
   } catch {
     /* quota / private mode */
   }
@@ -19,7 +19,7 @@ export function stashLocalBundleForConflictRecovery(): void {
 
 export function hasConflictRecoveryBundle(): boolean {
   try {
-    return sessionStorage.getItem(RECOVERY_KEY) != null;
+    return localStorage.getItem(RECOVERY_KEY) != null;
   } catch {
     return false;
   }
@@ -27,7 +27,7 @@ export function hasConflictRecoveryBundle(): boolean {
 
 export function clearConflictRecoveryBundle(): void {
   try {
-    sessionStorage.removeItem(RECOVERY_KEY);
+    localStorage.removeItem(RECOVERY_KEY);
   } catch {
     /* ignore */
   }
@@ -36,8 +36,8 @@ export function clearConflictRecoveryBundle(): void {
 /** 讀取並清除暫存；無資料時回傳 null */
 function takeConflictRecoveryRaw(): string | null {
   try {
-    const raw = sessionStorage.getItem(RECOVERY_KEY);
-    sessionStorage.removeItem(RECOVERY_KEY);
+    const raw = localStorage.getItem(RECOVERY_KEY);
+    localStorage.removeItem(RECOVERY_KEY);
     return raw;
   } catch {
     return null;
