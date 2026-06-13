@@ -14,6 +14,7 @@ import {
   Target,
   Store,
   HandCoins,
+  Boxes,
   Package,
   LayoutDashboard,
   ChevronRight,
@@ -1327,16 +1328,18 @@ export default function Dashboard({
     return all;
   }, [userRole, orderTick]);
 
-  /** 總部營運總覽 KPI：直營店實際營收、加盟批貨、總支出、淨利（淨利＝前三項營收減總支出） */
+  /** 總部營運總覽 KPI：直營店實際營收、加盟批貨、消耗品代收、總支出、淨利 */
   const adminHqOverviewMetrics = useMemo(() => {
     if (!isAdmin || !adminFinance) return null;
     const directStoreRevenue = adminFinance.directStoreActualRevenueTotal;
     const franchiseRevenue = adminFinance.franchiseeOrderTotal;
+    const consumableGoodsRevenue = adminFinance.franchiseeConsumableGoodsTotal;
     const expenseTotal = adminFinance.expenseTotal;
     const netProfit = directStoreRevenue + franchiseRevenue - expenseTotal;
     return {
       directStoreRevenue,
       franchiseRevenue,
+      consumableGoodsRevenue,
       expenseTotal,
       netProfit,
     };
@@ -2112,7 +2115,7 @@ export default function Dashboard({
 
             <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
               {adminKpiTab === 'hq-overview' ? (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-0 lg:divide-x lg:divide-zinc-800/80">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:gap-0 lg:divide-x lg:divide-zinc-800/80">
                   <div className="min-w-0 lg:px-4 lg:first:pl-0">
                     <div className="flex items-center gap-1.5 text-zinc-500">
                       <Store size={16} className="shrink-0 text-amber-400" aria-hidden />
@@ -2130,6 +2133,18 @@ export default function Dashboard({
                     <h2 className="mt-2.5 text-xl font-light text-amber-500 tabular-nums sm:text-[2.1rem]">
                       {moneyTW(adminHqOverviewMetrics?.franchiseRevenue ?? 0)}
                     </h2>
+                  </div>
+                  <div className="min-w-0 lg:px-4">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <Boxes size={16} className="shrink-0 text-sky-400/90" aria-hidden />
+                      <p className="min-w-0 flex-1 text-xs leading-snug sm:text-[0.95rem]">消耗品貨款</p>
+                    </div>
+                    <h2 className="mt-2.5 text-xl font-light text-sky-300/90 tabular-nums sm:text-[2.1rem]">
+                      {moneyTW(adminHqOverviewMetrics?.consumableGoodsRevenue ?? 0)}
+                    </h2>
+                    <p className="mt-1 text-[10px] leading-snug text-zinc-500 sm:text-[11px]">
+                      加盟代訂代收，不計批貨營收；對帳可抵銷支出
+                    </p>
                   </div>
                   <div className="min-w-0 lg:px-4">
                     <div className="flex items-center gap-1.5 text-zinc-500">

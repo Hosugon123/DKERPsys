@@ -169,6 +169,10 @@ export type AdminDashboardFinance = {
   directStoreActualRevenueTotal: number;
   /** 本月已完成之加盟叫貨中，計入總部營收之金額（已排除「消耗品」代訂列；訂單 totalAmount 仍含該列） */
   franchiseeOrderTotal: number;
+  /**
+   * 本月已完成之加盟叫貨中，消耗品代訂列小計（代收轉付、不計入加盟批貨營收；總部對帳時可抵銷相關支出）。
+   */
+  franchiseeConsumableGoodsTotal: number;
   /** 本月流水帳「收入」合計（營收總計以外另列） */
   ledgerIncomeTotal: number;
   /** 營收總計 = 直營店實際營收 + 加盟批貨（供淨利計算） */
@@ -306,6 +310,7 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
   let directStoreStallRetailTotal = 0;
   let directStoreActualRevenueTotal = 0;
   let franchiseeOrderTotal = 0;
+  let franchiseeConsumableGoodsTotal = 0;
   const procurementCostTotal = 0;
 
   for (const o of merged) {
@@ -316,6 +321,7 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
         o.selfSuppliedCostAmount ?? Math.max(0, o.totalAmount - (o.payableAmount ?? o.totalAmount));
       const batchNet = Math.max(0, o.totalAmount - selfSupplied);
       const consumableAmt = orderConsumableLinesAmountTotal(o.lines);
+      franchiseeConsumableGoodsTotal += consumableAmt;
       franchiseeOrderTotal += Math.max(0, batchNet - Math.min(batchNet, consumableAmt));
     }
     if (orderIsHeadquartersDirectScoped(o) && orderCountsTowardStallEconomics(o)) {
@@ -378,6 +384,7 @@ export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd
     directStoreStallRetailTotal,
     directStoreActualRevenueTotal,
     franchiseeOrderTotal,
+    franchiseeConsumableGoodsTotal,
     ledgerIncomeTotal,
     revenueTotal,
     procurementCostTotal,
