@@ -366,6 +366,13 @@ function OrderEditActionBar({
   onSave: () => void;
   onCancel: () => void;
 }) {
+  const displayStatusHint =
+    statusHint?.includes('正在自動儲存')
+      ? '正在儲存貨量...'
+      : statusHint?.includes('自動儲存') || statusHint?.includes('1 秒')
+        ? '貨量尚未儲存，請按「儲存貨量」完成更新'
+        : statusHint;
+
   return (
     <div
       className="fixed left-0 right-0 z-[25] top-[calc(env(safe-area-inset-top)+4rem)] border-b border-zinc-700/80 bg-zinc-950/95 backdrop-blur-md shadow-[0_8px_24px_rgba(0,0,0,0.35)] px-3 sm:px-4 md:px-6 lg:px-8 py-3"
@@ -384,8 +391,8 @@ function OrderEditActionBar({
           ) : (
             <span className="hidden sm:block" aria-hidden />
           )}
-          {statusHint ? (
-            <p className="text-xs text-zinc-500 leading-snug">{statusHint}</p>
+          {displayStatusHint ? (
+            <p className="text-xs text-zinc-500 leading-snug">{displayStatusHint}</p>
           ) : null}
         </div>
         <div className="flex gap-2 w-full sm:w-auto sm:shrink-0">
@@ -498,8 +505,6 @@ function orderStatusDisplayLabel(
 
 const PICK_MAX_Q = 99_999;
 /** 調整實出後自動寫入訂單（免按「儲存貨量」） */
-const PICKING_AUTOSAVE_MS = 1200;
-
 function pickingErrorMessage(
   res: Extract<UpdateEditableOrderLinesResult, { ok: false }>,
 ): string {
@@ -513,6 +518,13 @@ function pickingErrorMessage(
     default:
       return '找不到此訂單。';
   }
+}
+
+function pickingStatusHint(status: 'idle' | 'dirty' | 'saving' | 'saved' | 'error'): string {
+  if (status === 'saving') return '正在儲存貨量...';
+  if (status === 'dirty') return '貨量尚未儲存，請按「儲存貨量」完成更新';
+  if (status === 'saved') return '貨量已儲存';
+  return '調整後請按「儲存貨量」';
 }
 
 function parsePickQty(s: string) {
@@ -914,6 +926,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         setPickingPersistStatus('error');
         return { ok: false, reason: 'not_found' };
       }
+      pickingStorageUpdatedAtRef.current = getOrderStorageRevisionMs(orderId);
       setPickingError(null);
       setPickingPersistStatus('saved');
       return res;
@@ -1009,25 +1022,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     }
 
     setPickingPersistStatus('dirty');
-    const gen = ++pickingAutosaveGenRef.current;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        if (pickingAutosaveGenRef.current !== gen) return;
-        const latest = rawList.find((o) => o.id === pickingOrderId);
-        if (!latest) return;
-        if (getOrderStorageRevisionMs(pickingOrderId) > pickingStorageUpdatedAtRef.current) return;
-        setPickingPersistStatus('saving');
-        const res = await persistPickingLines(pickingOrderId, pickingLines);
-        if (pickingAutosaveGenRef.current !== gen) return;
-        if (res.ok) {
-          pickingStorageUpdatedAtRef.current = getOrderStorageRevisionMs(pickingOrderId);
-          setPickingPersistStatus('saved');
-        }
-      })();
-    }, PICKING_AUTOSAVE_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [pickingOrderId, pickingLines, rawList, persistPickingLines]);
+  }, [pickingOrderId, pickingLines, rawList]);
 
   const startPriceAdjust = (e: MouseEvent<HTMLButtonElement>, orderId: string) => {
     e.stopPropagation();
