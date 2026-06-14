@@ -967,7 +967,11 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     void (async () => {
       setPickingPersistStatus('saving');
       const res = await persistPickingLines(orderId, pickingLines);
-      if (res.ok) exitPickingEdit({ revertToOriginal: false });
+      if (res.ok) {
+        clearPickingUi();
+        setExpandedOrderId(null);
+        await syncOrders();
+      }
     })();
   };
 
@@ -2220,12 +2224,12 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           onCancel={() => exitPickingEdit({ revertToOriginal: true })}
           statusHint={
             pickingPersistStatus === 'saving'
-              ? '正在自動儲存實出數量…'
+              ? '正在儲存貨量…'
               : pickingPersistStatus === 'dirty'
-                ? '變更將在約 1 秒後自動儲存；「標記出貨」僅改狀態，與貨量無關'
+                ? '貨量尚未儲存，請按「儲存貨量」完成更新'
                 : pickingPersistStatus === 'saved'
-                  ? '實出已寫入訂單；明細「叫貨數量」即已儲存實出，「帶出數量」為昨剩餘＋叫貨試算'
-                  : '調整後會自動儲存；按「放棄」可還原為進入編輯前的數量'
+                  ? '貨量已儲存'
+                  : '調整後請按「儲存貨量」'
           }
         />
       )}
