@@ -288,8 +288,8 @@ export function loadDayForProcurement(ymdStr: string, scopeId?: string): DaySnap
 }
 
 /**
- * 批貨扣庫：以「單一已盤點訂單」內嵌之盤點快照為準（帶出／剩餘、含登錄實收）；
- * 若無內嵌快照則退回首選該盤點曆法日之合併讀法（`loadDayForProcurement(stallCountBasisYmd)`）。
+ * 批貨扣庫：以參考訂單之**盤點曆法日**即時合併讀法為準（`loadDayForProcurement`）；
+ * 收攤剩餘以銷售紀錄為準，可反映後續叫貨扣庫；若該日尚無銷售紀錄則退訂單內嵌快照。
  */
 export function loadDayForProcurementFromOrder(orderId: string): DaySnapshot {
   if (!orderId) {
@@ -298,6 +298,13 @@ export function loadDayForProcurementFromOrder(orderId: string): DaySnapshot {
   const o = findOrderByIdInStores(orderId);
   if (!o) {
     return mergeDayWithCurrentCatalog(emptyDay());
+  }
+  const scopeId = resolveOrderStallStorageScopeId(o);
+  if (o.stallCountBasisYmd) {
+    const live = loadDayForProcurement(o.stallCountBasisYmd, scopeId);
+    if (getSalesRecord(o.stallCountBasisYmd, scopeId)) {
+      return live;
+    }
   }
   if (o.stallCountSnapshot) {
     const merged = mergeSalesRecordWithCatalog(o.stallCountSnapshot);
@@ -314,7 +321,7 @@ export function loadDayForProcurementFromOrder(orderId: string): DaySnapshot {
     });
   }
   if (o.stallCountBasisYmd) {
-    return loadDayForProcurement(o.stallCountBasisYmd, resolveOrderStallStorageScopeId(o));
+    return loadDayForProcurement(o.stallCountBasisYmd, scopeId);
   }
   return mergeDayWithCurrentCatalog(emptyDay());
 }
@@ -359,19 +366,18 @@ function findOrderByIdInStores(orderId: string): OrderHistoryEntry | null {
 
 /**
  * 是否於叫貨送出時選了「欲扣除餘貨的訂單」。
- * 未選（`procurementDeductionBasisOrderId === ''`）時，盤點「植入訂單」不應併入前一日收攤剩餘。
- * 舊單無此欄（undefined）則維持原公式（併入前日剩餘）。
+ * 未選（`''`）或舊單無此欄（`undefined`）時，盤點「植入訂單」不併入參考剩餘。
  */
 function procurementOrderChainsPriorStallRemain(o: { procurementDeductionBasisOrderId?: string }): boolean {
-  if (o.procurementDeductionBasisOrderId === undefined) return true;
-  return o.procurementDeductionBasisOrderId.trim() !== '';
+  const raw = o.procurementDeductionBasisOrderId;
+  if (raw === undefined) return false;
+  return raw.trim() !== '';
 }
 
 /**
  * 與批貨頁「昨日剩貨」一致之剩餘來源，供植入帳上「帶出」：
- * - 舊單（無 procurementDeductionBasisOrderId）：盤點日**曆法**前一日之收攤剩餘。
- * - 新制有存單號：該扣庫參考訂單之帳上剩餘（內嵌盤點快照／銷售紀錄讀法）。
- * - 新制未指定（空字串）：不併入剩餘。
+ * - 有選扣庫參考單：該單盤點日之即時收攤剩餘（銷售紀錄，已反映叫貨扣庫）。
+ * - 未指定或舊單無欄位：不併入剩餘。
  */
 function loadRemainSnapshotForProcurementBringOut(
   o: {
@@ -381,18 +387,13 @@ function loadRemainSnapshotForProcurementBringOut(
     scopeId?: string;
     actorUserId?: string;
   },
-  stallYmd: string,
-  scopeId: string,
+  _stallYmd: string,
+  _scopeId: string,
 ): DaySnapshot {
   if (!procurementOrderChainsPriorStallRemain(o)) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
-  if (o.procurementDeductionBasisOrderId === undefined) {
-    const prevYmd = addDaysYmd(stallYmd, -1);
-    return loadDayForProcurement(prevYmd, scopeId);
-  }
-  const bid = o.procurementDeductionBasisOrderId.trim();
-  if (!bid) return mergeDayWithCurrentCatalog(emptyDay());
+  const bid = o.procurementDeductionBasisOrderId!.trim();
   return loadDayForProcurementFromOrder(bid);
 }
 
@@ -407,18 +408,10 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
   scopeId?: string;
   actorUserId?: string;
 }): DaySnapshot {
-  const scopeId = resolveOrderStallStorageScopeId(o);
   if (!procurementOrderChainsPriorStallRemain(o)) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
-  if (o.procurementDeductionBasisOrderId === undefined) {
-    const orderYmd = effectiveOrderDateYmd(o);
-    const prevYmd = orderYmd ? addDaysYmd(orderYmd, -1) : '';
-    if (!prevYmd) return mergeDayWithCurrentCatalog(emptyDay());
-    return loadDayForProcurement(prevYmd, scopeId);
-  }
-  const bid = o.procurementDeductionBasisOrderId.trim();
-  if (!bid) return mergeDayWithCurrentCatalog(emptyDay());
+  const bid = o.procurementDeductionBasisOrderId!.trim();
   return loadDayForProcurementFromOrder(bid);
 }
 
@@ -513,10 +506,9 @@ export function computeStallOutImportBreakdown(
 
   let carrySource: StallOutCarryRemainSource | null = null;
   if (chainsPriorStallRemain) {
-    if (o.procurementDeductionBasisOrderId === undefined) {
-      carrySource = { kind: 'calendar_prev_day', prevYmd: addDaysYmd(stallYmd, -1) };
-    } else if (o.procurementDeductionBasisOrderId.trim()) {
-      carrySource = { kind: 'basis_order', orderId: o.procurementDeductionBasisOrderId.trim() };
+    const bid = o.procurementDeductionBasisOrderId?.trim();
+    if (bid) {
+      carrySource = { kind: 'basis_order', orderId: bid };
     }
   }
 
@@ -855,22 +847,21 @@ export function setPreferredStallBasisYmd(ymdStr: string) {
   }
 }
 
-/** 批貨頁最後選的「欲扣除餘貨的訂單」；若無效則取最新一筆已盤點單。 */
+/** 批貨頁最後選的「欲扣除餘貨的訂單」；預設不指定，僅還原使用者曾明確選過的單號。 */
 export function getPreferredProcurementBasisOrderId(): string {
   const orders = listOrdersWithStallCountCompleted();
-  if (orders.length === 0) return '';
   let remembered: string | null = null;
   try {
     remembered = localStorage.getItem(PREF_PROCUREMENT_BASIS_ORDER);
   } catch {
     /* ignore */
   }
-  // 明確儲存空字串＝使用者在批貨頁按「清空」，不帶入任何扣庫參考單
-  if (remembered === '') return '';
-  if (remembered && orders.some((o) => o.id === remembered)) {
+  // 明確儲存空字串＝使用者在批貨頁選「不指定」或按「清空」
+  if (remembered === '' || remembered === null) return '';
+  if (orders.some((o) => o.id === remembered)) {
     return remembered;
   }
-  return orders[0]!.id;
+  return '';
 }
 
 export function setPreferredProcurementBasisOrderId(id: string) {

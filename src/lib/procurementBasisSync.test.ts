@@ -4,8 +4,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cartAfterDeductingStallRemainFromOrder,
+  loadDay,
   loadDayForProcurement,
   loadDayForProcurementFromOrder,
+  recomputeStallOutForStallYmdAndOrder,
   syncBasisDayFromOrderSnapshot,
 } from './stallInventoryStorage';
 import { saveSalesRecord } from './salesRecordStorage';
@@ -120,5 +122,75 @@ describe('procurement basis after order adjustment', () => {
     seedCompletedOrderWithSnapshot(2);
     const cart = cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 10 }, ORDER_ID);
     expect(cart[PRODUCT_ID]).toBe(8);
+  });
+
+  it('叫貨扣庫後 loadDayForProcurementFromOrder 讀即時剩餘，非凍結快照', () => {
+    seedCompletedOrderWithSnapshot(10);
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '5' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    const snap = loadDayForProcurementFromOrder(ORDER_ID);
+    expect(Number(snap.lines[PRODUCT_ID]?.remain)).toBe(5);
+  });
+
+  it('植入帶出：扣庫後參考剩餘＋叫貨，不重複加凍結快照', () => {
+    const BASIS_ORDER = 'basis-order-1';
+    const NEW_ORDER = 'new-order-1';
+    const NEXT_YMD = '2026-05-21';
+    const basis = {
+      id: BASIS_ORDER,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 10,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 10, unitPrice: 100, unit: '隻' }],
+      actorRole: 'employee' as const,
+      scopeId: 'scope:hq',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: { [PRODUCT_ID]: { out: '20', remain: '10' } },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    localStorage.setItem('dongshan_franchise_mgmt_orders_v1', JSON.stringify([basis]));
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '10' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    const newOrder = {
+      id: NEW_ORDER,
+      createdAt: `${NEXT_YMD}T08:00:00.000Z`,
+      orderDateYmd: NEXT_YMD,
+      updatedAt: `${NEXT_YMD}T08:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 500,
+      payableAmount: 500,
+      itemCount: 5,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 5, unitPrice: 100, unit: '隻' }],
+      actorRole: 'employee' as const,
+      scopeId: 'scope:hq',
+      procurementDeductionBasisOrderId: BASIS_ORDER,
+    };
+    localStorage.setItem(
+      'dongshan_franchise_mgmt_orders_v1',
+      JSON.stringify([basis, newOrder]),
+    );
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '5' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
+    });
+    recomputeStallOutForStallYmdAndOrder(NEXT_YMD, NEW_ORDER, undefined, { clearRemain: true });
+    expect(Number(loadDay(NEXT_YMD).lines[PRODUCT_ID]?.out)).toBe(10);
   });
 });

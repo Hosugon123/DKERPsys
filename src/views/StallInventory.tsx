@@ -359,13 +359,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     const next: DaySnapshot = { ...snap, lines };
     const completedAt = new Date().toISOString();
     const stampBasisYmd = stallBasisYmd;
-    const recomputedForStamp = recomputeStallOutForStallYmdAndOrder(
-      stampBasisYmd,
-      viewOrderId,
-      next,
-      { clearRemain: false },
-    );
-    const recordLinesFromStamp: DaySnapshot['lines'] = { ...recomputedForStamp.lines };
+    const recordLinesFromStamp: DaySnapshot['lines'] = { ...next.lines };
     for (const it of supplyItems) {
       if (isConsumableItem(it)) delete recordLinesFromStamp[it.id];
     }
@@ -383,10 +377,8 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       ),
     };
     const dayToSave: DaySnapshot = {
-      ...recomputedForStamp,
-      actualRevenue: next.actualRevenue,
-      revenueGapAmount: next.revenueGapAmount,
-      revenueGapReason: next.revenueGapReason,
+      ...next,
+      updatedAt: completedAt,
     };
     const stallScopeId = viewOrder ? resolveOrderStallStorageScopeId(viewOrder) : undefined;
     const gapDraft = syncGapToLedger
