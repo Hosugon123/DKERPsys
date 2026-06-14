@@ -4,6 +4,8 @@
 import { orderLineQtyMapsEqual, type OrderHistoryLine } from './orderHistoryStorage';
 import type { DongshanStorageKey } from './appDataBundle';
 import { mergeFranchiseeRetailStoreJson } from './franchiseeRetailState';
+import { HQ_SCOPE_ID } from './dataScope';
+import { isLegacyBareStallDateKey, scopedStallDateKey } from './scopedStallDateKey';
 
 export type OrderLikeForMerge = {
   id: string;
@@ -496,11 +498,33 @@ function mergeByDateRow(l: unknown, c: unknown): unknown {
   return newer;
 }
 
+function normalizeByDateStoreKeys(byDate: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, row] of Object.entries(byDate)) {
+    const normalizedKey = isLegacyBareStallDateKey(key)
+      ? scopedStallDateKey(HQ_SCOPE_ID, key)
+      : key;
+    const existing = out[normalizedKey];
+    if (existing == null) {
+      out[normalizedKey] = row;
+      continue;
+    }
+    out[normalizedKey] = mergeByDateRow(existing, row);
+  }
+  return out;
+}
+
 function mergeByDateStore(localRaw: string | null | undefined, cloudRaw: string | null | undefined): string {
   const local = (safeParseJson(localRaw) as ByDateStore | null) ?? { version: 1, byDate: {} };
   const cloud = (safeParseJson(cloudRaw) as ByDateStore | null) ?? { version: 1, byDate: {} };
-  const localDates = local.byDate && typeof local.byDate === 'object' ? local.byDate : {};
-  const cloudDates = cloud.byDate && typeof cloud.byDate === 'object' ? cloud.byDate : {};
+  const localDates =
+    local.byDate && typeof local.byDate === 'object'
+      ? normalizeByDateStoreKeys(local.byDate as Record<string, unknown>)
+      : {};
+  const cloudDates =
+    cloud.byDate && typeof cloud.byDate === 'object'
+      ? normalizeByDateStoreKeys(cloud.byDate as Record<string, unknown>)
+      : {};
   const dateKeys = new Set([...Object.keys(localDates), ...Object.keys(cloudDates)]);
   const byDate: Record<string, unknown> = {};
   for (const dk of dateKeys) {

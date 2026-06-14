@@ -23,7 +23,7 @@ import {
   computeStallGapSummary,
 } from './financeLib';
 import { getSalesRecord, saveSalesRecord } from './salesRecordStorage';
-import { loadDay, loadDayForProcurement, saveDay } from './stallInventoryStorage';
+import { loadDay, loadDayForProcurement, saveDay, commitStallInventoryComplete } from './stallInventoryStorage';
 import { HQ_SCOPE_ID } from './dataScope';
 import type { SalesRecordDaySnapshot } from './salesRecordStorage';
 
@@ -121,6 +121,31 @@ describe('跨模組資料一致性', () => {
       expect(String(salesDay?.actualRevenue).trim()).toBe('9000');
       expect(Number(stallDay.lines[DUCK_HEAD_ID]?.remain)).toBe(2);
       expect(Number(salesDay?.lines[DUCK_HEAD_ID]?.remain)).toBe(2);
+    });
+
+    it('commitStallInventoryComplete 一次寫入三庫並驗證押記', () => {
+      appendProcurementOrderEntry({
+        lines: ORDER_LINES,
+        totalAmount: 1000,
+        actorRole: 'admin',
+        orderDateYmd: BASIS_YMD,
+      });
+      updateOrderStatusInEitherStore('ORD-20260603-001', '已完成');
+
+      const snap = makeSnapshot();
+      const completedAt = '2026-06-03T18:00:00.000Z';
+      const res = commitStallInventoryComplete({
+        orderId: 'ORD-20260603-001',
+        basisYmd: BASIS_YMD,
+        completedAt,
+        recordSnap: snap,
+        stallDaySnap: { lines: snap.lines, actualRevenue: snap.actualRevenue, updatedAt: completedAt },
+      });
+      expect(res.ok).toBe(true);
+
+      const orderSnap = readMergedOrderByIdFromStores('ORD-20260603-001')?.stallCountSnapshot;
+      expect(stallCountSnapshotPersistedMatches(orderSnap, snap)).toBe(true);
+      expect(getSalesRecord(BASIS_YMD)?.actualRevenue).toBe(snap.actualRevenue);
     });
   });
 

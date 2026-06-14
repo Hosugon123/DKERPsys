@@ -7,14 +7,18 @@ import {
   effectiveOrderDateYmd,
   readMergedOrderByIdFromStores,
   resolveOrderDataScopeId,
+  setOrderStallCountStamp,
+  stallCountSnapshotPersistedMatches,
   type OrderHistoryEntry,
 } from './orderHistoryStorage';
 import { HQ_SCOPE_ID, getDataScopeContext } from './dataScope';
 import {
+  bareYmdFromStallStorageKey,
   isLegacyBareStallDateKey,
   resolveOrderStallStorageScopeId,
   resolveStallStorageScopeId,
   scopedStallDateKey,
+  stallStorageKeyMatchesScope,
 } from './scopedStallDateKey';
 import {
   getSalesRecord,
@@ -310,7 +314,7 @@ export function loadDayForProcurementFromOrder(orderId: string): DaySnapshot {
     });
   }
   if (o.stallCountBasisYmd) {
-    return loadDayForProcurement(o.stallCountBasisYmd);
+    return loadDayForProcurement(o.stallCountBasisYmd, resolveOrderStallStorageScopeId(o));
   }
   return mergeDayWithCurrentCatalog(emptyDay());
 }
@@ -370,15 +374,22 @@ function procurementOrderChainsPriorStallRemain(o: { procurementDeductionBasisOr
  * - 新制未指定（空字串）：不併入剩餘。
  */
 function loadRemainSnapshotForProcurementBringOut(
-  o: { procurementDeductionBasisOrderId?: string },
-  stallYmd: string
+  o: {
+    procurementDeductionBasisOrderId?: string;
+    orderDateYmd?: string;
+    createdAt: string;
+    scopeId?: string;
+    actorUserId?: string;
+  },
+  stallYmd: string,
+  scopeId: string,
 ): DaySnapshot {
   if (!procurementOrderChainsPriorStallRemain(o)) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
   if (o.procurementDeductionBasisOrderId === undefined) {
     const prevYmd = addDaysYmd(stallYmd, -1);
-    return loadDayForProcurement(prevYmd);
+    return loadDayForProcurement(prevYmd, scopeId);
   }
   const bid = o.procurementDeductionBasisOrderId.trim();
   if (!bid) return mergeDayWithCurrentCatalog(emptyDay());
@@ -393,7 +404,10 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
   procurementDeductionBasisOrderId?: string;
   orderDateYmd?: string;
   createdAt: string;
+  scopeId?: string;
+  actorUserId?: string;
 }): DaySnapshot {
+  const scopeId = resolveOrderStallStorageScopeId(o);
   if (!procurementOrderChainsPriorStallRemain(o)) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
@@ -401,7 +415,7 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
     const orderYmd = effectiveOrderDateYmd(o);
     const prevYmd = orderYmd ? addDaysYmd(orderYmd, -1) : '';
     if (!prevYmd) return mergeDayWithCurrentCatalog(emptyDay());
-    return loadDayForProcurement(prevYmd);
+    return loadDayForProcurement(prevYmd, scopeId);
   }
   const bid = o.procurementDeductionBasisOrderId.trim();
   if (!bid) return mergeDayWithCurrentCatalog(emptyDay());
@@ -424,8 +438,9 @@ export function recomputeStallOutForStallYmdAndOrder(
   opts?: { clearRemain?: boolean }
 ): DaySnapshot {
   const o = findOrderByIdInStores(orderId);
+  const scopeId = o ? resolveOrderStallStorageScopeId(o) : resolveStallStorageScopeId();
   if (!o || o.status === '已取消') {
-    return loadDay(stallYmd);
+    return loadDay(stallYmd, scopeId);
   }
   const sumBy: Record<string, number> = {};
   for (const l of o.lines) {
@@ -433,8 +448,8 @@ export function recomputeStallOutForStallYmdAndOrder(
     if (q <= 0) continue;
     sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
   }
-  const prevDay = loadRemainSnapshotForProcurementBringOut(o, stallYmd);
-  const fromStorage = loadDay(stallYmd);
+  const prevDay = loadRemainSnapshotForProcurementBringOut(o, stallYmd, scopeId);
+  const fromStorage = loadDay(stallYmd, scopeId);
   const base: DaySnapshot = editorSnap
     ? {
         ...fromStorage,
@@ -457,8 +472,8 @@ export function recomputeStallOutForStallYmdAndOrder(
     const nextRemain = clearRemain ? '' : (lines[it.id].remain ?? '');
     lines[it.id] = { out: String(nextOut), remain: nextRemain };
   }
-  saveDay(stallYmd, { ...snap, lines });
-  return loadDay(stallYmd);
+  saveDay(stallYmd, { ...snap, lines }, scopeId);
+  return loadDay(stallYmd, scopeId);
 }
 
 /** 盤點頁「植入訂單」公式之逐品明細（不含消耗品，與攤上盤點表一致） */
@@ -486,6 +501,7 @@ export function computeStallOutImportBreakdown(
 } | null {
   const o = findOrderByIdInStores(orderId);
   if (!o || o.status === '已取消') return null;
+  const scopeId = resolveOrderStallStorageScopeId(o);
   const chainsPriorStallRemain = procurementOrderChainsPriorStallRemain(o);
   const sumBy: Record<string, number> = {};
   for (const l of o.lines) {
@@ -493,7 +509,7 @@ export function computeStallOutImportBreakdown(
     if (q <= 0) continue;
     sumBy[l.productId] = roundProcurementQty((sumBy[l.productId] || 0) + q);
   }
-  const prevDay = loadRemainSnapshotForProcurementBringOut(o, stallYmd);
+  const prevDay = loadRemainSnapshotForProcurementBringOut(o, stallYmd, scopeId);
 
   let carrySource: StallOutCarryRemainSource | null = null;
   if (chainsPriorStallRemain) {
@@ -586,6 +602,42 @@ export function syncBasisDayFromOrderSnapshot(orderId: string): void {
     },
     scopeId,
   );
+}
+
+export type CommitStallInventoryCompleteResult =
+  | { ok: true }
+  | { ok: false; reason: 'order_not_found' | 'stamp_failed' | 'persist_mismatch' };
+
+/**
+ * 盤點完成一次寫入：訂單押記、攤上日、銷售紀錄（同 scope／營業日），並驗證押記已落地。
+ */
+export function commitStallInventoryComplete(params: {
+  orderId: string;
+  basisYmd: string;
+  completedAt: string;
+  recordSnap: SalesRecordDaySnapshot;
+  stallDaySnap: DaySnapshot;
+  scopeId?: string;
+}): CommitStallInventoryCompleteResult {
+  const { orderId, basisYmd, completedAt, recordSnap, stallDaySnap, scopeId } = params;
+  if (!readMergedOrderByIdFromStores(orderId)) {
+    return { ok: false, reason: 'order_not_found' };
+  }
+  const okStamp = setOrderStallCountStamp(orderId, {
+    basisYmd,
+    completedAt,
+    snapshot: recordSnap,
+  });
+  if (!okStamp) return { ok: false, reason: 'stamp_failed' };
+
+  saveDay(basisYmd, stallDaySnap, scopeId);
+  saveSalesRecord(basisYmd, recordSnap, scopeId);
+
+  const merged = readMergedOrderByIdFromStores(orderId);
+  if (!stallCountSnapshotPersistedMatches(merged?.stallCountSnapshot, recordSnap)) {
+    return { ok: false, reason: 'persist_mismatch' };
+  }
+  return { ok: true };
 }
 
 export type StallOrderForDateRow = {
@@ -733,19 +785,32 @@ export function listProcurementOrdersInLast5Days(anchorYmd: string): StallOrderF
   return listProcurementOrdersInLastNDays(anchorYmd, 5);
 }
 
-export function listDateKeys() {
-  return Object.keys(loadAll().byDate).sort();
+export function listDateKeys(scopeId?: string) {
+  const scope = resolveStallStorageScopeId(scopeId);
+  return Object.keys(loadAll().byDate)
+    .filter((k) => stallStorageKeyMatchesScope(k, scope))
+    .map((k) => bareYmdFromStallStorageKey(k))
+    .sort();
 }
 
 const PREF_STALL_BASIS = 'dongshan_procurement_stall_basis_ymd';
 const PREF_PROCUREMENT_BASIS_ORDER = 'dongshan_procurement_stall_basis_order_id';
 
-/** 自新到舊的已儲存盤點日＋寫入時間（供歷程與下單選用） */
-export function listSavedStallDaysWithMeta(): { ymd: string; updatedAt: string }[] {
+/** 自新到舊的已儲存盤點日＋寫入時間（供歷程與下單選用；回傳曆法日，非 storage key）。 */
+export function listSavedStallDaysWithMeta(scopeId?: string): { ymd: string; updatedAt: string }[] {
+  const scope = resolveStallStorageScopeId(scopeId);
   const s = loadAll();
-  return Object.keys(s.byDate)
-    .sort((a, b) => b.localeCompare(a))
-    .map((d) => ({ ymd: d, updatedAt: s.byDate[d].updatedAt || '' }));
+  const byYmd = new Map<string, string>();
+  for (const [storageKey, row] of Object.entries(s.byDate)) {
+    if (!stallStorageKeyMatchesScope(storageKey, scope)) continue;
+    const dayYmd = bareYmdFromStallStorageKey(storageKey);
+    const prev = byYmd.get(dayYmd);
+    const cur = row.updatedAt || '';
+    if (!prev || cur > prev) byYmd.set(dayYmd, cur);
+  }
+  return Array.from(byYmd.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([ymd, updatedAt]) => ({ ymd, updatedAt }));
 }
 
 /**
@@ -825,15 +890,19 @@ export function formatYmdWithWeekday(ymdStr: string) {
 /** 同一星期幾的歷史「售出量」取平均，僅使用嚴格早於 asOfYmd 的日期 */
 export function averageSoldSameWeekday(
   productId: string,
-  asOfYmd: string
+  asOfYmd: string,
+  scopeId?: string,
 ): { avg: number; sampleCount: number } {
   const s = loadAll();
+  const scope = resolveStallStorageScopeId(scopeId);
   const targetWd = parseYmd(asOfYmd).getDay();
   const solds: number[] = [];
-  for (const d of Object.keys(s.byDate).sort()) {
+  for (const storageKey of Object.keys(s.byDate).sort()) {
+    if (!stallStorageKeyMatchesScope(storageKey, scope)) continue;
+    const d = bareYmdFromStallStorageKey(storageKey);
     if (d >= asOfYmd) break;
     if (parseYmd(d).getDay() !== targetWd) continue;
-    const line = s.byDate[d].lines[productId];
+    const line = s.byDate[storageKey].lines[productId];
     if (!line) continue;
     const out = num(line.out);
     const remain = num(line.remain);
@@ -849,12 +918,11 @@ export function averageSoldSameWeekday(
  * 所選「營業日」的建議帶出量（以當天凌晨視角）：
  * ＝ 與該日相同星期幾的歷史平均售出量 － 前一日庫存尾貨（前一日盤點的剩餘量）
  */
-export function suggestBringForDate(productId: string, businessDayYmd: string) {
+export function suggestBringForDate(productId: string, businessDayYmd: string, scopeId?: string) {
   const yPrev = addDaysYmd(businessDayYmd, -1);
-  const s = loadAll();
-  const prevSnap = s.byDate[yPrev];
-  const carryRemain = num(prevSnap?.lines[productId]?.remain);
-  const { avg, sampleCount } = averageSoldSameWeekday(productId, businessDayYmd);
+  const prevSnap = loadDay(yPrev, scopeId);
+  const carryRemain = num(prevSnap.lines[productId]?.remain);
+  const { avg, sampleCount } = averageSoldSameWeekday(productId, businessDayYmd, scopeId);
   const raw = avg - carryRemain;
   return {
     suggest: Math.max(0, Math.round(raw * 10) / 10),
@@ -924,11 +992,15 @@ function cartAfterDeductingStallRemainFromSnapshot(
   return out;
 }
 
-export function getLastKpisFromLatestDay() {
-  const keys = listDateKeys();
+export function getLastKpisFromLatestDay(scopeId?: string) {
+  const scope = resolveStallStorageScopeId(scopeId);
+  const keys = Object.keys(loadAll().byDate)
+    .filter((k) => stallStorageKeyMatchesScope(k, scope))
+    .sort();
   if (keys.length === 0) return null;
-  const last = keys[keys.length - 1];
-  const day = loadDay(last);
+  const lastKey = keys[keys.length - 1]!;
+  const lastYmd = bareYmdFromStallStorageKey(lastKey);
+  const day = loadDay(lastYmd, scope);
   const ids = getAllSupplyItems().map((i) => i.id);
   const split = aggregateStallKpis(
     ids,
@@ -936,7 +1008,7 @@ export function getLastKpisFromLatestDay() {
     (id) => getSupplyItem(id)
   );
   return {
-    date: last,
+    date: lastYmd,
     ...split.retail,
     consumableRef: split.consumable,
     actualRevenue: num(day.actualRevenue),

@@ -6,7 +6,8 @@
  * - remote：啟動時由 {@link initRemoteSyncOnAppLoad} 先 GET 覆蓋本地；每次寫入後自動推送整包。
  */
 import { getStorageMode, type StorageMode } from './storageMode';
-import { awaitRemotePushIdle, withRemoteStorageRead, withRemoteStorageWrite } from './remoteSyncHub';
+import { awaitRemotePushIdle, withRemoteStorageRead, withRemoteStorageWrite, withRemoteStorageWriteDeferPush } from './remoteSyncHub';
+import { resolveOrderStallStorageScopeId } from '../lib/scopedStallDateKey';
 import * as accountingLedger from '../lib/accountingLedgerStorage';
 import * as orderHistory from '../lib/orderHistoryStorage';
 import * as stallInventory from '../lib/stallInventoryStorage';
@@ -35,6 +36,8 @@ export {
   syncRemoteAfterDirectLocalMutation,
   withRemoteStorageRead,
   withRemoteStorageWrite,
+  withRemoteStorageWriteDeferPush,
+  hasPendingRemotePush,
 } from './remoteSyncHub';
 export type { RemoteSyncStatus } from './remoteSyncHub';
 export {
@@ -151,13 +154,16 @@ export const orders = {
     procurementDeductionBasisOrderId?: string;
   }): Promise<string> {
     return withRemoteStorageWrite(() => {
-      const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(
-        params.procurementDeductionBasisOrderId ?? '',
-      );
+      const basisOrderId = params.procurementDeductionBasisOrderId?.trim() ?? '';
+      const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
       if (basisYmd) {
         const toDeduct: Record<string, number> = {};
         for (const line of params.lines) toDeduct[line.productId] = line.qty;
-        stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct);
+        const basisOrder = basisOrderId
+          ? orderHistory.readMergedOrderByIdFromStores(basisOrderId)
+          : null;
+        const scopeId = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : undefined;
+        stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
       }
       return orderHistory.appendProcurementOrderEntry(params);
     });
@@ -170,9 +176,23 @@ export const orders = {
       snapshot: import('../lib/salesRecordStorage').SalesRecordDaySnapshot;
     },
   ): Promise<boolean> {
-    const ok = await withRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields));
-    if (ok && getStorageMode() === 'remote') await awaitRemotePushIdle();
-    return ok;
+    return withRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields));
+  },
+  async commitStallInventoryComplete(params: {
+    orderId: string;
+    basisYmd: string;
+    completedAt: string;
+    recordSnap: import('../lib/salesRecordStorage').SalesRecordDaySnapshot;
+    stallDaySnap: stallInventory.DaySnapshot;
+    scopeId?: string;
+  }): Promise<stallInventory.CommitStallInventoryCompleteResult> {
+    const res = await withRemoteStorageWriteDeferPush(() =>
+      stallInventory.commitStallInventoryComplete(params),
+    );
+    if (res.ok && getStorageMode() === 'remote') {
+      void awaitRemotePushIdle();
+    }
+    return res;
   },
   async updateStallCountSnapshotByOrderId(
     orderId: string,
@@ -219,8 +239,14 @@ export type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 // ——— 攤上盤點 ———
 
 export const stallInventoryApi = {
-  async saveDay(ymdStr: string, snap: stallInventory.DaySnapshot, scopeId?: string): Promise<void> {
-    return withRemoteStorageWrite(() => stallInventory.saveDay(ymdStr, snap, scopeId));
+  async saveDay(
+    ymdStr: string,
+    snap: stallInventory.DaySnapshot,
+    scopeId?: string,
+    options?: { deferRemotePush?: boolean },
+  ): Promise<void> {
+    const write = options?.deferRemotePush ? withRemoteStorageWriteDeferPush : withRemoteStorageWrite;
+    return write(() => stallInventory.saveDay(ymdStr, snap, scopeId));
   },
   async loadDay(ymdStr: string, scopeId?: string): Promise<stallInventory.DaySnapshot> {
     return withRemoteStorageRead(() => stallInventory.loadDay(ymdStr, scopeId));

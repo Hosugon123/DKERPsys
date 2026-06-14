@@ -35,3 +35,18 @@ export function resolveOrderStallStorageScopeId(
 export function isLegacyBareStallDateKey(key: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(key.trim());
 }
+
+/** 由儲存鍵還原曆法日（支援 scoped 與舊裸鍵）。 */
+export function bareYmdFromStallStorageKey(key: string): string {
+  const parsed = parseScopedStallDateKey(key);
+  if (parsed) return parsed.ymd;
+  return key.trim();
+}
+
+/** 儲存鍵是否屬於指定資料範圍（舊裸鍵視為總部）。 */
+export function stallStorageKeyMatchesScope(storageKey: string, scopeId?: string): boolean {
+  const scope = resolveStallStorageScopeId(scopeId);
+  const parsed = parseScopedStallDateKey(storageKey);
+  if (parsed) return parsed.scopeId === scope;
+  return scope === HQ_SCOPE_ID && isLegacyBareStallDateKey(storageKey);
+}

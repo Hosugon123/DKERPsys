@@ -3,9 +3,18 @@
  * 手機下拉另可觸發整頁重新載入，以取得最新部署的 JS/CSS（等同瀏覽器重新整理）。
  */
 import { getStorageMode } from '../services/storageMode';
-import { fetchRemoteBundle } from '../services/remoteSyncHub';
-import { dispatchDongshanStorageSyncEvents, importDongshanDataBundle } from './appDataBundle';
-import { canReloadAppShell } from './unsavedWorkGuard';
+import {
+  fetchRemoteBundle,
+  hasPendingRemotePush,
+} from '../services/remoteSyncHub';
+import {
+  buildDongshanDataBundle,
+  DONGSHAN_EXPORT_STORAGE_KEYS,
+  dispatchDongshanStorageSyncEvents,
+  importDongshanDataBundle,
+  mergeDongshanBundlesLocalWinsDirty,
+} from './appDataBundle';
+import { canReloadAppShell, hasUnsavedWork } from './unsavedWorkGuard';
 
 export const APP_PAGE_REFRESH_EVENT = 'appPageRefresh';
 
@@ -31,8 +40,12 @@ export function reloadAppShell(): void {
 
 export async function refreshAppPageData(options?: RefreshAppPageOptions): Promise<void> {
   if (getStorageMode() === 'remote') {
-    const bundle = await fetchRemoteBundle();
-    const result = importDongshanDataBundle(bundle);
+    const cloud = await fetchRemoteBundle();
+    const local = buildDongshanDataBundle();
+    const dirty =
+      hasUnsavedWork() || hasPendingRemotePush() ? [...DONGSHAN_EXPORT_STORAGE_KEYS] : [];
+    const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, dirty);
+    const result = importDongshanDataBundle(merged);
     if (result.ok === false) {
       throw new Error(result.error);
     }

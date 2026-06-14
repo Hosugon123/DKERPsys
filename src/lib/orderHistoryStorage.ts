@@ -1148,6 +1148,23 @@ export function appendProcurementOrderEntry(params: {
   return entry.id;
 }
 
+function patchOrderStallFieldsInEveryStore(
+  orderId: string,
+  patch: (row: OrderHistoryEntry) => OrderHistoryEntry | null,
+): boolean {
+  const inMgmt = loadFranchiseManagementOrdersAll().some((o) => o.id === orderId);
+  const inHist = loadOrderHistoryAllEntries().some((o) => o.id === orderId);
+  if (!inMgmt && !inHist) return false;
+  let ok = true;
+  if (inMgmt) {
+    ok = patchFranchiseManagementOrderById(orderId, (row) => patch(row as OrderHistoryEntry)) && ok;
+  }
+  if (inHist) {
+    ok = patchOrderHistoryById(orderId, patch) && ok;
+  }
+  return ok;
+}
+
 /**
  * 在該筆訂單寫入攤上盤點壓記（盤點日＋完成時間＋帳上快照），供多店多單與銷售紀錄分帳顯示。
  */
@@ -1155,6 +1172,7 @@ export function setOrderStallCountStamp(
   orderId: string,
   fields: { basisYmd: string; completedAt: string; snapshot: SalesRecordDaySnapshot }
 ): boolean {
+  if (!readMergedOrderByIdFromStores(orderId)) return false;
   const merged = mergeSalesRecordWithCatalog(fields.snapshot);
   const ctx = getDataScopeContext();
   const completedByUserId = ctx.userId?.trim() || undefined;
@@ -1167,24 +1185,11 @@ export function setOrderStallCountStamp(
     ...(who ? { stallCountCompletedByName: who, lastUpdatedByName: who } : {}),
   };
   const now = new Date().toISOString();
-  let ok = false;
-  if (loadFranchiseManagementOrdersAll().some((o) => o.id === orderId)) {
-    ok =
-      patchFranchiseManagementOrderById(orderId, (row) => ({
-        ...row,
-        ...stampPatch,
-        updatedAt: now,
-      })) || ok;
-  }
-  if (loadOrderHistoryAllEntries().some((o) => o.id === orderId)) {
-    ok =
-      patchOrderHistoryById(orderId, (row) => ({
-        ...row,
-        ...stampPatch,
-        updatedAt: now,
-      })) || ok;
-  }
-  return ok;
+  return patchOrderStallFieldsInEveryStore(orderId, (row) => ({
+    ...row,
+    ...stampPatch,
+    updatedAt: now,
+  }));
 }
 
 export type UpdateStallSnapshotResult = { ok: true } | { ok: false; reason: 'not_found' | 'no_stamp' };
@@ -1241,31 +1246,34 @@ export function updateStallCountSnapshotByOrderId(
   const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === orderId);
   const histHit = loadOrderHistoryAllEntries().find((o) => o.id === orderId);
   if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
-  const hasStamp = Boolean(
-    mgmtHit?.stallCountCompletedAt?.trim() || histHit?.stallCountCompletedAt?.trim(),
-  );
-  if (!hasStamp) return { ok: false, reason: 'no_stamp' };
+  const stampedRef = [mgmtHit, histHit].find((o) => o?.stallCountCompletedAt?.trim());
+  if (!stampedRef?.stallCountCompletedAt?.trim()) return { ok: false, reason: 'no_stamp' };
 
-  let wrote = false;
-  if (mgmtHit) {
-    wrote =
-      patchFranchiseManagementOrderById(orderId, (row) => ({
+  const stampBackfill = {
+    stallCountBasisYmd: stampedRef.stallCountBasisYmd,
+    stallCountCompletedAt: stampedRef.stallCountCompletedAt,
+    stallCountCompletedByUserId: stampedRef.stallCountCompletedByUserId,
+    stallCountCompletedByName: stampedRef.stallCountCompletedByName,
+  };
+
+  const ok = patchOrderStallFieldsInEveryStore(orderId, (row) => {
+    if (!row.stallCountCompletedAt?.trim()) {
+      return {
         ...row,
+        ...stampBackfill,
         stallCountSnapshot: nextSnap,
         updatedAt: now,
         ...(who ? { lastUpdatedByName: who } : {}),
-      })) || wrote;
-  }
-  if (histHit) {
-    wrote =
-      patchOrderHistoryById(orderId, (row) => ({
-        ...row,
-        stallCountSnapshot: nextSnap,
-        updatedAt: now,
-        ...(who ? { lastUpdatedByName: who } : {}),
-      })) || wrote;
-  }
-  return wrote ? { ok: true } : { ok: false, reason: 'no_stamp' };
+      };
+    }
+    return {
+      ...row,
+      stallCountSnapshot: nextSnap,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    };
+  });
+  return ok ? { ok: true } : { ok: false, reason: 'no_stamp' };
 }
 
 /**

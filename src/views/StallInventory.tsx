@@ -41,7 +41,7 @@ import {
   listUncountedCompletedProcurementOrdersForSession,
   type DaySnapshot,
 } from '../lib/stallInventoryStorage';
-import { orders as ordersApi, ledger as ledgerApi, salesRecords as salesRecordsApi, stallInventoryApi } from '../services/apiService';
+import { orders as ordersApi, ledger as ledgerApi, stallInventoryApi } from '../services/apiService';
 import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { buildStallGapLedgerDraftInput } from '../lib/procurementLedgerDraft';
 import { resolveOrderStallStorageScopeId } from '../lib/scopedStallDateKey';
@@ -91,7 +91,10 @@ const STALL_QTY_STEP_INPUT =
 const STALL_QTY_ROW = 'inline-flex items-center justify-center gap-0.5 flex-nowrap';
 
 type StallInventoryWorkDraft = {
-  dateStr: string;
+  /** 盤點營業日（與所選訂單 orderDateYmd 一致） */
+  basisYmd?: string;
+  /** @deprecated 舊草稿欄位，相容還原 */
+  dateStr?: string;
   viewOrderId: string;
   snap: DaySnapshot;
 };
@@ -100,10 +103,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
   const restoredStall = useRestoreWorkDraft<StallInventoryWorkDraft>(WORK_DRAFT_IDS.stallInventory);
+  const [dateStr, setDateStr] = useState(() => ymd(new Date()));
   const [nowIso, setNowIso] = useState(() => new Date().toISOString());
-  const dateStr = useMemo(() => ymd(new Date(nowIso)), [nowIso]);
   const [snap, setSnap] = useState<DaySnapshot>(() => {
-    if (restoredStall?.snap && restoredStall.dateStr === ymd(new Date())) {
+    if (restoredStall?.snap) {
       return restoredStall.snap;
     }
     return loadDay(ymd(new Date()));
@@ -112,37 +115,70 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const [stallListTick, setStallListTick] = useState(0);
   const [recomputeMsg, setRecomputeMsg] = useState<string | null>(null);
   const [stallCountConfirmOpen, setStallCountConfirmOpen] = useState(false);
+  const [stallCountSubmitting, setStallCountSubmitting] = useState(false);
   /** 盤點落差可選同步至流水帳 */
   const [syncGapToLedger, setSyncGapToLedger] = useState(false);
   /** 盤點表自動儲存提示 */
   const [autosaveHint, setAutosaveHint] = useState(false);
   /** 本場盤點鎖定之單一叫貨單：植入帶出、盤點完成押記皆針對此單。 */
-  const [viewOrderId, setViewOrderId] = useState(() =>
-    restoredStall?.dateStr === ymd(new Date()) ? restoredStall.viewOrderId : '',
-  );
-  const skipNextDayLoadRef = useRef(
-    Boolean(restoredStall && restoredStall.dateStr === ymd(new Date())),
-  );
+  const [viewOrderId, setViewOrderId] = useState(() => restoredStall?.viewOrderId ?? '');
+  const skipNextDayLoadRef = useRef(Boolean(restoredStall?.snap));
   /** 訂單摘要＋帶出試算表預設收合，避免清單過長 */
   const [stallOrderDetailOpen, setStallOrderDetailOpen] = useState(false);
   const stallBaselineRef = useRef('');
   useEffect(() => {
-    const t = window.setInterval(() => {
-      setNowIso(new Date().toISOString());
-    }, 1000);
+    const refreshClock = () => {
+      const now = new Date();
+      setNowIso(now.toISOString());
+      setDateStr(ymd(now));
+    };
+    refreshClock();
+    const t = window.setInterval(refreshClock, 60_000);
     return () => window.clearInterval(t);
   }, []);
+
+  /** 供選單：盤點日起往前提煉內多店多單，依單一筆一盤 */
+  const ordersInWindow = useMemo(
+    () => listUncountedCompletedProcurementOrdersForSession(),
+    [stallListTick],
+  );
+
+  useEffect(() => {
+    if (ordersInWindow.length === 0) {
+      setViewOrderId('');
+      return;
+    }
+    setViewOrderId((prev) => {
+      if (prev && ordersInWindow.some((o) => o.id === prev)) return prev;
+      return ordersInWindow[0]!.id;
+    });
+  }, [ordersInWindow]);
+
+  const viewOrder = useMemo(
+    () => ordersInWindow.find((o) => o.id === viewOrderId) ?? null,
+    [ordersInWindow, viewOrderId],
+  );
+
+  /** 盤點營業日：有選訂單時以訂單歸屬日為準，避免畫面（今日）與儲存日分裂。 */
+  const stallBasisYmd = useMemo(
+    () => (viewOrder ? effectiveOrderDateYmd(viewOrder) : dateStr),
+    [viewOrder, dateStr],
+  );
+  const stallScopeId = useMemo(
+    () => (viewOrder ? resolveOrderStallStorageScopeId(viewOrder) : undefined),
+    [viewOrder],
+  );
 
   useEffect(() => {
     if (skipNextDayLoadRef.current) {
       skipNextDayLoadRef.current = false;
-      stallBaselineRef.current = stallDaySnapshotFingerprint(loadDay(dateStr));
+      stallBaselineRef.current = stallDaySnapshotFingerprint(loadDay(stallBasisYmd, stallScopeId));
       return;
     }
-    const day = loadDay(dateStr);
+    const day = loadDay(stallBasisYmd, stallScopeId);
     stallBaselineRef.current = stallDaySnapshotFingerprint(day);
     setSnap(day);
-  }, [dateStr]);
+  }, [stallBasisYmd, stallScopeId, viewOrderId]);
 
   const stallDirty = useMemo(
     () => stallDaySnapshotFingerprint(snap) !== stallBaselineRef.current,
@@ -152,21 +188,19 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
 
   usePersistWorkDraft(
     WORK_DRAFT_IDS.stallInventory,
-    { dateStr, viewOrderId, snap },
+    { basisYmd: stallBasisYmd, viewOrderId, snap },
     stallDirty,
   );
 
   const debouncedSnapForAutosave = useDebouncedValue(snap, 1500, stallDirty);
 
   useEffect(() => {
-    if (!stallDirty || !viewOrderId) return;
-    const order = listUncountedCompletedProcurementOrdersForSession().find((o) => o.id === viewOrderId);
-    if (!order) return;
-    const basisYmd = effectiveOrderDateYmd(order);
-    const scopeId = resolveOrderStallStorageScopeId(order);
+    if (!stallDirty || !viewOrderId || !viewOrder) return;
     let cancelled = false;
     void (async () => {
-      await stallInventoryApi.saveDay(basisYmd, debouncedSnapForAutosave, scopeId);
+      await stallInventoryApi.saveDay(stallBasisYmd, debouncedSnapForAutosave, stallScopeId, {
+        deferRemotePush: true,
+      });
       if (cancelled) return;
       stallBaselineRef.current = stallDaySnapshotFingerprint(debouncedSnapForAutosave);
       setAutosaveHint(true);
@@ -175,7 +209,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     return () => {
       cancelled = true;
     };
-  }, [debouncedSnapForAutosave, stallDirty, viewOrderId, stallListTick]);
+  }, [debouncedSnapForAutosave, stallDirty, viewOrderId, stallListTick, stallBasisYmd, stallScopeId, viewOrder]);
 
   useEffect(() => {
     if (!stallCountConfirmOpen) return;
@@ -191,7 +225,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       setStallListTick((n) => n + 1);
       setSnap((prev) => {
         if (stallDaySnapshotFingerprint(prev) !== stallBaselineRef.current) return prev;
-        const day = loadDay(dateStr);
+        const day = loadDay(stallBasisYmd, stallScopeId);
         stallBaselineRef.current = stallDaySnapshotFingerprint(day);
         return day;
       });
@@ -212,7 +246,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       window.removeEventListener('supplyCatalogUpdated', on);
       window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, on);
     };
-  }, [dateStr]);
+  }, [stallBasisYmd, stallScopeId]);
 
   const setLine = useCallback(
     (id: string, key: 'out' | 'remain', value: string) => {
@@ -263,38 +297,15 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const actualForGap = parseMoneyInputForLedgerGap(debouncedActualRevenue);
   const ledgerGap = actualForGap === null ? null : actualForGap - dayKpi.shouldRevenue;
 
-  /** 供選單：盤點日起往前提煉內多店多單，依單一筆一盤 */
-  const ordersInWindow = useMemo(
-    () => listUncountedCompletedProcurementOrdersForSession(),
-    [stallListTick]
-  );
-
-  // 有訂單時預設選清單最前一筆；單據變更時若目前選單已無則重選
-  useEffect(() => {
-    if (ordersInWindow.length === 0) {
-      setViewOrderId('');
-      return;
-    }
-    setViewOrderId((prev) => {
-      if (prev && ordersInWindow.some((o) => o.id === prev)) return prev;
-      return ordersInWindow[0]!.id;
-    });
-  }, [ordersInWindow]);
-
   useEffect(() => {
     setStallOrderDetailOpen(false);
   }, [viewOrderId]);
 
-  const viewOrder = useMemo(
-    () => ordersInWindow.find((o) => o.id === viewOrderId) ?? null,
-    [ordersInWindow, viewOrderId]
-  );
-
   /** 所選訂單 × 盤點日：參考剩餘（扣庫單據或前一日）＋本單叫貨＝實際帶出（與「植入訂單」一致） */
   const importBreakdown = useMemo(() => {
     if (!viewOrderId) return null;
-    return computeStallOutImportBreakdown(dateStr, viewOrderId);
-  }, [dateStr, viewOrderId, stallListTick]);
+    return computeStallOutImportBreakdown(stallBasisYmd, viewOrderId);
+  }, [stallBasisYmd, viewOrderId, stallListTick]);
 
   const formatStallCountStamp = (iso: string) => formatSlashDateTimeFromIso(iso) || iso;
 
@@ -308,7 +319,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         const c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
         return { item, c };
       }),
-    [snap.lines, dateStr, stallDisplayItems]
+    [snap.lines, stallDisplayItems, supplyRetailView]
   );
 
   /** 通過欄位檢查後才開啟「確認盤點完成」彈窗 */
@@ -340,17 +351,14 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
 
   /** 彈窗按「確定」後寫入：訂單押記、攤上日、銷售紀錄（歷史訂單才會顯示已盤點） */
   const commitInventoryComplete = () => {
-    if (!viewOrderId) {
-      setStallCountConfirmOpen(false);
-      return;
-    }
+    if (!viewOrderId || stallCountSubmitting) return;
     const lines: DaySnapshot['lines'] = { ...snap.lines };
     for (const it of supplyItems) {
       if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
     }
     const next: DaySnapshot = { ...snap, lines };
     const completedAt = new Date().toISOString();
-    const stampBasisYmd = viewOrder ? effectiveOrderDateYmd(viewOrder) : dateStr;
+    const stampBasisYmd = stallBasisYmd;
     const recomputedForStamp = recomputeStallOutForStallYmdAndOrder(
       stampBasisYmd,
       viewOrderId,
@@ -374,44 +382,58 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         stallDisplayItems.map((it) => [it.id, pricePerPackage(it)]),
       ),
     };
-    void (async () => {
-      const okStamp = await ordersApi.setOrderStallCountStamp(viewOrderId, {
-        basisYmd: stampBasisYmd,
-        completedAt,
-        snapshot: recordSnapAligned,
-      });
-      if (!okStamp) {
-        setStallCountConfirmOpen(false);
-        setRecomputeMsg('寫入訂單押記失敗（找不到單號）。請確認訂單仍在本機。');
-        setTimeout(() => setRecomputeMsg(null), 5000);
-        return;
-      }
-      const dayToSave: DaySnapshot = {
-        ...recomputedForStamp,
-        actualRevenue: next.actualRevenue,
-        revenueGapAmount: next.revenueGapAmount,
-        revenueGapReason: next.revenueGapReason,
-      };
-      const stallScopeId = viewOrder ? resolveOrderStallStorageScopeId(viewOrder) : undefined;
-      await stallInventoryApi.saveDay(stampBasisYmd, dayToSave, stallScopeId);
-      await salesRecordsApi.save(stampBasisYmd, recordSnapAligned, stallScopeId);
-      if (syncGapToLedger) {
-        const gapN = num(next.revenueGapAmount ?? '');
-        const draft = buildStallGapLedgerDraftInput({
-          gapAmount: gapN,
+    const dayToSave: DaySnapshot = {
+      ...recomputedForStamp,
+      actualRevenue: next.actualRevenue,
+      revenueGapAmount: next.revenueGapAmount,
+      revenueGapReason: next.revenueGapReason,
+    };
+    const stallScopeId = viewOrder ? resolveOrderStallStorageScopeId(viewOrder) : undefined;
+    const gapDraft = syncGapToLedger
+      ? buildStallGapLedgerDraftInput({
+          gapAmount: num(next.revenueGapAmount ?? ''),
           gapReason: (next.revenueGapReason ?? '').trim(),
           basisYmd: stampBasisYmd,
           orderId: viewOrderId,
+        })
+      : null;
+
+    setStallCountSubmitting(true);
+    void (async () => {
+      try {
+        const res = await ordersApi.commitStallInventoryComplete({
+          orderId: viewOrderId,
+          basisYmd: stampBasisYmd,
+          completedAt,
+          recordSnap: recordSnapAligned,
+          stallDaySnap: dayToSave,
+          scopeId: stallScopeId,
         });
-        if (draft) await ledgerApi.append(draft);
+        if (res.ok === false) {
+          const msg =
+            res.reason === 'order_not_found'
+              ? '找不到訂單，可能已被刪除或同步覆蓋。請重新選擇訂單後再試。'
+              : res.reason === 'persist_mismatch'
+                ? '盤點已寫入但驗證不一致，請重新整理後確認銷售紀錄是否已出現。'
+                : '寫入訂單押記失敗（無權限或訂單不存在）。請確認訂單仍在本機。';
+          setRecomputeMsg(msg);
+          setTimeout(() => setRecomputeMsg(null), 8000);
+          return;
+        }
+        if (gapDraft) await ledgerApi.append(gapDraft);
+        setSyncGapToLedger(false);
+        setStallListTick((n) => n + 1);
+        stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
+        clearWorkDraft(WORK_DRAFT_IDS.stallInventory);
+        setSaveFlash(true);
+        setTimeout(() => setSaveFlash(false), 2500);
+        setStallCountConfirmOpen(false);
+      } catch {
+        setRecomputeMsg('盤點送出失敗（網路或同步錯誤）。請稍後再試；輸入資料已保留在本機。');
+        setTimeout(() => setRecomputeMsg(null), 8000);
+      } finally {
+        setStallCountSubmitting(false);
       }
-      setSyncGapToLedger(false);
-      setStallListTick((n) => n + 1);
-      stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
-      clearWorkDraft(WORK_DRAFT_IDS.stallInventory);
-      setStallCountConfirmOpen(false);
-      setSaveFlash(true);
-      setTimeout(() => setSaveFlash(false), 2500);
     })();
   };
 
@@ -421,15 +443,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       return;
     }
     void (async () => {
-      const next = recomputeStallOutForStallYmdAndOrder(dateStr, viewOrderId, snap, { clearRemain: true });
+      const next = recomputeStallOutForStallYmdAndOrder(stallBasisYmd, viewOrderId, snap, { clearRemain: true });
       setSnap(next);
-      const order = listUncountedCompletedProcurementOrdersForSession().find((o) => o.id === viewOrderId);
-      if (order) {
-        await stallInventoryApi.saveDay(
-          dateStr,
-          next,
-          resolveOrderStallStorageScopeId(order),
-        );
+      if (viewOrder) {
+        await stallInventoryApi.saveDay(stallBasisYmd, next, stallScopeId);
         stallBaselineRef.current = stallDaySnapshotFingerprint(next);
       }
       setStallListTick((n) => n + 1);
@@ -599,7 +616,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   {importBreakdown && (
                     <div className="mt-0 mx-3 mb-3 rounded-lg border border-zinc-800/80 bg-zinc-950/50 overflow-hidden">
                       <p className="px-3 py-2 text-[0.6875rem] sm:text-xs text-zinc-500 border-b border-zinc-800/80 leading-relaxed">
-                        帶出試算明細（盤點日 {formatSlashYmdWithWeekdayFromYmd(dateStr)}）：
+                        帶出試算明細（盤點日 {formatSlashYmdWithWeekdayFromYmd(stallBasisYmd)}）：
                         {importBreakdown.carrySource?.kind === 'calendar_prev_day' ? (
                           <>
                             前一日 {formatSlashYmdWithWeekdayFromYmd(importBreakdown.carrySource.prevYmd)}{' '}
@@ -1030,7 +1047,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   單號 {viewOrder.id}
                 </p>
                 <p className="text-sm text-amber-200/80 mt-1">
-                  盤點日 {ymdDashToSlash(dateStr)}
+                  盤點日 {ymdDashToSlash(stallBasisYmd)}
                 </p>
               </div>
               <button
@@ -1046,16 +1063,18 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={() => setStallCountConfirmOpen(false)}
-                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl border border-zinc-600 text-zinc-300 text-sm font-medium hover:bg-zinc-800/80"
+                disabled={stallCountSubmitting}
+                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl border border-zinc-600 text-zinc-300 text-sm font-medium hover:bg-zinc-800/80 disabled:opacity-50"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={commitInventoryComplete}
-                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl bg-amber-500 text-zinc-950 text-sm font-bold hover:bg-amber-400"
+                disabled={stallCountSubmitting}
+                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl bg-amber-500 text-zinc-950 text-sm font-bold hover:bg-amber-400 disabled:opacity-60"
               >
-                確定送出
+                {stallCountSubmitting ? '送出中…' : '確定送出'}
               </button>
             </div>
           </div>

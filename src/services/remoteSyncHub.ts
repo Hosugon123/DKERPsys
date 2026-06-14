@@ -19,6 +19,7 @@ import {
   applyConflictRecoveryAfterRemoteImport,
   stashLocalBundleForConflictRecovery,
 } from '../lib/conflictRecoveryStorage';
+import { hasUnsavedWork } from '../lib/unsavedWorkGuard';
 import { getApiBaseUrl, getApiSyncToken, getAsyncStorageDelayMs, getStorageMode } from './storageMode';
 
 export const REMOTE_SYNC_STATUS_EVENT = 'dongshanRemoteSyncStatus';
@@ -63,6 +64,11 @@ export function getRemoteSyncStatus(): RemoteSyncStatus {
 
 export function isRemoteSyncLocked(): boolean {
   return remoteSyncLocked;
+}
+
+/** 是否有已排程但尚未推送的雲端變更（含去抖動計時中）。 */
+export function hasPendingRemotePush(): boolean {
+  return pendingAfterText != null || debounceTimer != null;
 }
 
 function noteRemoteBundleUpdatedAt(bundle: DongshanDataBundleV1 | null | undefined): void {
@@ -306,6 +312,8 @@ function applySyncFailureFromUnknown(e: unknown): void {
  */
 export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
   if (getStorageMode() !== 'remote') return;
+  // 盤點／表單編輯中或尚有未推送變更時，不從雲端拉回以免覆寫本機草稿
+  if (hasUnsavedWork() || hasPendingRemotePush()) return;
   try {
     const cloud = await fetchRemoteBundle();
     if (isRemoteBundleEffectivelyEmpty(cloud)) {
@@ -404,6 +412,24 @@ export async function withRemoteStorageWrite<T>(fn: () => T | Promise<T>): Promi
   if (after !== before) {
     scheduleDebouncedPush(before, after);
     await awaitRemotePushIdle();
+  }
+
+  return out;
+}
+
+/** 寫入本機並排程雲端推送，但不等待推送完成（盤點自動儲存等高頻寫入用）。 */
+export async function withRemoteStorageWriteDeferPush<T>(fn: () => T | Promise<T>): Promise<T> {
+  await storageTick();
+  if (getStorageMode() !== 'remote') {
+    return await Promise.resolve(fn());
+  }
+
+  const before = serializeDongshanDataBundle();
+  const out = await Promise.resolve(fn());
+  const after = serializeDongshanDataBundle();
+
+  if (after !== before) {
+    scheduleDebouncedPush(before, after);
   }
 
   return out;

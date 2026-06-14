@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendProcurementOrderEntry,
   deleteOrderByIdFromAnyStore,
+  listOrdersWithStallCountCompleted,
   readMergedOrderByIdFromStores,
   setOrderStallCountStamp,
   updateOrderStatusInEitherStore,
@@ -14,7 +15,7 @@ import {
   listAccountingLedgerEntriesForScopeId,
 } from './accountingLedgerStorage';
 import { getSalesRecord, saveSalesRecord } from './salesRecordStorage';
-import { loadDay, loadDayForProcurement, saveDay } from './stallInventoryStorage';
+import { commitStallInventoryComplete, loadDay, loadDayForProcurement, saveDay } from './stallInventoryStorage';
 import { buildProcurementLedgerDraftInput, buildStallGapLedgerDraftInput } from './procurementLedgerDraft';
 import { HQ_SCOPE_ID } from './dataScope';
 
@@ -185,5 +186,32 @@ describe('五項更新流程整合', () => {
     expect(deleteOrderByIdFromAnyStore(orderA)).toBe(true);
     expect(getSalesRecord(BASIS)).not.toBeNull();
     expect(readMergedOrderByIdFromStores(orderB)).toBeTruthy();
+  });
+
+  it('流程 D：commitStallInventoryComplete 一次寫入押記、攤上日、銷售紀錄', () => {
+    const orderId = appendProcurementOrderEntry({
+      lines: [{ productId: DUCK, name: '鴨頭', unitPrice: 50, qty: 10, unit: '份' }],
+      totalAmount: 500,
+      actorRole: 'admin',
+      orderDateYmd: BASIS,
+    });
+    updateOrderStatusInEitherStore(orderId, '已完成');
+
+    const snap = {
+      lines: { [DUCK]: { out: '10', remain: '0' } },
+      actualRevenue: '4200',
+      updatedAt: '2026-06-10T18:30:00.000Z',
+    };
+    const res = commitStallInventoryComplete({
+      orderId,
+      basisYmd: BASIS,
+      completedAt: snap.updatedAt,
+      recordSnap: snap,
+      stallDaySnap: snap,
+    });
+    expect(res.ok).toBe(true);
+    expect(listOrdersWithStallCountCompleted().some((o) => o.id === orderId)).toBe(true);
+    expect(getSalesRecord(BASIS)?.actualRevenue).toBe('4200');
+    expect(readMergedOrderByIdFromStores(orderId)?.stallCountCompletedAt).toBe(snap.updatedAt);
   });
 });
