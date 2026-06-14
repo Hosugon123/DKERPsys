@@ -215,6 +215,24 @@ export function saveDay(ymdStr: string, snap: DaySnapshot, scopeId?: string) {
   saveAll(s);
 }
 
+/** 刪除指定範圍、營業日之攤上日庫（刪單連動清理用）。 */
+export function removeStallDay(ymdStr: string, scopeId?: string): boolean {
+  const s = loadAll();
+  const scope = resolveStallStorageScopeId(scopeId);
+  const scopedKey = scopedStallDateKey(scope, ymdStr);
+  let removed = false;
+  if (s.byDate[scopedKey]) {
+    delete s.byDate[scopedKey];
+    removed = true;
+  }
+  if (scope === HQ_SCOPE_ID && s.byDate[ymdStr]) {
+    delete s.byDate[ymdStr];
+    removed = true;
+  }
+  if (removed) saveAll(s);
+  return removed;
+}
+
 /**
  * 叫貨送出時自「盤點日」的剩餘量扣除（不會低於 0；該日尚無盤點則從空表建立欄位）。
  */

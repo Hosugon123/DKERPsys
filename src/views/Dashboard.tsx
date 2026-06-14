@@ -43,11 +43,7 @@ import {
   stallSalesBoardRowYmd,
   type StallGapSummary,
 } from '../lib/financeLib';
-import {
-  ACCOUNTING_LEDGER_UPDATED_EVENT,
-  listAccountingLedgerEntries,
-  listAccountingLedgerEntriesForScopeId,
-} from '../lib/accountingLedgerStorage';
+import type { AccountingLedgerEntry } from '../lib/accountingLedgerStorage';
 import { computeDirectStoreOperatingExpense } from '../lib/directStoreOperatingExpense';
 import {
   usesDirectStoreOperatingExpenseModel,
@@ -66,8 +62,6 @@ import {
 } from '../lib/orderStallDisplayRevenue';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
-  loadFranchiseManagementOrders,
-  loadOrderHistory,
   effectiveOrderDateYmd,
   orderCountsTowardStallEconomics,
   orderIsFranchiseBusinessScoped,
@@ -76,6 +70,7 @@ import {
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
 } from '../lib/orderHistoryStorage';
+import { useDashboardData } from '../hooks/useDashboardData';
 import {
   buildDirectStallEconomicsByYmd,
   buildFranchiseStallEconomicsByYmd,
@@ -90,7 +85,7 @@ import {
   setRevenueBaselineTarget,
 } from '../lib/dashboardRevenueBaselineStorage';
 import { computeLine } from '../lib/stallMath';
-import { getSalesRecord, mergeSalesRecordWithCatalog, patchSalesRecordRevenueGapReason } from '../lib/salesRecordStorage';
+import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 
 const HQ_STALL_VIEW = 'headquarter' as const;
 const FRANCHISE_STALL_VIEW = 'franchisee' as const;
@@ -165,7 +160,7 @@ function aggregateProductRevenue(
 }
 
 function aggregateExpenseShareRows(
-  entries: ReturnType<typeof listAccountingLedgerEntries>,
+  entries: AccountingLedgerEntry[],
   startYmd: string,
   endYmd: string,
 ): ExpenseShareRow[] {
@@ -401,11 +396,14 @@ function orderMatchesFranchiseeBusinessDash(
   return row.actorRole === 'franchisee' && row.actorUserId === uid;
 }
 
-function stallSnapshotMergedFromOrder(o: OrderHistoryEntry) {
+function stallSnapshotMergedFromOrder(
+  o: OrderHistoryEntry,
+  getSalesRecordLookup: (ymd: string, scopeId: string) => SalesRecordDaySnapshot | null,
+) {
   if (o.stallCountSnapshot) return mergeSalesRecordWithCatalog(o.stallCountSnapshot);
   const b = o.stallCountBasisYmd?.trim();
   if (b) {
-    const rec = getSalesRecord(b, resolveOrderDataScopeId(o));
+    const rec = getSalesRecordLookup(b, resolveOrderDataScopeId(o) ?? HQ_SCOPE_ID);
     if (rec) return mergeSalesRecordWithCatalog(rec);
   }
   return null;
@@ -977,6 +975,8 @@ function DirectStallGapReasonCell({
   syncKey,
   preferredNote,
   scopedNotesOnly = false,
+  getSalesRecordLookup,
+  onPatchRevenueGapReason,
 }: {
   ymd: string;
   syncKey: number;
@@ -984,10 +984,12 @@ function DirectStallGapReasonCell({
   preferredNote?: string;
   /** 加盟本店：僅顯示該店訂單快照備註，不讀寫全域 salesRecord */
   scopedNotesOnly?: boolean;
+  getSalesRecordLookup: (ymd: string, scopeId: string) => SalesRecordDaySnapshot | null;
+  onPatchRevenueGapReason: (ymd: string, reason: string, scopeId?: string) => void | Promise<void>;
 }) {
   const snap = useMemo(
-    () => (scopedNotesOnly ? null : getSalesRecord(ymd, HQ_SCOPE_ID)),
-    [ymd, syncKey, scopedNotesOnly],
+    () => (scopedNotesOnly ? null : getSalesRecordLookup(ymd, HQ_SCOPE_ID)),
+    [ymd, syncKey, scopedNotesOnly, getSalesRecordLookup],
   );
   const snapReason = scopedNotesOnly ? '' : snap?.revenueGapReason?.trim() ?? '';
   const seedReason =
@@ -1033,7 +1035,7 @@ function DirectStallGapReasonCell({
         onChange={(e) => setVal(e.target.value)}
         onBlur={() => {
           if (val.trim() === seedReason.trim()) return;
-          patchSalesRecordRevenueGapReason(ymd, val, scopedNotesOnly ? undefined : HQ_SCOPE_ID);
+          void onPatchRevenueGapReason(ymd, val, scopedNotesOnly ? undefined : HQ_SCOPE_ID);
         }}
       />
       {amountLine ? (
@@ -1206,8 +1208,14 @@ export default function Dashboard({
   const realIsAdmin = userRole === 'admin';
   /** 「實際渲染時」的 admin 身份：總部本人＋未進入 view-as 才為 true */
   const isAdmin = realIsAdmin && !viewAsFranchisee;
-  const [financeTick, setFinanceTick] = useState(0);
-  const [orderTick, setOrderTick] = useState(0);
+  const {
+    dashboardOrders,
+    ledgerEntries: ledgerForView,
+    getSalesRecordCached,
+    patchRevenueGapReason,
+    orderTick,
+    financeTick,
+  } = useDashboardData(viewAsFranchisee?.userId ?? null);
   const [summaryRange, setSummaryRange] = useState<SummaryRangeKey>('month');
   /** 總部合併 KPI 卡（總部營運總覽／直營店營運摘要）專用區間；與其他區塊的 summaryRange 可分開設定 */
   const [adminFinanceSummaryRange, setAdminFinanceSummaryRange] = useState<SummaryRangeKey>('month');
@@ -1266,68 +1274,6 @@ export default function Dashboard({
     return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
   }, [isAdmin, financeTick, orderTick, adminFinanceSummaryRange]);
 
-  useEffect(() => {
-    const bump = () => setOrderTick((t) => t + 1);
-    window.addEventListener('orderHistoryUpdated', bump);
-    window.addEventListener('franchiseManagementOrdersUpdated', bump);
-    window.addEventListener('salesRecordUpdated', bump);
-    return () => {
-      window.removeEventListener('orderHistoryUpdated', bump);
-      window.removeEventListener('franchiseManagementOrdersUpdated', bump);
-      window.removeEventListener('salesRecordUpdated', bump);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    const bump = () => setFinanceTick((t) => t + 1);
-    window.addEventListener('orderHistoryUpdated', bump);
-    window.addEventListener('franchiseManagementOrdersUpdated', bump);
-    return () => {
-      window.removeEventListener('orderHistoryUpdated', bump);
-      window.removeEventListener('franchiseManagementOrdersUpdated', bump);
-    };
-  }, [isAdmin]);
-
-  useEffect(() => {
-    const bump = () => setFinanceTick((t) => t + 1);
-    window.addEventListener(ACCOUNTING_LEDGER_UPDATED_EVENT, bump);
-    return () => {
-      window.removeEventListener(ACCOUNTING_LEDGER_UPDATED_EVENT, bump);
-    };
-  }, []);
-
-  const dashboardOrders = useMemo(() => {
-    const mgmt = loadFranchiseManagementOrders().map<DashboardOrder>((m) => ({
-      id: m.id,
-      createdAt: m.createdAt,
-      orderDateYmd: m.orderDateYmd,
-      updatedAt: m.updatedAt,
-      source: m.source,
-      totalAmount: m.totalAmount,
-      payableAmount: m.payableAmount ?? m.totalAmount,
-      selfSuppliedCostAmount: m.selfSuppliedCostAmount ?? 0,
-      itemCount: m.itemCount,
-      lines: m.lines,
-      actorRole: 'admin',
-      storeLabel: m.storeLabel,
-      status: m.status,
-      stallCountBasisYmd: m.stallCountBasisYmd,
-      stallCountCompletedAt: m.stallCountCompletedAt,
-      stallCountSnapshot: m.stallCountSnapshot,
-      scopeId: m.scopeId,
-      actorUserId: m.actorUserId,
-      createdByName: m.createdByName,
-      stallCountCompletedByName: m.stallCountCompletedByName,
-      stallCountCompletedByUserId: m.stallCountCompletedByUserId,
-      lastUpdatedByName: m.lastUpdatedByName,
-    }));
-    const history = loadOrderHistory();
-    const all = [...mgmt, ...history].filter((o) => orderMatchesSessionScope(o));
-    all.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-    return all;
-  }, [userRole, orderTick]);
-
   /** 總部營運總覽 KPI：直營店實際營收、加盟批貨、消耗品代收、總支出、淨利 */
   const adminHqOverviewMetrics = useMemo(() => {
     if (!isAdmin || !adminFinance) return null;
@@ -1370,16 +1316,6 @@ export default function Dashboard({
     }
     return dashboardOrders;
   }, [dashboardOrders, viewAsFranchisee]);
-
-  /**
-   * 「實際渲染」用之流水帳：view-as 改讀指定加盟店 scope 的紀錄；其餘沿用目前登入身份的 scope。
-   */
-  const ledgerForView = useMemo(() => {
-    if (viewAsFranchisee) {
-      return listAccountingLedgerEntriesForScopeId(`scope:franchisee:${viewAsFranchisee.userId}`);
-    }
-    return listAccountingLedgerEntries();
-  }, [viewAsFranchisee, financeTick, userRole]);
 
   /** 「銷售數據」區：加盟 scope 為該店加盟主 userId；總部直營為 null */
   const franchiseStallSalesBoardOwnerUserId = useMemo(
@@ -1574,7 +1510,7 @@ export default function Dashboard({
       }
       const ymd = stallSalesBoardRowYmd(o);
       if (!ymd || !qualifying.has(ymd)) continue;
-      const snap = stallSnapshotMergedFromOrder(o);
+      const snap = stallSnapshotMergedFromOrder(o, getSalesRecordCached);
       if (!snap) continue;
       let dayMap = perDay.get(ymd);
       if (!dayMap) {
@@ -1587,7 +1523,7 @@ export default function Dashboard({
     for (const ymd of qualifyingYmds) {
       if (perDay.has(ymd)) continue;
       const salesScope = franchiseId ? `scope:franchisee:${franchiseId}` : HQ_SCOPE_ID;
-      const raw = getSalesRecord(ymd, salesScope);
+      const raw = getSalesRecordCached(ymd, salesScope);
       if (!raw) continue;
       const snap = mergeSalesRecordWithCatalog(raw);
       const dayMap = new Map<string, number>();
@@ -1631,6 +1567,7 @@ export default function Dashboard({
     effectiveOrders,
     franchiseStallSalesBoardOwnerUserId,
     orderTick,
+    getSalesRecordCached,
   ]);
 
   const showFranchiseStallSalesBoard = franchiseStallSalesBoardOwnerUserId != null;
@@ -2601,6 +2538,8 @@ export default function Dashboard({
                                 syncKey={orderTick}
                                 preferredNote={eco?.note}
                                 scopedNotesOnly={showFranchiseStallSalesBoard}
+                                getSalesRecordLookup={getSalesRecordCached}
+                                onPatchRevenueGapReason={patchRevenueGapReason}
                               />
                             </td>
                           </tr>

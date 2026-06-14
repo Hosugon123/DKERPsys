@@ -35,16 +35,15 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   ymd,
   loadDay,
-  saveDay,
   stallDaySnapshotFingerprint,
   recomputeStallOutForStallYmdAndOrder,
   computeStallOutImportBreakdown,
   listUncountedCompletedProcurementOrdersForSession,
   type DaySnapshot,
 } from '../lib/stallInventoryStorage';
-import { orders as ordersApi, withRemoteStorageWrite } from '../services/apiService';
+import { orders as ordersApi, ledger as ledgerApi, salesRecords as salesRecordsApi, stallInventoryApi } from '../services/apiService';
 import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
-import { saveSalesRecord } from '../lib/salesRecordStorage';
+import { buildStallGapLedgerDraftInput } from '../lib/procurementLedgerDraft';
 import { resolveOrderStallStorageScopeId } from '../lib/scopedStallDateKey';
 import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
@@ -113,6 +112,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const [stallListTick, setStallListTick] = useState(0);
   const [recomputeMsg, setRecomputeMsg] = useState<string | null>(null);
   const [stallCountConfirmOpen, setStallCountConfirmOpen] = useState(false);
+  /** 盤點落差可選同步至流水帳 */
+  const [syncGapToLedger, setSyncGapToLedger] = useState(false);
+  /** 盤點表自動儲存提示 */
+  const [autosaveHint, setAutosaveHint] = useState(false);
   /** 本場盤點鎖定之單一叫貨單：植入帶出、盤點完成押記皆針對此單。 */
   const [viewOrderId, setViewOrderId] = useState(() =>
     restoredStall?.dateStr === ymd(new Date()) ? restoredStall.viewOrderId : '',
@@ -152,6 +155,27 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     { dateStr, viewOrderId, snap },
     stallDirty,
   );
+
+  const debouncedSnapForAutosave = useDebouncedValue(snap, 1500, stallDirty);
+
+  useEffect(() => {
+    if (!stallDirty || !viewOrderId) return;
+    const order = listUncountedCompletedProcurementOrdersForSession().find((o) => o.id === viewOrderId);
+    if (!order) return;
+    const basisYmd = effectiveOrderDateYmd(order);
+    const scopeId = resolveOrderStallStorageScopeId(order);
+    let cancelled = false;
+    void (async () => {
+      await stallInventoryApi.saveDay(basisYmd, debouncedSnapForAutosave, scopeId);
+      if (cancelled) return;
+      stallBaselineRef.current = stallDaySnapshotFingerprint(debouncedSnapForAutosave);
+      setAutosaveHint(true);
+      window.setTimeout(() => setAutosaveHint(false), 2000);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSnapForAutosave, stallDirty, viewOrderId, stallListTick]);
 
   useEffect(() => {
     if (!stallCountConfirmOpen) return;
@@ -369,14 +393,19 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         revenueGapReason: next.revenueGapReason,
       };
       const stallScopeId = viewOrder ? resolveOrderStallStorageScopeId(viewOrder) : undefined;
-      await withRemoteStorageWrite(() => {
-        saveDay(stampBasisYmd, dayToSave, stallScopeId);
-        saveSalesRecord(
-          stampBasisYmd,
-          recordSnapAligned,
-          stallScopeId,
-        );
-      });
+      await stallInventoryApi.saveDay(stampBasisYmd, dayToSave, stallScopeId);
+      await salesRecordsApi.save(stampBasisYmd, recordSnapAligned, stallScopeId);
+      if (syncGapToLedger) {
+        const gapN = num(next.revenueGapAmount ?? '');
+        const draft = buildStallGapLedgerDraftInput({
+          gapAmount: gapN,
+          gapReason: (next.revenueGapReason ?? '').trim(),
+          basisYmd: stampBasisYmd,
+          orderId: viewOrderId,
+        });
+        if (draft) await ledgerApi.append(draft);
+      }
+      setSyncGapToLedger(false);
       setStallListTick((n) => n + 1);
       stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
       clearWorkDraft(WORK_DRAFT_IDS.stallInventory);
@@ -392,10 +421,17 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       return;
     }
     void (async () => {
-      const next = await withRemoteStorageWrite(() =>
-        recomputeStallOutForStallYmdAndOrder(dateStr, viewOrderId, snap, { clearRemain: true })
-      );
+      const next = recomputeStallOutForStallYmdAndOrder(dateStr, viewOrderId, snap, { clearRemain: true });
       setSnap(next);
+      const order = listUncountedCompletedProcurementOrdersForSession().find((o) => o.id === viewOrderId);
+      if (order) {
+        await stallInventoryApi.saveDay(
+          dateStr,
+          next,
+          resolveOrderStallStorageScopeId(order),
+        );
+        stallBaselineRef.current = stallDaySnapshotFingerprint(next);
+      }
       setStallListTick((n) => n + 1);
       setRecomputeMsg('已帶入。剩餘貨量請逐格填寫。');
       setTimeout(() => setRecomputeMsg(null), 5000);
@@ -433,6 +469,9 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       {saveFlash && <p className="text-sm text-emerald-400">已寫入。</p>}
+      {autosaveHint && !saveFlash && (
+        <p className="text-xs text-zinc-500">盤點表已自動儲存至本機。</p>
+      )}
 
       <div
         className="rounded-2xl border border-amber-900/50 bg-amber-950/15 p-4"
@@ -761,6 +800,17 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                 className="w-full resize-none min-h-11 h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2.5 text-[calc(0.875rem*0.7)] leading-snug text-zinc-200 placeholder:text-zinc-600 placeholder:text-[calc(0.875rem*0.7)]"
                 placeholder="例：請客、食材耗損、收銀短溢、零錢誤差…"
               />
+            </label>
+            <label className="sm:col-span-2 flex items-start gap-2.5 rounded-lg border border-zinc-700/70 bg-zinc-950/50 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-zinc-600 accent-amber-500"
+                checked={syncGapToLedger}
+                onChange={(e) => setSyncGapToLedger(e.target.checked)}
+              />
+              <span className="text-xs text-zinc-400 leading-relaxed">
+                盤點完成時，將「認列金額」同步至流水帳（短收／損耗為支出，多收為店外收入）
+              </span>
             </label>
           </div>
         </section>

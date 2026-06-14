@@ -10,6 +10,7 @@ import { awaitRemotePushIdle, withRemoteStorageRead, withRemoteStorageWrite } fr
 import * as accountingLedger from '../lib/accountingLedgerStorage';
 import * as orderHistory from '../lib/orderHistoryStorage';
 import * as stallInventory from '../lib/stallInventoryStorage';
+import * as salesRecord from '../lib/salesRecordStorage';
 import * as userCatalog from '../lib/userCatalogState';
 import * as costStructure from '../lib/costStructureStorage';
 import {
@@ -56,6 +57,9 @@ export const ledger = {
     return withRemoteStorageRead(() =>
       accountingLedger.listAccountingLedgerEntriesInDateRange(startYmd, endYmd),
     );
+  },
+  async listForScopeId(scopeId: string): Promise<accountingLedger.AccountingLedgerEntry[]> {
+    return withRemoteStorageRead(() => accountingLedger.listAccountingLedgerEntriesForScopeId(scopeId));
   },
   async append(input: accountingLedger.NewAccountingLedgerInput): Promise<accountingLedger.AccountingLedgerEntry> {
     return withRemoteStorageWrite(() => accountingLedger.appendAccountingLedgerEntry(input));
@@ -145,7 +149,7 @@ export const orders = {
     actorRole: orderHistory.OrderActorRole;
     orderDateYmd: string;
     procurementDeductionBasisOrderId?: string;
-  }): Promise<void> {
+  }): Promise<string> {
     return withRemoteStorageWrite(() => {
       const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(
         params.procurementDeductionBasisOrderId ?? '',
@@ -155,7 +159,7 @@ export const orders = {
         for (const line of params.lines) toDeduct[line.productId] = line.qty;
         stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct);
       }
-      orderHistory.appendProcurementOrderEntry(params);
+      return orderHistory.appendProcurementOrderEntry(params);
     });
   },
   async setOrderStallCountStamp(
@@ -192,6 +196,38 @@ export const orders = {
     return withRemoteStorageRead(() => orderHistory.listOrdersWithStallCountCompleted());
   },
 };
+
+// ——— 銷售紀錄 ———
+
+export const salesRecords = {
+  async get(ymd: string, scopeId?: string): Promise<salesRecord.SalesRecordDaySnapshot | null> {
+    return withRemoteStorageRead(() => salesRecord.getSalesRecord(ymd, scopeId));
+  },
+  async patchRevenueGapReason(ymd: string, reason: string, scopeId?: string): Promise<void> {
+    return withRemoteStorageWrite(() => salesRecord.patchSalesRecordRevenueGapReason(ymd, reason, scopeId));
+  },
+  async listMeta(scopeId?: string) {
+    return withRemoteStorageRead(() => salesRecord.listSalesRecordMeta(scopeId));
+  },
+  async save(ymd: string, snapshot: salesRecord.SalesRecordDaySnapshot, scopeId?: string): Promise<void> {
+    return withRemoteStorageWrite(() => salesRecord.saveSalesRecord(ymd, snapshot, scopeId));
+  },
+};
+
+export type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
+
+// ——— 攤上盤點 ———
+
+export const stallInventoryApi = {
+  async saveDay(ymdStr: string, snap: stallInventory.DaySnapshot, scopeId?: string): Promise<void> {
+    return withRemoteStorageWrite(() => stallInventory.saveDay(ymdStr, snap, scopeId));
+  },
+  async loadDay(ymdStr: string, scopeId?: string): Promise<stallInventory.DaySnapshot> {
+    return withRemoteStorageRead(() => stallInventory.loadDay(ymdStr, scopeId));
+  },
+};
+
+export type { DaySnapshot } from '../lib/stallInventoryStorage';
 
 export type {
   OrderHistoryEntry,

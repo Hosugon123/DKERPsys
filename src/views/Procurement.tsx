@@ -18,7 +18,8 @@ import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
-import { orders as ordersApi } from '../services/apiService';
+import { orders as ordersApi, ledger as ledgerApi } from '../services/apiService';
+import { buildProcurementLedgerDraftInput } from '../lib/procurementLedgerDraft';
 import {
   displayOrderCreatedByLabel,
   effectiveOrderDateYmd,
@@ -141,6 +142,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const [favoritesPanelOpen, setFavoritesPanelOpen] = useState(false);
   /** 送出訂單前須在彈層內再按一次「確定送出」 */
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
+  /** 直營／總部叫貨：可選同步帶入食材支出流水帳 */
+  const [syncProcurementToLedger, setSyncProcurementToLedger] = useState(false);
   /** 訂單歸屬日（可預先下單）；下單時間為送出當下之 createdAt */
   const [newOrderDateYmd, setNewOrderDateYmd] = useState(
     () => restoredProcurement?.newOrderDateYmd ?? defaultProcurementOrderDateYmd(),
@@ -511,7 +514,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     setSubmitModalOpen(false);
 
     void (async () => {
-      await ordersApi.appendProcurementOrderEntry({
+      const orderId = await ordersApi.appendProcurementOrderEntry({
         lines,
         totalAmount: amount,
         payableAmount,
@@ -520,14 +523,24 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         orderDateYmd: newOrderDateYmd,
         procurementDeductionBasisOrderId: stallBasisOrderId,
       });
+      if (syncProcurementToLedger && (userRole === 'admin' || userRole === 'employee')) {
+        const draft = buildProcurementLedgerDraftInput({
+          lines,
+          payableAmount,
+          orderDateYmd: newOrderDateYmd,
+          orderId,
+        });
+        if (draft) await ledgerApi.append(draft);
+      }
       clearWorkDraft(WORK_DRAFT_IDS.procurement);
       setOrderSuccess(true);
       setCart({});
       setQtyInputDraft({});
       setNewOrderDateYmd(ymd(new Date()));
+      setSyncProcurementToLedger(false);
       setTimeout(() => setOrderSuccess(false), 3000);
     })();
-  }, [buildLinesFromCart, newOrderDateYmd, stallBasisOrderId, supplyRetailView, userRole]);
+  }, [buildLinesFromCart, newOrderDateYmd, stallBasisOrderId, supplyRetailView, userRole, syncProcurementToLedger]);
 
   const applyFavoriteReplace = (f: FavoriteOrder) => {
     setFavoriteError('');
@@ -1582,6 +1595,19 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 </div>
               </label>
             </div>
+            {(userRole === 'admin' || userRole === 'employee') && (
+              <label className="mt-4 flex items-start gap-2.5 rounded-xl border border-zinc-700/80 bg-zinc-950/60 px-3 py-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-zinc-600 accent-amber-500"
+                  checked={syncProcurementToLedger}
+                  onChange={(e) => setSyncProcurementToLedger(e.target.checked)}
+                />
+                <span className="text-xs text-zinc-400 leading-relaxed">
+                  同步帶入「食材支出」流水帳（依叫貨金額與品項自動分類，便於對帳 COGS）
+                </span>
+              </label>
+            )}
             <div className="mt-5 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
               <button
                 type="button"

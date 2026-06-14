@@ -8,6 +8,7 @@ import { getStoreCode3, normalizeStoreCode3Digits } from './storeCodeStorage';
 import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessionActorDisplayName';
 import { getSupplyItem, isConsumableItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
 import { initialFranchiseeStoreLabelForOrder } from './orderStoreLabel';
+import { purgeStallDayRecordsForDeletedOrder } from './orderStallRecordCleanup';
 
 /** 寫入訂單／押記時可存檔的顯示名（登入者姓名 → 帳號 → 依 userId 查目錄） */
 function persistableActorDisplayName(): string | undefined {
@@ -470,6 +471,19 @@ function franchiseMgmtToHistoryEntry(m: FranchiseManagementOrder): OrderHistoryE
   };
 }
 
+/** 雙庫合併讀取全部訂單（不過濾 scope；供刪單清理、財務彙總等內部用途）。 */
+export function listAllMergedOrdersFromStores(): OrderHistoryEntry[] {
+  const byId = new Map<string, OrderHistoryEntry>();
+  for (const m of loadFranchiseManagementOrdersAll()) {
+    byId.set(m.id, franchiseMgmtToHistoryEntry(m));
+  }
+  for (const e of loadOrderHistoryAllEntries()) {
+    const prev = byId.get(e.id);
+    byId.set(e.id, prev ? mergeOrderLikeRecord(prev, e) : normalizeHistoryEntry(e));
+  }
+  return Array.from(byId.values());
+}
+
 /**
  * 歷史訂單畫面專用：本機內已確認出貨（狀態「已完成」）的批貨單。
  * 含加盟/店員寫入之 order_history，以及超級管理員專寫之訂單管理內、已完成之單（兩庫併陳）。
@@ -581,6 +595,16 @@ export function deleteOrderByIdFromAnyStore(orderId: string): boolean {
   if (!mgmtHit && !histHit) return false;
   if (mgmtHit && !canAccessOrder(mgmtHit, ctx)) return false;
   if (histHit && !canAccessOrder(histHit, ctx)) return false;
+
+  const deletedForCleanup: OrderHistoryEntry | null = (() => {
+    if (mgmtHit && histHit) {
+      return mergeOrderLikeRecord(franchiseMgmtToHistoryEntry(mgmtHit), normalizeHistoryEntry(histHit));
+    }
+    if (mgmtHit) return franchiseMgmtToHistoryEntry(mgmtHit);
+    if (histHit) return normalizeHistoryEntry(histHit);
+    return null;
+  })();
+
   if (mgmtHit) {
     saveFranchiseManagementOrders(mgmtAll.filter((o) => o.id !== orderId));
   }
@@ -588,6 +612,9 @@ export function deleteOrderByIdFromAnyStore(orderId: string): boolean {
     saveOrderHistory(histAll.filter((o) => o.id !== orderId));
   }
   tombstoneDeletedOrderId(orderId);
+  if (deletedForCleanup) {
+    purgeStallDayRecordsForDeletedOrder(deletedForCleanup);
+  }
   return true;
 }
 
@@ -598,7 +625,7 @@ function appendFranchiseManagementOrderInternal(params: {
   selfSuppliedCostAmount?: number;
   orderDateYmd: string;
   procurementDeductionBasisOrderId?: string;
-}): void {
+}): string {
   const {
     lines,
     totalAmount,
@@ -633,6 +660,7 @@ function appendFranchiseManagementOrderInternal(params: {
       : {}),
   };
   saveFranchiseManagementOrders([entry, ...loadFranchiseManagementOrdersAll()]);
+  return entry.id;
 }
 
 export function updateFranchiseManagementOrderStatus(id: string, status: FranchiseOrderStatus) {
@@ -1053,7 +1081,7 @@ export function appendProcurementOrderEntry(params: {
   orderDateYmd: string;
   /** 批貨頁選取之扣庫參考單號；傳空字串表示不指定 */
   procurementDeductionBasisOrderId?: string;
-}): void {
+}): string {
   const {
     lines,
     totalAmount,
@@ -1066,7 +1094,7 @@ export function appendProcurementOrderEntry(params: {
   const ctx = getDataScopeContext();
   const bookYmd = normalizeOrderDateYmdInput(orderDateYmd);
   if (actorRole === 'admin') {
-    appendFranchiseManagementOrderInternal({
+    return appendFranchiseManagementOrderInternal({
       lines,
       totalAmount,
       payableAmount: payableAmount ?? totalAmount,
@@ -1074,7 +1102,6 @@ export function appendProcurementOrderEntry(params: {
       orderDateYmd: bookYmd,
       procurementDeductionBasisOrderId,
     });
-    return;
   }
 
   const itemCount = roundProcurementQty(lines.reduce((s, l) => s + l.qty, 0));
@@ -1118,6 +1145,7 @@ export function appendProcurementOrderEntry(params: {
   };
 
   saveOrderHistory([entry, ...loadOrderHistoryAllEntries()]);
+  return entry.id;
 }
 
 /**

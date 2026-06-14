@@ -20,14 +20,14 @@ vi.mock('./orderHistoryStorage', async (importOriginal) => {
         itemCount: 11,
         lines: [
           {
-            productId: 's17',
+            productId: 's20',
             name: '鴨頭',
             unitPrice: 100,
             qty: 10,
             unit: '隻',
           },
           {
-            productId: 's26',
+            productId: 's33',
             name: '竹籤',
             unitPrice: 60,
             qty: 1,

@@ -194,6 +194,24 @@ export function getSalesRecord(ymd: string, scopeId?: string): SalesRecordDaySna
   return mergeSnapshotWithCatalog(row.snapshot);
 }
 
+/** 刪除指定範圍、營業日之銷售紀錄（刪單連動清理用）。 */
+export function removeSalesRecordDay(ymd: string, scopeId?: string): boolean {
+  const s = loadStore();
+  const scope = resolveStallStorageScopeId(scopeId);
+  const scopedKey = scopedStallDateKey(scope, ymd);
+  let removed = false;
+  if (s.byDate[scopedKey]) {
+    delete s.byDate[scopedKey];
+    removed = true;
+  }
+  if (scope === HQ_SCOPE_ID && s.byDate[ymd]) {
+    delete s.byDate[ymd];
+    removed = true;
+  }
+  if (removed) saveStore(s);
+  return removed;
+}
+
 /**
  * 僅在該筆訂單有「盤點完成」押記時視為已盤點。
  */
