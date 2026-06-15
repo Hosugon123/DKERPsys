@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import type { UserRole } from './Orders';
 import { readSession } from '../lib/authSession';
 import { listSystemUsers } from '../lib/systemUsersStorage';
-import { Wallet, CalendarDays, ChevronDown, Pencil, Trash2, X, Search } from 'lucide-react';
+import { Wallet, CalendarDays, Pencil, Trash2, X, Search } from 'lucide-react';
+import {
+  DashboardMonthCustomRangePicker,
+  dashboardPeriodLabel,
+  resolveDashboardPeriodYmd,
+  type DashboardPeriodMode,
+} from '../components/DashboardPeriodPicker';
 import { useAccountingLedger } from '../hooks/useAccountingLedger';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
@@ -31,49 +37,6 @@ import { cn } from '../lib/utils';
 function todayYmd(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function currentYm(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function addDaysToYmd(ymd: string, deltaDays: number): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + deltaDays);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-/** 本週一至週日（依本機曆法，週一為一週起始） */
-function thisWeekMonToSunBounds(): { start: string; end: string } {
-  const now = new Date();
-  const dow = now.getDay();
-  const diffToMonday = dow === 0 ? -6 : 1 - dow;
-  const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday);
-  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
-  return {
-    start: `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`,
-    end: `${sun.getFullYear()}-${String(sun.getMonth() + 1).padStart(2, '0')}-${String(sun.getDate()).padStart(2, '0')}`,
-  };
-}
-
-type DateQuickPreset = 'today' | 'week' | '30d';
-
-/** 取得 YYYY-MM 當月首日與末日（YYYY-MM-DD） */
-function monthBoundsFromYm(ym: string): { start: string; end: string } {
-  const [ys, ms] = ym.split('-');
-  const y = Number(ys);
-  const m = Number(ms);
-  if (!Number.isFinite(y) || !Number.isFinite(m)) {
-    const t = todayYmd();
-    return { start: t, end: t };
-  }
-  const mm = String(m).padStart(2, '0');
-  const start = `${y}-${mm}-01`;
-  const lastCal = new Date(y, m, 0);
-  const end = `${y}-${mm}-${String(lastCal.getDate()).padStart(2, '0')}`;
-  return { start, end };
 }
 
 /** 僅保留數字與單一小數點 */
@@ -162,18 +125,6 @@ const formDateWrapClass = cn(
 const formDateInputClass =
   'accounting-form-date-input box-border flex w-full min-w-0 max-w-full h-11 sm:h-10 min-h-0 items-center border-0 bg-transparent shadow-none px-3 pr-10 sm:pl-9 sm:pr-10 py-0 text-base sm:text-sm leading-normal sm:leading-tight text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
 
-const rangeDateShellClass =
-  'rounded-lg border border-zinc-600/70 bg-zinc-950/90 focus-within:ring-2 focus-within:ring-amber-500/35 focus-within:border-amber-500/50';
-
-const rangeDateWrapClass = cn(
-  'accounting-form-date-wrap grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] overflow-hidden',
-  rangeDateShellClass,
-);
-
-/** 支出明細列內之日期範圍：手機全寬避免裁切；桌面維持精簡高度 */
-const rangeDateInputClass =
-  'accounting-form-date-input flex h-11 md:h-9 w-full min-w-0 max-w-full items-center border-0 bg-transparent shadow-none px-3 pr-10 py-0 md:py-1.5 text-base md:text-xs leading-normal text-zinc-100 focus:outline-none focus:ring-0 [color-scheme:dark]';
-
 export default function Accounting({ userRole }: { userRole: UserRole }) {
   const restoredAccounting = useRestoreWorkDraft<AccountingWorkDraft>(WORK_DRAFT_IDS.accounting);
   const isAdmin = userRole === 'admin';
@@ -191,10 +142,7 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
     [userRole, employeeOrgType],
   );
 
-  const defaultRange = useMemo(() => monthBoundsFromYm(currentYm()), []);
-  const [rangeStart, setRangeStart] = useState(defaultRange.start);
-  const [rangeEnd, setRangeEnd] = useState(defaultRange.end);
-  const [quickPreset, setQuickPreset] = useState<DateQuickPreset | null>(null);
+  const [listPeriod, setListPeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
   const [searchQuery, setSearchQuery] = useState('');
 
   const [dateYmd, setDateYmd] = useState(() => restoredAccounting?.dateYmd ?? todayYmd());
@@ -270,9 +218,9 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
   }, [entries, restoredAccounting]);
 
   const rangeBounds = useMemo(() => {
-    if (!rangeStart || !rangeEnd) return { lo: '', hi: '' };
-    return rangeStart <= rangeEnd ? { lo: rangeStart, hi: rangeEnd } : { lo: rangeEnd, hi: rangeStart };
-  }, [rangeStart, rangeEnd]);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(listPeriod);
+    return { lo: startYmd, hi: endYmd };
+  }, [listPeriod]);
 
   const dateFiltered = useMemo(() => {
     if (!rangeBounds.lo || !rangeBounds.hi) return entries;
@@ -310,16 +258,6 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
     }
     return { income, expense, net: income - expense };
   }, [filtered]);
-
-  const dateFilterSummaryLabel = useMemo(() => {
-    if (quickPreset === 'today') return '今天';
-    if (quickPreset === 'week') return '本週';
-    if (quickPreset === '30d') return '近 30 天';
-    if (rangeBounds.lo && rangeBounds.hi) {
-      return `${ymdDashToSlash(rangeBounds.lo)} ～ ${ymdDashToSlash(rangeBounds.hi)}`;
-    }
-    return '全部紀錄';
-  }, [quickPreset, rangeBounds.lo, rangeBounds.hi]);
 
   const categoryOptions = useMemo(
     () =>
@@ -418,48 +356,6 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
     clearWorkDraft(WORK_DRAFT_IDS.accounting);
     return true;
   }, [add, amountRaw, category, dateYmd, flowType, note, subCategory]);
-
-  const clearDateFilter = useCallback(() => {
-    setQuickPreset(null);
-    const { start, end } = monthBoundsFromYm(currentYm());
-    setRangeStart(start);
-    setRangeEnd(end);
-  }, []);
-
-  const showAllDateRange = useCallback(() => {
-    setQuickPreset(null);
-    if (entries.length === 0) {
-      const t = todayYmd();
-      setRangeStart(t);
-      setRangeEnd(t);
-      return;
-    }
-    const sorted = entries.map((e) => e.dateYmd).sort();
-    setRangeStart(sorted[0]!);
-    setRangeEnd(sorted[sorted.length - 1]!);
-  }, [entries]);
-
-  const applyQuickToday = useCallback(() => {
-    const t = todayYmd();
-    setRangeStart(t);
-    setRangeEnd(t);
-    setQuickPreset('today');
-  }, []);
-
-  const applyQuickWeek = useCallback(() => {
-    const { start, end } = thisWeekMonToSunBounds();
-    setRangeStart(start);
-    setRangeEnd(end);
-    setQuickPreset('week');
-  }, []);
-
-  /** 含今日在內連續 30 天 */
-  const applyQuick30Days = useCallback(() => {
-    const end = todayYmd();
-    setRangeEnd(end);
-    setRangeStart(addDaysToYmd(end, -29));
-    setQuickPreset('30d');
-  }, []);
 
   const openEdit = (row: AccountingLedgerEntry) => {
     setEditingEntry(row);
@@ -742,15 +638,7 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
               <h3 className="text-lg font-semibold text-zinc-200">支出明細</h3>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem] text-zinc-500 leading-snug">
                 <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0 tabular-nums">
-                  {rangeBounds.lo && rangeBounds.hi ? (
-                    <>
-                      <span className="whitespace-nowrap">{ymdDashToSlash(rangeBounds.lo)}</span>
-                      <span className="text-zinc-600">～</span>
-                      <span className="whitespace-nowrap">{ymdDashToSlash(rangeBounds.hi)}</span>
-                    </>
-                  ) : (
-                    <span>全部紀錄</span>
-                  )}
+                  <span className="whitespace-nowrap">{dashboardPeriodLabel(listPeriod)}</span>
                 </span>
                 <span className="text-zinc-600" aria-hidden>
                   ·
@@ -763,110 +651,13 @@ export default function Accounting({ userRole }: { userRole: UserRole }) {
               </div>
             </div>
 
-            <details className="order-1 md:order-2 group w-full min-w-0 max-w-full shrink-0 rounded-xl border border-amber-900/35 bg-zinc-950/60">
-              <summary
-                className={cn(
-                  'flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-left',
-                  '[&::-webkit-details-marker]:hidden',
-                )}
-              >
-                <span className="flex min-w-0 flex-1 items-center gap-2 text-xs text-zinc-400">
-                  <CalendarDays size={16} className="shrink-0 text-amber-600/80" aria-hidden />
-                  <span className="min-w-0 truncate">
-                    日期區間：
-                    <span className="text-amber-200/90 font-medium">{dateFilterSummaryLabel}</span>
-                  </span>
-                </span>
-                <ChevronDown
-                  size={16}
-                  className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
-                  aria-hidden
-                />
-              </summary>
-              <div
-                className="flex flex-col gap-3 border-t border-zinc-800/80 p-3 pt-2.5 w-full min-w-0 max-w-full overflow-x-hidden"
-                role="group"
-                aria-label="日期範圍篩選"
-              >
-                <div className="grid grid-cols-3 gap-2 w-full min-w-0">
-                  {(
-                    [
-                      { id: 'today' as const, label: '今天', onClick: applyQuickToday },
-                      { id: 'week' as const, label: '本週', onClick: applyQuickWeek },
-                      { id: '30d' as const, label: '近 30 天', onClick: applyQuick30Days },
-                    ] as const
-                  ).map(({ id, label, onClick }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={onClick}
-                      aria-pressed={quickPreset === id}
-                      className={cn(
-                        'min-h-10 min-w-0 px-1.5 py-2 text-xs rounded-lg font-medium transition-colors border',
-                        quickPreset === id
-                          ? 'bg-amber-600 text-white border-amber-500 shadow-sm shadow-amber-900/30'
-                          : 'bg-zinc-950/50 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600',
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex flex-col gap-2 w-full min-w-0">
-                  <p className="text-xs text-zinc-500">自訂日期範圍</p>
-                  <div className="grid grid-cols-1 gap-2 w-full min-w-0 sm:grid-cols-2">
-                    <label className="flex flex-col gap-1 min-w-0 w-full max-w-full">
-                      <span className="text-[0.6875rem] text-zinc-500 shrink-0">從</span>
-                      <div className={rangeDateWrapClass}>
-                        <input
-                          type="date"
-                          value={rangeStart}
-                          onChange={(ev) => {
-                            setRangeStart(ev.target.value);
-                            setQuickPreset(null);
-                          }}
-                          className={rangeDateInputClass}
-                          aria-label="起始日期"
-                        />
-                      </div>
-                    </label>
-                    <label className="flex flex-col gap-1 min-w-0 w-full max-w-full">
-                      <span className="text-[0.6875rem] text-zinc-500 shrink-0">至</span>
-                      <div className={rangeDateWrapClass}>
-                        <input
-                          type="date"
-                          value={rangeEnd}
-                          onChange={(ev) => {
-                            setRangeEnd(ev.target.value);
-                            setQuickPreset(null);
-                          }}
-                          className={rangeDateInputClass}
-                          aria-label="結束日期"
-                        />
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 w-full min-w-0">
-                  <button
-                    type="button"
-                    onClick={clearDateFilter}
-                    className="min-h-10 min-w-0 px-2 rounded-lg text-xs font-medium border border-zinc-600/70 text-zinc-300 bg-zinc-950/40 hover:bg-zinc-800/90 hover:text-zinc-100 hover:border-zinc-500/60 transition-colors"
-                  >
-                    清除篩選
-                  </button>
-                  <button
-                    type="button"
-                    onClick={showAllDateRange}
-                    className="min-h-10 min-w-0 px-2 rounded-lg text-xs font-medium border border-amber-600/50 text-amber-100 bg-amber-950/30 hover:bg-amber-950/45 hover:border-amber-500/55 transition-colors"
-                  >
-                    顯示全部
-                  </button>
-                </div>
-              </div>
-            </details>
+            <div className="order-1 md:order-2 w-full min-w-0 max-w-sm shrink-0">
+              <DashboardMonthCustomRangePicker
+                value={listPeriod}
+                onChange={setListPeriod}
+                ariaLabel="支出明細日期區間"
+              />
+            </div>
           </div>
 
           <div className="relative">

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
-import { FlaskConical, CalendarDays } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { FlaskConical } from 'lucide-react';
 import {
   ResponsiveContainer,
   PieChart,
@@ -8,10 +8,15 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
+import {
+  DashboardMonthCustomRangePicker,
+  dashboardPeriodLabel,
+  resolveDashboardPeriodYmd,
+  type DashboardPeriodMode,
+} from './DashboardPeriodPicker';
 import { useAccountingLedger } from '../hooks/useAccountingLedger';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { computeMarinadeExpenseAnalysis } from '../lib/accountingLedgerStorage';
-import { ymdDashToSlash } from '../lib/dateDisplay';
 import { cn } from '../lib/utils';
 
 function todayYmd(): string {
@@ -19,51 +24,7 @@ function todayYmd(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function currentYm(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function monthBoundsFromYm(ym: string): { start: string; end: string } {
-  const [ys, ms] = ym.split('-');
-  const y = Number(ys);
-  const m = Number(ms);
-  if (!Number.isFinite(y) || !Number.isFinite(m)) {
-    const t = todayYmd();
-    return { start: t, end: t };
-  }
-  const mm = String(m).padStart(2, '0');
-  const start = `${y}-${mm}-01`;
-  const lastCal = new Date(y, m, 0);
-  const end = `${y}-${mm}-${String(lastCal.getDate()).padStart(2, '0')}`;
-  return { start, end };
-}
-
-function addDaysToYmd(ymd: string, deltaDays: number): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + deltaDays);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-function thisWeekMonToSunBounds(): { start: string; end: string } {
-  const now = new Date();
-  const dow = now.getDay();
-  const diffToMonday = dow === 0 ? -6 : 1 - dow;
-  const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday);
-  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
-  return {
-    start: `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`,
-    end: `${sun.getFullYear()}-${String(sun.getMonth() + 1).padStart(2, '0')}-${String(sun.getDate()).padStart(2, '0')}`,
-  };
-}
-
-type DateQuickPreset = 'today' | 'week' | '30d';
-
 const MARINADE_PIE_COLORS = ['#d97706', '#ca8a04', '#b45309', '#92400e', '#78350f', '#451a03', '#57534e'];
-
-const rangeDateInputClass =
-  'h-9 min-w-0 w-[124px] sm:w-[136px] rounded-lg bg-zinc-950/90 border border-amber-900/40 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-500/50 focus:border-amber-500/60 [color-scheme:dark] shrink-0';
 
 function money(n: number) {
   return n.toLocaleString('zh-TW', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -75,16 +36,12 @@ function money(n: number) {
 export default function MarinadeCostAnalysis() {
   const isNarrow = useIsNarrowScreen();
   const { entries } = useAccountingLedger();
-
-  const defaultRange = useMemo(() => monthBoundsFromYm(currentYm()), []);
-  const [rangeStart, setRangeStart] = useState(defaultRange.start);
-  const [rangeEnd, setRangeEnd] = useState(defaultRange.end);
-  const [quickPreset, setQuickPreset] = useState<DateQuickPreset | null>(null);
+  const [analysisPeriod, setAnalysisPeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
 
   const rangeBounds = useMemo(() => {
-    if (!rangeStart || !rangeEnd) return { lo: '', hi: '' };
-    return rangeStart <= rangeEnd ? { lo: rangeStart, hi: rangeEnd } : { lo: rangeEnd, hi: rangeStart };
-  }, [rangeStart, rangeEnd]);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(analysisPeriod);
+    return { lo: startYmd, hi: endYmd };
+  }, [analysisPeriod]);
 
   const marinadeAnalysis = useMemo(() => {
     const lo = rangeBounds.lo;
@@ -92,47 +49,6 @@ export default function MarinadeCostAnalysis() {
     if (!lo || !hi) return computeMarinadeExpenseAnalysis(entries, todayYmd(), todayYmd());
     return computeMarinadeExpenseAnalysis(entries, lo, hi);
   }, [entries, rangeBounds.lo, rangeBounds.hi]);
-
-  const clearToCurrentMonth = useCallback(() => {
-    setQuickPreset(null);
-    const { start, end } = monthBoundsFromYm(currentYm());
-    setRangeStart(start);
-    setRangeEnd(end);
-  }, []);
-
-  const showAllDataRange = useCallback(() => {
-    setQuickPreset(null);
-    if (entries.length === 0) {
-      const t = todayYmd();
-      setRangeStart(t);
-      setRangeEnd(t);
-      return;
-    }
-    const sorted = entries.map((e) => e.dateYmd).sort();
-    setRangeStart(sorted[0]!);
-    setRangeEnd(sorted[sorted.length - 1]!);
-  }, [entries]);
-
-  const applyQuickToday = useCallback(() => {
-    const t = todayYmd();
-    setRangeStart(t);
-    setRangeEnd(t);
-    setQuickPreset('today');
-  }, []);
-
-  const applyQuickWeek = useCallback(() => {
-    const { start, end } = thisWeekMonToSunBounds();
-    setRangeStart(start);
-    setRangeEnd(end);
-    setQuickPreset('week');
-  }, []);
-
-  const applyQuick30Days = useCallback(() => {
-    const end = todayYmd();
-    setRangeEnd(end);
-    setRangeStart(addDaysToYmd(end, -29));
-    setQuickPreset('30d');
-  }, []);
 
   return (
     <section className="rounded-2xl border border-amber-900/25 bg-zinc-900/40 backdrop-blur-sm shadow-xl shadow-black/15 p-4 md:p-5">
@@ -148,77 +64,17 @@ export default function MarinadeCostAnalysis() {
             </p>
           </div>
 
-          <div
-            className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 rounded-lg border border-amber-900/35 bg-zinc-950/60 px-2 py-1.5 shrink-0"
-            role="group"
-            aria-label="滷料分析日期範圍"
-          >
-            <div className="flex flex-wrap items-center gap-1 mr-0.5 pr-1 border-r border-zinc-800/90">
-              {(
-                [
-                  { id: 'today' as const, label: '今天', onClick: applyQuickToday },
-                  { id: 'week' as const, label: '本週', onClick: applyQuickWeek },
-                  { id: '30d' as const, label: '近 30 天', onClick: applyQuick30Days },
-                ] as const
-              ).map(({ id, label, onClick }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={onClick}
-                  aria-pressed={quickPreset === id}
-                  className={cn(
-                    'px-2 py-1 text-xs rounded-md font-medium transition-colors border',
-                    quickPreset === id
-                      ? 'bg-amber-600 text-white border-amber-500 shadow-sm shadow-amber-900/30'
-                      : 'bg-zinc-950/50 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600'
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <CalendarDays size={14} className="text-amber-600/75 shrink-0" aria-hidden />
-            <span className="text-[0.6875rem] text-zinc-500 whitespace-nowrap">從</span>
-            <input
-              type="date"
-              value={rangeStart}
-              onChange={(ev) => {
-                setRangeStart(ev.target.value);
-                setQuickPreset(null);
-              }}
-              className={rangeDateInputClass}
-              aria-label="起始日期"
+          <div className="w-full min-w-0 max-w-xs shrink-0">
+            <DashboardMonthCustomRangePicker
+              value={analysisPeriod}
+              onChange={setAnalysisPeriod}
+              ariaLabel="滷料分析日期區間"
             />
-            <span className="text-[0.6875rem] text-zinc-500 whitespace-nowrap">至</span>
-            <input
-              type="date"
-              value={rangeEnd}
-              onChange={(ev) => {
-                setRangeEnd(ev.target.value);
-                setQuickPreset(null);
-              }}
-              className={rangeDateInputClass}
-              aria-label="結束日期"
-            />
-            <button
-              type="button"
-              onClick={clearToCurrentMonth}
-              className="h-9 px-2 rounded-lg text-[0.6875rem] font-medium border border-zinc-600/70 text-zinc-400 hover:bg-zinc-800/90 hover:text-zinc-200 transition-colors whitespace-nowrap"
-            >
-              當月
-            </button>
-            <button
-              type="button"
-              onClick={showAllDataRange}
-              className="h-9 px-2 rounded-lg text-[0.6875rem] font-medium border border-amber-800/45 text-amber-200/85 bg-amber-950/25 hover:bg-amber-950/40 transition-colors whitespace-nowrap"
-            >
-              全部
-            </button>
           </div>
         </div>
 
         <p className="text-[0.625rem] text-zinc-600">
-          目前區間：{rangeBounds.lo && rangeBounds.hi ? `${ymdDashToSlash(rangeBounds.lo)} ～ ${ymdDashToSlash(rangeBounds.hi)}` : '—'}
+          目前區間：{dashboardPeriodLabel(analysisPeriod)}
         </p>
       </div>
 

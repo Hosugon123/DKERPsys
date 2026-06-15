@@ -91,10 +91,10 @@ function parseQtyInput(raw: string): number {
 }
 
 const PROC_DOCK_SELECT_CLASS =
-  'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[3.25rem] max-w-[5.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1.5 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark]';
+  'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[3.25rem] max-w-[5.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1.5 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark] lg:h-7 lg:min-w-[3.5rem] lg:max-w-[6rem] lg:text-xs';
 
 const PROC_WEEKDAY_SELECT_CLASS =
-  `${PROC_DOCK_SELECT_CLASS} min-w-[5rem] max-w-[9.5rem] px-2`;
+  `${PROC_DOCK_SELECT_CLASS} min-w-[5rem] max-w-[9.5rem] px-2 lg:max-w-[7rem]`;
 
 type ProcurementWorkDraft = {
   cart: Record<string, number>;
@@ -441,8 +441,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     setCheckoutBarCompact(mobile && (qtyFieldFocused || keyboardLikely));
   }, []);
 
-  /** 手機一律用精簡結帳列；鍵盤彈出時維持同版型並貼齊 visualViewport */
-  const dockCompact = isNarrow || checkoutBarCompact;
+  /** 手機鍵盤彈出時外層更緊；桌機與手機皆用精簡結帳列，減少遮擋品項格 */
+  const dockTight = isNarrow || checkoutBarCompact;
 
   useEffect(() => {
     syncCheckoutDock();
@@ -653,7 +653,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     <div
       className={cn(
         'space-y-3 max-w-3xl mx-auto lg:max-w-none',
-        dockCompact ? 'pb-[6.75rem]' : 'pb-36'
+        'pb-[6.75rem] lg:pb-[4.5rem]'
       )}
     >
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -1298,213 +1298,99 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         ref={checkoutDockRef}
         className={cn(
           'procurement-checkout-dock fixed left-0 right-0 lg:left-64 z-40 pointer-events-none bg-gradient-to-t from-[#0a0a0a] to-transparent',
-          dockCompact
+          dockTight
             ? 'px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-0.5'
-            : 'px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2'
+            : 'px-3 lg:px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:pb-2 pt-0.5 lg:pt-1'
         )}
       >
         <div
           className={cn(
             'max-w-3xl mx-auto pointer-events-auto border border-zinc-700/90 bg-zinc-950/95 backdrop-blur-md shadow-2xl',
-            dockCompact
-              ? 'rounded-xl p-2 flex flex-col gap-1.5'
-              : 'rounded-2xl p-3 sm:p-4 flex flex-col gap-2.5'
+            'rounded-xl p-2 flex flex-col gap-1.5 lg:flex-row lg:items-center lg:gap-2.5 lg:p-1.5 lg:rounded-lg'
           )}
         >
-          {dockCompact ? (
-            <div className="flex items-center gap-x-1.5 gap-y-1 min-w-0">
-              <span className="text-[10px] leading-none text-zinc-500 shrink-0">參考</span>
-              {showReferenceDataDate ? (
-                <span className="text-[10px] leading-none text-amber-200/90 tabular-nums truncate min-w-0 flex-1 basis-0">
-                  {formatSlashYmdWithWeekdayFromYmd(referenceDataDisplayYmd)}
-                </span>
-              ) : (
-                <span className="min-w-0 flex-1 basis-0" aria-hidden />
-              )}
-              <select
-                aria-label="售出參考模式（最高／平均／上週／最低）"
-                value={referenceMode}
-                onChange={(e) => setReferenceMode(e.target.value as ProcurementReferenceMode)}
-                className={PROC_DOCK_SELECT_CLASS}
-              >
-                {PROCUREMENT_REFERENCE_MODE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="參考星期（同名星期售出參考）"
-                value={String(referenceWeekdayIdx)}
-                onChange={(e) => selectReferenceWeekday(Number(e.target.value))}
-                className={PROC_WEEKDAY_SELECT_CLASS}
-              >
-                {PROCUREMENT_WEEKDAY_LABELS.map((label, idx) => (
-                  <option key={label} value={idx}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-zinc-800/90 bg-zinc-900/50 px-2.5 py-2">
-              {showReferenceDataDate ? (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-                  <span className="text-xs text-zinc-500 shrink-0">參考時間</span>
-                  <span className="text-xs text-amber-200/90 tabular-nums shrink-0">
-                    {formatSlashYmdWithWeekdayFromYmd(referenceDataDisplayYmd)}
-                  </span>
-                </div>
-              ) : null}
-              <label className="mt-1.5 flex min-w-0 items-center gap-2">
-                <span className="text-xs text-zinc-500 shrink-0 whitespace-nowrap">參考模式</span>
-                <select
-                  aria-label="售出參考模式（最高／平均／上週／最低）"
-                  value={referenceMode}
-                  onChange={(e) => setReferenceMode(e.target.value as ProcurementReferenceMode)}
-                  className="accounting-form-date-input box-border h-9 min-h-0 min-w-0 flex-1 max-w-full rounded-lg border border-zinc-700/80 bg-zinc-950/80 px-2.5 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]"
-                >
-                  {PROCUREMENT_REFERENCE_MODE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="mt-1.5 flex min-w-0 items-center gap-2">
-                <span className="text-xs text-zinc-500 shrink-0 whitespace-nowrap">對照星期</span>
-                <select
-                  aria-label="對照星期（同名星期售出參考）"
-                  value={String(referenceWeekdayIdx)}
-                  onChange={(e) => selectReferenceWeekday(Number(e.target.value))}
-                  className="accounting-form-date-input box-border h-9 min-h-0 min-w-0 flex-1 max-w-full rounded-lg border border-zinc-700/80 bg-zinc-950/80 px-2.5 py-0 text-sm leading-tight text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600/50 focus:border-amber-600/40 [color-scheme:dark]"
-                >
-                  {PROCUREMENT_WEEKDAY_LABELS.map((label, idx) => (
-                    <option key={label} value={idx}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          )}
-
-          <div
-            className={cn(
-              dockCompact
-                ? 'flex flex-row flex-nowrap items-center gap-1.5'
-                : 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5',
-            )}
-          >
-            {dockCompact ? (
-              <>
-                <ShoppingBasket className="text-amber-500 shrink-0 self-center" size={18} aria-hidden />
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                  <div
-                    className="flex flex-wrap items-baseline gap-x-1 gap-y-0 text-[10px] leading-tight tabular-nums"
-                    aria-label="訂單金額摘要"
-                  >
-                    <span className="text-zinc-500 shrink-0">批貨</span>
-                    <span
-                      className="font-semibold text-amber-400 shrink-0"
-                      title={showProcurementCost ? compactPayableHint : undefined}
-                    >
-                      $ {totalPayablePrice.toLocaleString()}
-                    </span>
-                    <span className="text-zinc-600 shrink-0" aria-hidden>
-                      ·
-                    </span>
-                    <span className="text-zinc-500 shrink-0">售完</span>
-                    <span className="font-semibold text-emerald-400 shrink-0">
-                      $ {soldOutRetailEstimate.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-1 items-stretch">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCart({});
-                      setQtyInputDraft({});
-                      setSubmitModalOpen(false);
-                    }}
-                    className="min-w-0 h-9 px-2.5 rounded-lg border border-zinc-600 bg-zinc-900/80 text-zinc-200 text-xs font-semibold hover:bg-zinc-800 active:scale-[0.98]"
-                  >
-                    清空
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openSubmitConfirm}
-                    disabled={totalCount <= 0}
-                    className="min-w-0 h-9 px-3 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                    aria-label="送出訂單"
-                  >
-                    <ListOrdered size={15} className="shrink-0" aria-hidden />
-                    送出
-                  </button>
-                </div>
-              </>
+          <div className="flex items-center gap-x-1.5 gap-y-1 min-w-0 lg:flex-1 lg:min-w-0">
+            <span className="text-[10px] lg:text-xs leading-none text-zinc-500 shrink-0">參考</span>
+            {showReferenceDataDate ? (
+              <span className="text-[10px] lg:text-xs leading-none text-amber-200/90 tabular-nums truncate min-w-0 flex-1 basis-0">
+                {formatSlashYmdWithWeekdayFromYmd(referenceDataDisplayYmd)}
+              </span>
             ) : (
-              <>
-                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className="relative shrink-0">
-                    <ShoppingBasket className="text-amber-500" size={24} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="grid grid-cols-2 w-full items-start gap-2 sm:gap-4 min-w-0">
-                      <div className="min-w-0">
-                        <p className="text-xs text-zinc-500 whitespace-nowrap">批貨金額</p>
-                        <p className="text-sm sm:text-lg font-semibold text-amber-400 tabular-nums leading-tight">
-                          $ {totalPayablePrice.toLocaleString()}
-                        </p>
-                        {showProcurementCost && userRole === 'franchisee' && selfSuppliedDeduction > 0 && (
-                          <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">
-                            扣除自備品項 $ {Math.round(selfSuppliedDeduction).toLocaleString()} 後，實際應付 $
-                            {Math.round(franchiseeNetPayable).toLocaleString()}
-                          </p>
-                        )}
-                        {showProcurementCost && userRole === 'franchisee' && totalSelfSuppliedCost > 0 && (
-                          <p className="text-[11px] text-zinc-500 leading-snug">
-                            自備成本（計入支出）$ {Math.round(totalSelfSuppliedCost).toLocaleString()}
-                          </p>
-                        )}
-                      </div>
-                      <div className="min-w-0 pl-3 sm:pl-4 border-l border-zinc-800/70">
-                        <p className="text-xs text-zinc-500 leading-snug whitespace-nowrap">
-                          售完金額
-                          <span className="ml-0.5 text-[10px] text-zinc-600 font-normal">（批貨+剩餘）</span>
-                        </p>
-                        <p className="text-sm sm:text-lg font-semibold text-emerald-400 tabular-nums leading-tight mt-0.5">
-                          $ {soldOutRetailEstimate.toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-row flex-wrap gap-2 w-full sm:w-auto sm:shrink-0 sm:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCart({});
-                      setQtyInputDraft({});
-                      setSubmitModalOpen(false);
-                    }}
-                    className="flex-1 sm:flex-initial min-w-0 min-h-10 px-4 sm:px-5 rounded-xl border border-zinc-600 bg-zinc-900/80 text-zinc-200 text-sm font-semibold hover:bg-zinc-800 active:scale-[0.98]"
-                  >
-                    清空
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openSubmitConfirm}
-                    disabled={totalCount <= 0}
-                    className="flex-1 sm:flex-initial min-w-0 min-h-10 px-4 sm:px-6 rounded-xl bg-amber-500 text-zinc-950 text-sm font-bold active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <ListOrdered size={18} />
-                    送出訂單
-                  </button>
-                </div>
-              </>
+              <span className="min-w-0 flex-1 basis-0" aria-hidden />
             )}
+            <select
+              aria-label="售出參考模式（最高／平均／上週／最低）"
+              value={referenceMode}
+              onChange={(e) => setReferenceMode(e.target.value as ProcurementReferenceMode)}
+              className={PROC_DOCK_SELECT_CLASS}
+            >
+              {PROCUREMENT_REFERENCE_MODE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="參考星期（同名星期售出參考）"
+              value={String(referenceWeekdayIdx)}
+              onChange={(e) => selectReferenceWeekday(Number(e.target.value))}
+              className={PROC_WEEKDAY_SELECT_CLASS}
+            >
+              {PROCUREMENT_WEEKDAY_LABELS.map((label, idx) => (
+                <option key={label} value={idx}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-row flex-nowrap items-center gap-1.5 lg:shrink-0 lg:border-l lg:border-zinc-800/80 lg:pl-2.5">
+            <ShoppingBasket className="text-amber-500 shrink-0 self-center lg:w-5 lg:h-5" size={18} aria-hidden />
+            <div className="flex-1 min-w-0 flex flex-col justify-center">
+              <div
+                className="flex flex-wrap items-baseline gap-x-1 gap-y-0 text-[10px] lg:text-xs leading-tight tabular-nums"
+                aria-label="訂單金額摘要"
+              >
+                <span className="text-zinc-500 shrink-0">批貨</span>
+                <span
+                  className="font-semibold text-amber-400 shrink-0"
+                  title={showProcurementCost ? compactPayableHint : undefined}
+                >
+                  $ {totalPayablePrice.toLocaleString()}
+                </span>
+                <span className="text-zinc-600 shrink-0" aria-hidden>
+                  ·
+                </span>
+                <span className="text-zinc-500 shrink-0">售完</span>
+                <span className="font-semibold text-emerald-400 shrink-0">
+                  $ {soldOutRetailEstimate.toLocaleString()}
+                </span>
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-1 items-stretch">
+              <button
+                type="button"
+                onClick={() => {
+                  setCart({});
+                  setQtyInputDraft({});
+                  setSubmitModalOpen(false);
+                }}
+                className="min-w-0 h-9 lg:h-8 px-2.5 rounded-lg border border-zinc-600 bg-zinc-900/80 text-zinc-200 text-xs font-semibold hover:bg-zinc-800 active:scale-[0.98]"
+              >
+                清空
+              </button>
+              <button
+                type="button"
+                onClick={openSubmitConfirm}
+                disabled={totalCount <= 0}
+                className="min-w-0 h-9 lg:h-8 px-3 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label="送出訂單"
+              >
+                <ListOrdered size={15} className="shrink-0" aria-hidden />
+                <span className="lg:hidden">送出</span>
+                <span className="hidden lg:inline">送出訂單</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

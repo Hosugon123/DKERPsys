@@ -1,13 +1,11 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { createPortal } from 'react-dom';
 import {
   TrendingUp,
   FileText,
@@ -31,6 +29,12 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { UserRole } from './Orders';
+import {
+  DashboardMonthCustomRangePicker,
+  dashboardPeriodLabel,
+  resolveDashboardPeriodYmd,
+  type DashboardPeriodMode,
+} from '../components/DashboardPeriodPicker';
 import { cn } from '../lib/utils';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
@@ -104,28 +108,10 @@ function resolveFranchiseScopeOwnerUserId(
 }
 
 type ProductRevenueRow = { id: number; name: string; revenue: number; qty: number; pct: number };
-type SummaryRangeKey = 'today' | 'week' | 'days7' | 'days30' | 'month' | 'year';
-const SUMMARY_RANGE_OPTIONS: ReadonlyArray<{ key: SummaryRangeKey; label: string }> = [
-  { key: 'today', label: '本日' },
-  { key: 'week', label: '本週' },
-  { key: 'days7', label: '7天' },
-  { key: 'days30', label: '30天' },
-  { key: 'month', label: '本月' },
-  { key: 'year', label: '本年' },
-];
-/** 銷售數據區：週次對照與同名星期統計之區間預設 */
-const STALL_SALES_BOARD_RANGE_OPTIONS: ReadonlyArray<{ key: SummaryRangeKey; label: string }> = [
-  { key: 'month', label: '本月' },
-  { key: 'year', label: '本年' },
-  { key: 'days7', label: '7天' },
-  { key: 'days30', label: '30天' },
-];
-/** 總部「直營盤點落差」專用；與下方營運摘要的 summaryRange 分開，避免必須捲動才能換區間 */
-type DirectStallGapRangeMode =
-  | { kind: 'preset'; key: SummaryRangeKey }
-  | { kind: 'custom'; startYmd: string; endYmd: string };
+/** 盤點落差等區塊：與營運 KPI 相同語意（本月／自訂） */
+type DirectStallGapRangeMode = DashboardPeriodMode;
 /** 銷售數據區間：none＝不篩日期（全部已建檔營業日） */
-type StallSalesBoardRangeMode = { kind: 'none' } | DirectStallGapRangeMode;
+type StallSalesBoardRangeMode = { kind: 'none' } | DashboardPeriodMode;
 type ExpenseShareRow = { id: number; name: string; amount: number; pct: number };
 const RANK_DEFAULT_LIMIT = 10;
 type RevenueRankRow = { id: number; name: string; revenue: number; pct?: number };
@@ -429,61 +415,12 @@ function formatWeekdaySoldQty(n: number): string {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 3, minimumFractionDigits: 0 });
 }
 
-function summaryRangeLabel(key: SummaryRangeKey): string {
-  if (key === 'today') return '本日';
-  if (key === 'week') return '本週';
-  if (key === 'days7') return '7天';
-  if (key === 'days30') return '30天';
-  if (key === 'year') return '本年';
-  return '本月';
-}
-
-function resolveRange(key: SummaryRangeKey): { startYmd: string; endYmd: string } {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const end = toYmd(today);
-  if (key === 'today') return { startYmd: end, endYmd: end };
-  if (key === 'days7') {
-    const start = new Date(today);
-    start.setDate(today.getDate() - 6);
-    return { startYmd: toYmd(start), endYmd: end };
-  }
-  if (key === 'days30') {
-    const start = new Date(today);
-    start.setDate(today.getDate() - 29);
-    return { startYmd: toYmd(start), endYmd: end };
-  }
-  if (key === 'month') {
-    const start = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { startYmd: toYmd(start), endYmd: end };
-  }
-  if (key === 'year') {
-    const start = new Date(today.getFullYear(), 0, 1);
-    return { startYmd: toYmd(start), endYmd: end };
-  }
-  // 本週（週一到今天）
-  const mondayShift = (today.getDay() + 6) % 7;
-  const start = new Date(today);
-  start.setDate(today.getDate() - mondayShift);
-  return { startYmd: toYmd(start), endYmd: end };
-}
-
-function normalizeYmdRange(startYmd: string, endYmd: string): { startYmd: string; endYmd: string } {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startYmd) || !/^\d{4}-\d{2}-\d{2}$/.test(endYmd)) {
-    return { startYmd, endYmd };
-  }
-  return startYmd <= endYmd ? { startYmd, endYmd } : { startYmd: endYmd, endYmd: startYmd };
-}
-
 function resolveDirectStallGapYmdRange(mode: DirectStallGapRangeMode): { startYmd: string; endYmd: string } {
-  if (mode.kind === 'preset') return resolveRange(mode.key);
-  return normalizeYmdRange(mode.startYmd, mode.endYmd);
+  return resolveDashboardPeriodYmd(mode);
 }
 
 function directStallGapRangeLabel(mode: DirectStallGapRangeMode): string {
-  if (mode.kind === 'preset') return summaryRangeLabel(mode.key);
-  const { startYmd, endYmd } = resolveDirectStallGapYmdRange(mode);
-  return `${startYmd}～${endYmd}`;
+  return dashboardPeriodLabel(mode);
 }
 
 function stallSalesBoardRangeLabel(mode: StallSalesBoardRangeMode): string {
@@ -506,299 +443,6 @@ function resolveStallSalesBoardYmdRange(
   }
   if (!max) return { startYmd: todayStr, endYmd: todayStr };
   return { startYmd: min, endYmd: max };
-}
-
-const SUMMARY_RANGE_SELECT_CLASS =
-  'w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
-
-const SUMMARY_RANGE_INLINE_BUTTON_CLASS =
-  'inline-flex h-[26px] w-24 items-center justify-between gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-xs font-medium leading-none text-zinc-200 transition-colors hover:border-amber-600/45 hover:text-amber-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
-
-/** 營運 KPI 卡：窄螢幕區間觸發鈕（與卡片同寬、對齊分頁列） */
-const ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS =
-  'flex min-h-10 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm font-medium text-zinc-200 transition-colors hover:border-amber-600/45 hover:text-amber-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
-
-function summaryRangeToggleClass(active: boolean) {
-  return cn(
-    'px-2.5 py-1 rounded-md text-xs border transition-colors',
-    active
-      ? 'bg-amber-600/20 border-amber-500/40 text-amber-300'
-      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200',
-  );
-}
-
-function DashboardSummaryRangePicker({
-  value,
-  onChange,
-  isNarrow,
-  ariaLabel = '區間',
-  narrowSelectClassName,
-  selectClassName,
-  wideGapClass = 'gap-1.5',
-  /** 寬螢幕時讓各預設區間鈕均分寬度（營運 KPI 工具列用） */
-  wideStretch = false,
-}: {
-  value: SummaryRangeKey;
-  onChange: (key: SummaryRangeKey) => void;
-  isNarrow: boolean;
-  ariaLabel?: string;
-  narrowSelectClassName?: string;
-  selectClassName?: string;
-  wideGapClass?: string;
-  wideStretch?: boolean;
-}) {
-  if (isNarrow) {
-    return (
-      <select
-        aria-label={ariaLabel}
-        value={value}
-        onChange={(e) => onChange(e.target.value as SummaryRangeKey)}
-        className={cn(narrowSelectClassName ?? SUMMARY_RANGE_SELECT_CLASS, selectClassName)}
-      >
-        {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-          <option key={key} value={key}>
-            {label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  return (
-    <div
-      className={cn(
-        'flex flex-wrap items-center',
-        wideStretch ? 'w-full min-w-0 max-w-full gap-1' : wideGapClass,
-      )}
-    >
-      {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onChange(key)}
-                  className={cn(
-            summaryRangeToggleClass(value === key),
-            wideStretch && 'flex min-h-9 min-w-0 flex-1 basis-0 items-center justify-center text-center',
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function DashboardInlineSummaryRangePicker({
-  value,
-  onChange,
-  isNarrow,
-  ariaLabel = '區間',
-  wideGapClass = 'gap-1.5',
-  narrowTriggerClassName,
-  /** 窄螢幕下列表寬度；預設靠右固定 w-28 */
-  narrowMenuClassName,
-  narrowWrapperClassName,
-  /** 寬螢幕時區間鈕均分整列寬度 */
-  wideStretch = false,
-}: {
-  value: SummaryRangeKey;
-  onChange: (key: SummaryRangeKey) => void;
-  isNarrow: boolean;
-  ariaLabel?: string;
-  wideGapClass?: string;
-  /** 窄螢幕下拉觸發鈕 class（預設為 {@link SUMMARY_RANGE_INLINE_BUTTON_CLASS}） */
-  narrowTriggerClassName?: string;
-  narrowMenuClassName?: string;
-  /** 窄螢幕時外層容器 class（例：w-full min-w-0 與觸發鈕同寬） */
-  narrowWrapperClassName?: string;
-  wideStretch?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  const current = SUMMARY_RANGE_OPTIONS.find((option) => option.key === value);
-
-  const updateMenuRect = useCallback(() => {
-    const el = triggerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setMenuRect({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setMenuRect(null);
-      return;
-    }
-    updateMenuRect();
-    window.addEventListener('resize', updateMenuRect);
-    window.addEventListener('scroll', updateMenuRect, true);
-    return () => {
-      window.removeEventListener('resize', updateMenuRect);
-      window.removeEventListener('scroll', updateMenuRect, true);
-    };
-  }, [open, updateMenuRect]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [open]);
-
-  if (!isNarrow) {
-    return (
-      <div className={cn(wideStretch && 'w-full min-w-0')}>
-        <DashboardSummaryRangePicker
-          value={value}
-          onChange={onChange}
-          isNarrow={isNarrow}
-          ariaLabel={ariaLabel}
-          wideGapClass={wideGapClass}
-          wideStretch={wideStretch}
-        />
-      </div>
-    );
-  }
-
-  const menu =
-    open && menuRect
-      ? createPortal(
-          <div
-            ref={menuRef}
-            role="listbox"
-            aria-label={ariaLabel}
-            style={{ top: menuRect.top, left: menuRect.left, width: menuRect.width }}
-            className={cn(
-              'fixed z-[200] max-h-[min(16rem,50vh)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30',
-              narrowMenuClassName,
-            )}
-          >
-            {SUMMARY_RANGE_OPTIONS.map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                role="option"
-                aria-selected={value === key}
-                className={cn(
-                  'block w-full px-3 py-2 text-left text-xs transition-colors',
-                  value === key
-                    ? 'bg-amber-600/20 text-amber-300'
-                    : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100',
-                )}
-                onClick={() => {
-                  onChange(key);
-                  setOpen(false);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )
-      : null;
-
-  return (
-    <div className={cn('relative', narrowWrapperClassName)}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={narrowTriggerClassName ?? SUMMARY_RANGE_INLINE_BUTTON_CLASS}
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
-      >
-        <span className="truncate">{current?.label ?? summaryRangeLabel(value)}</span>
-        <ChevronDown
-          size={12}
-          className={cn('shrink-0 text-zinc-500 transition-transform', open ? 'rotate-180 text-amber-400' : null)}
-          aria-hidden
-        />
-      </button>
-      {menu}
-    </div>
-  );
-}
-
-function StallGapQuickPresetRow(props: {
-  range: DirectStallGapRangeMode | { kind: 'none' };
-  onPreset: (key: SummaryRangeKey) => void;
-  onPickCustom: () => void;
-  isNarrow: boolean;
-  options?: ReadonlyArray<{ key: SummaryRangeKey; label: string }>;
-  quickLabel?: string;
-  allowDeselect?: boolean;
-  onDeselect?: () => void;
-}) {
-  const { range, onPreset, onPickCustom, isNarrow, quickLabel = '快速選擇', allowDeselect, onDeselect } =
-    props;
-  const options = props.options ?? SUMMARY_RANGE_OPTIONS;
-  const selectVal = range.kind === 'none' ? '' : range.kind === 'preset' ? range.key : 'custom';
-
-  if (isNarrow) {
-    return (
-      <select
-        aria-label="快速選擇區間"
-        value={selectVal}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === '') {
-            if (allowDeselect) onDeselect?.();
-            return;
-          }
-          if (v === 'custom') onPickCustom();
-          else onPreset(v as SummaryRangeKey);
-        }}
-        className={SUMMARY_RANGE_SELECT_CLASS}
-      >
-        {allowDeselect ? <option value="">全部</option> : null}
-        {options.map(({ key, label }) => (
-          <option key={key} value={key}>
-            {label}
-          </option>
-        ))}
-        <option value="custom">自訂起訖</option>
-      </select>
-    );
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
-      {quickLabel ? (
-        <span className="text-[11px] text-zinc-500 mr-0.5 shrink-0">{quickLabel}</span>
-      ) : null}
-      {options.map(({ key, label }) => (
-        <button
-          key={key}
-          type="button"
-          aria-pressed={range.kind === 'preset' && range.key === key}
-          onClick={() => {
-            if (allowDeselect && range.kind === 'preset' && range.key === key) onDeselect?.();
-            else onPreset(key);
-          }}
-          className={summaryRangeToggleClass(range.kind === 'preset' && range.key === key)}
-        >
-          {label}
-        </button>
-      ))}
-      <button
-        type="button"
-        aria-pressed={range.kind === 'custom'}
-        onClick={() => {
-          if (allowDeselect && range.kind === 'custom') onDeselect?.();
-          else onPickCustom();
-        }}
-        className={summaryRangeToggleClass(range.kind === 'custom')}
-      >
-        自訂
-      </button>
-    </div>
-  );
 }
 
 function commitRevenueBaselineDraft(scopeId: string, idx: number, rawInput: string): void {
@@ -932,6 +576,9 @@ function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
   );
 }
 
+const WEEKDAY_SELECT_CLASS =
+  'w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
+
 function WeekdayChainPicker({
   focusIdx,
   onChange,
@@ -948,7 +595,7 @@ function WeekdayChainPicker({
         const v = e.target.value;
         onChange(v === '' ? null : Number(v));
       }}
-      className={cn(SUMMARY_RANGE_SELECT_CLASS, 'h-9 min-h-0 max-w-full')}
+      className={cn(WEEKDAY_SELECT_CLASS, 'h-9 min-h-0 max-w-full')}
     >
       <option value="">全部（逐日）</option>
       {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
@@ -1216,13 +863,15 @@ export default function Dashboard({
     orderTick,
     financeTick,
   } = useDashboardData(viewAsFranchisee?.userId ?? null);
-  const [summaryRange, setSummaryRange] = useState<SummaryRangeKey>('month');
-  /** 總部合併 KPI 卡（總部營運總覽／直營店營運摘要）專用區間；與其他區塊的 summaryRange 可分開設定 */
-  const [adminFinanceSummaryRange, setAdminFinanceSummaryRange] = useState<SummaryRangeKey>('month');
+  const [summaryPeriod, setSummaryPeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
+  /** 總部合併 KPI 卡（總部營運總覽／直營店營運摘要）專用區間；與其他區塊的 summaryPeriod 可分開設定 */
+  const [adminFinancePeriod, setAdminFinancePeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
+  /** 支出結構表專用區間（與上方營運 KPI 獨立） */
+  const [expenseStructurePeriod, setExpenseStructurePeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
   /** 總部合併 KPI 卡：總覽四欄 vs 直營兩欄 */
   const [adminKpiTab, setAdminKpiTab] = useState<'hq-overview' | 'direct-stall'>('hq-overview');
   /** 商品營收圓餅專用區間（總部與本店共用；本店僅含可視訂單）；與營運摘要 summaryRange 分開 */
-  const [productChartsRange, setProductChartsRange] = useState<SummaryRangeKey>('month');
+  const [productChartsPeriod, setProductChartsPeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
   const [showAllDirect, setShowAllDirect] = useState(false);
   const [showAllFranchise, setShowAllFranchise] = useState(false);
   const [showAllSelf, setShowAllSelf] = useState(false);
@@ -1232,13 +881,11 @@ export default function Dashboard({
   const [franchisePickerOpen, setFranchisePickerOpen] = useState(false);
   /** 直營「盤點落差與呆帳」專用區間（與總部營運摘要 summaryRange 獨立） */
   const [directStallGapRange, setDirectStallGapRange] = useState<DirectStallGapRangeMode>({
-    kind: 'preset',
-    key: 'month',
+    kind: 'month',
   });
-  /** 本店盤點落差區間（與上方 KPI 的 summaryRange 分開；同總部直營盤點操作） */
+  /** 本店盤點落差區間（與上方 KPI 的 summaryPeriod 分開；同總部直營盤點操作） */
   const [nonAdminStallGapRange, setNonAdminStallGapRange] = useState<DirectStallGapRangeMode>({
-    kind: 'preset',
-    key: 'month',
+    kind: 'month',
   });
   /** 銷售數據區：週次對照與同名星期統計之區間（與 KPI、盤點落差分開） */
   const [stallSalesBoardRange, setStallSalesBoardRange] = useState<StallSalesBoardRangeMode>({
@@ -1270,9 +917,15 @@ export default function Dashboard({
 
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
-    const { startYmd, endYmd } = resolveRange(adminFinanceSummaryRange);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(adminFinancePeriod);
     return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
-  }, [isAdmin, financeTick, orderTick, adminFinanceSummaryRange]);
+  }, [isAdmin, financeTick, orderTick, adminFinancePeriod]);
+
+  const expenseStructureFinance = useMemo(() => {
+    if (!isAdmin) return null;
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(expenseStructurePeriod);
+    return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
+  }, [isAdmin, financeTick, orderTick, expenseStructurePeriod]);
 
   /** 總部營運總覽 KPI：直營店實際營收、加盟批貨、消耗品代收、總支出、淨利 */
   const adminHqOverviewMetrics = useMemo(() => {
@@ -1603,7 +1256,7 @@ export default function Dashboard({
 
   const nonAdminSummary = useMemo(() => {
     if (isAdmin) return null;
-    const { startYmd, endYmd } = resolveRange(summaryRange);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(summaryPeriod);
     const stallCompleted = effectiveOrders.filter((o) => {
       if (!orderCountsTowardStallEconomics(o)) return false;
       const ymd = stallCountAttributeYmd(o);
@@ -1646,7 +1299,7 @@ export default function Dashboard({
     const gross = revenue - expense;
     const net = revenue - expense;
     return {
-      rangeLabel: summaryRangeLabel(summaryRange),
+      rangeLabel: dashboardPeriodLabel(summaryPeriod),
       revenue,
       procurementCost,
       ledgerExpense,
@@ -1664,7 +1317,7 @@ export default function Dashboard({
     franchiseStallSalesBoardOwnerUserId,
     ledgerForView,
     isAdmin,
-    summaryRange,
+    summaryPeriod,
     userRole,
     viewAsFranchisee,
   ]);
@@ -1672,13 +1325,13 @@ export default function Dashboard({
   /** 本店／view-as：與總部相同，依「建單日」落在區間內之已完成訂單（僅 effectiveOrders） */
   const nonAdminProductChartOrders = useMemo(() => {
     if (isAdmin) return [];
-    const { startYmd, endYmd } = resolveRange(productChartsRange);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(productChartsPeriod);
     return effectiveOrders.filter((o) => {
       if (o.status !== '已完成') return false;
       const ymd0 = effectiveOrderDateYmd(o);
       return ymd0 >= startYmd && ymd0 <= endYmd;
     });
-  }, [effectiveOrders, isAdmin, productChartsRange]);
+  }, [effectiveOrders, isAdmin, productChartsPeriod]);
 
   const topProducts = useMemo(() => {
     if (isAdmin) return [];
@@ -1705,7 +1358,7 @@ export default function Dashboard({
 
   const nonAdminExpenseRows = useMemo(() => {
     if (isAdmin) return [];
-    const { startYmd, endYmd } = resolveRange(productChartsRange);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(productChartsPeriod);
     const byName = new Map<string, number>();
     if (franchiseOperatingExpenseModel) {
       const procurementCost = nonAdminProductChartOrders.reduce((s, o) => s + o.totalAmount, 0);
@@ -1745,20 +1398,20 @@ export default function Dashboard({
     effectiveOrders,
     franchiseOperatingExpenseModel,
     isAdmin,
-    productChartsRange,
+    productChartsPeriod,
     ledgerForView,
     nonAdminProductChartOrders,
   ]);
 
   const adminProductChartOrders = useMemo(() => {
     if (!isAdmin) return [];
-    const { startYmd, endYmd } = resolveRange(productChartsRange);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(productChartsPeriod);
     return dashboardOrders.filter((o) => {
       if (o.status !== '已完成') return false;
       const ymd0 = effectiveOrderDateYmd(o);
       return ymd0 >= startYmd && ymd0 <= endYmd;
     });
-  }, [dashboardOrders, isAdmin, productChartsRange]);
+  }, [dashboardOrders, isAdmin, productChartsPeriod]);
 
   const adminStallGapRange = useMemo(() => {
     if (!isAdmin) return null;
@@ -1855,7 +1508,7 @@ export default function Dashboard({
    */
   const franchiseStoreBreakdown = useMemo(() => {
     if (!realIsAdmin) return [];
-    const { startYmd, endYmd } = resolveRange(summaryRange);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(summaryPeriod);
     type Row = {
       /** 加盟主之 user.id；舊資料若無 actorUserId 則為 null（無法進入 view-as） */
       franchiseeUserId: string | null;
@@ -1914,7 +1567,7 @@ export default function Dashboard({
         b.completedOrderCount - a.completedOrderCount ||
         a.label.localeCompare(b.label, 'zh-Hant'),
     );
-  }, [dashboardOrders, realIsAdmin, summaryRange]);
+  }, [dashboardOrders, realIsAdmin, summaryPeriod]);
 
   return (
     <div className="space-y-6">
@@ -2014,39 +1667,20 @@ export default function Dashboard({
                     直營店營運摘要
                   </button>
                 </div>
-                <details className="group w-full min-w-0 max-w-full border-t border-zinc-800/80">
-                  <summary
-                    className={cn(
-                      'flex cursor-pointer list-none items-center justify-between gap-2 py-2.5 text-left',
-                      '[&::-webkit-details-marker]:hidden',
-                    )}
-                  >
-                    <span className="min-w-0 truncate text-xs text-zinc-500">
-                      數據區間：
-                      <span className="font-medium text-amber-200/90">
-                        {summaryRangeLabel(adminFinanceSummaryRange)}
-                      </span>
+                <div className="w-full min-w-0 border-t border-zinc-800/80 pt-2.5 space-y-2">
+                  <span className="block text-xs text-zinc-500">
+                    數據區間：
+                    <span className="font-medium text-amber-200/90">
+                      {dashboardPeriodLabel(adminFinancePeriod)}
                     </span>
-                    <ChevronDown
-                      size={16}
-                      className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
-                      aria-hidden
-                    />
-                  </summary>
-                  <div className="pb-2.5 pt-0.5 w-full min-w-0 max-w-full overflow-x-hidden">
-                    <DashboardInlineSummaryRangePicker
-                      value={adminFinanceSummaryRange}
-                      onChange={setAdminFinanceSummaryRange}
-                      isNarrow={isNarrow}
-                      ariaLabel="營運數據區間"
-                      wideGapClass="gap-1"
-                      narrowTriggerClassName={ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS}
-                      narrowMenuClassName="left-0 right-0 w-full min-w-0"
-                      narrowWrapperClassName="w-full min-w-0"
-                      wideStretch
-                    />
-                  </div>
-                </details>
+                  </span>
+                  <DashboardMonthCustomRangePicker
+                    value={adminFinancePeriod}
+                    onChange={setAdminFinancePeriod}
+                    ariaLabel="營運數據區間"
+                    stretch
+                  />
+                </div>
               </div>
             </div>
 
@@ -2157,39 +1791,20 @@ export default function Dashboard({
                   {nonAdminSummary?.rangeLabel ?? '本月'}營運摘要
                 </h3>
               </div>
-              <details className="group w-full min-w-0 max-w-full shrink-0 sm:w-auto sm:min-w-[11rem] sm:max-w-[20rem]">
-                <summary
-                  className={cn(
-                    'flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-left',
-                    '[&::-webkit-details-marker]:hidden',
-                  )}
-                >
-                  <span className="min-w-0 truncate text-xs text-zinc-500">
-                    區間：
-                    <span className="font-medium text-amber-200/90">
-                      {summaryRangeLabel(summaryRange)}
-                    </span>
+              <div className="w-full min-w-0 shrink-0 sm:w-auto sm:min-w-[11rem] sm:max-w-[20rem] space-y-2">
+                <span className="block text-xs text-zinc-500">
+                  區間：
+                  <span className="font-medium text-amber-200/90">
+                    {dashboardPeriodLabel(summaryPeriod)}
                   </span>
-                  <ChevronDown
-                    size={14}
-                    className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
-                    aria-hidden
-                  />
-                </summary>
-                <div className="mt-2 w-full min-w-0 max-w-full overflow-x-hidden">
-                  <DashboardInlineSummaryRangePicker
-                    value={summaryRange}
-                    onChange={setSummaryRange}
-                    isNarrow={isNarrow}
-                    ariaLabel="營運摘要區間"
-                    wideGapClass="gap-1"
-                    narrowTriggerClassName={ADMIN_KPI_RANGE_NARROW_TRIGGER_CLASS}
-                    narrowMenuClassName="left-0 right-0 w-full min-w-0"
-                    narrowWrapperClassName="w-full min-w-0"
-                    wideStretch
-                  />
-                </div>
-              </details>
+                </span>
+                <DashboardMonthCustomRangePicker
+                  value={summaryPeriod}
+                  onChange={setSummaryPeriod}
+                  ariaLabel="營運摘要區間"
+                  stretch
+                />
+              </div>
             </div>
             <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950/35 p-4 sm:p-5">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-zinc-800/80">
@@ -2258,55 +1873,11 @@ export default function Dashboard({
           title={`本店盤點落差與呆帳（${directStallGapRangeLabel(nonAdminStallGapRange)}）`}
           summary={nonAdminStallGap}
           filterSlot={
-            <div className="space-y-2.5">
-              <StallGapQuickPresetRow
-                range={nonAdminStallGapRange}
-                onPreset={(key) => setNonAdminStallGapRange({ kind: 'preset', key })}
-                onPickCustom={() =>
-                  setNonAdminStallGapRange({
-                    kind: 'custom',
-                    startYmd: nonAdminStallGapResolvedYmd.startYmd,
-                    endYmd: nonAdminStallGapResolvedYmd.endYmd,
-                  })
-                }
-                isNarrow={isNarrow}
-              />
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-                <span className="text-[11px] text-zinc-500 shrink-0">自訂起訖</span>
-                <input
-                  type="date"
-                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
-                  value={nonAdminStallGapResolvedYmd.startYmd}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setNonAdminStallGapRange({
-                      kind: 'custom',
-                      startYmd: v,
-                      endYmd: nonAdminStallGapResolvedYmd.endYmd,
-                    });
-                  }}
-                />
-                <span className="text-zinc-600 text-xs">～</span>
-                <input
-                  type="date"
-                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
-                  value={nonAdminStallGapResolvedYmd.endYmd}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setNonAdminStallGapRange({
-                      kind: 'custom',
-                      startYmd: nonAdminStallGapResolvedYmd.startYmd,
-                      endYmd: v,
-                    });
-                  }}
-                />
-                <span className="text-[11px] text-zinc-600 tabular-nums">
-                  盤點歸屬日：{nonAdminStallGapResolvedYmd.startYmd}～{nonAdminStallGapResolvedYmd.endYmd}
-                </span>
-              </div>
-            </div>
+            <DashboardMonthCustomRangePicker
+              value={nonAdminStallGapRange}
+              onChange={setNonAdminStallGapRange}
+              ariaLabel="本店盤點落差區間"
+            />
           }
         />
       )}
@@ -2351,58 +1922,33 @@ export default function Dashboard({
                     ? '未選取：含所有已建檔營業日（可搭配下方對照星期）'
                     : `已選 ${stallSalesBoardRangeLabel(stallSalesBoardRange)}：再點一次可取消`}
                 </p>
-              <StallGapQuickPresetRow
-                range={stallSalesBoardRange}
-                options={STALL_SALES_BOARD_RANGE_OPTIONS}
-                quickLabel=""
-                allowDeselect
-                onDeselect={() => setStallSalesBoardRange({ kind: 'none' })}
-                onPreset={(key) => setStallSalesBoardRange({ kind: 'preset', key })}
-                onPickCustom={() =>
-                  setStallSalesBoardRange({
-                    kind: 'custom',
-                    startYmd: stallSalesBoardResolvedYmd.startYmd,
-                    endYmd: stallSalesBoardResolvedYmd.endYmd,
-                  })
-                }
-                isNarrow={isNarrow}
-              />
-              {stallSalesBoardRange.kind !== 'none' ? (
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-                <span className="text-xs text-zinc-400 shrink-0">自訂起訖</span>
-                <input
-                  type="date"
-                  aria-label="區間起始日"
-                  className="rounded-md border border-zinc-600 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200 tabular-nums min-h-[36px]"
-                  value={stallSalesBoardResolvedYmd.startYmd}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setStallSalesBoardRange({
-                      kind: 'custom',
-                      startYmd: v,
-                      endYmd: stallSalesBoardResolvedYmd.endYmd,
-                    });
-                  }}
-                />
-                <span className="text-zinc-600 text-xs">～</span>
-                <input
-                  type="date"
-                  aria-label="區間結束日"
-                  className="rounded-md border border-zinc-600 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200 tabular-nums min-h-[36px]"
-                  value={stallSalesBoardResolvedYmd.endYmd}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setStallSalesBoardRange({
-                      kind: 'custom',
-                      startYmd: stallSalesBoardResolvedYmd.startYmd,
-                      endYmd: v,
-                    });
-                  }}
-                />
-              </div>
-              ) : null}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+                  <button
+                    type="button"
+                    aria-pressed={stallSalesBoardRange.kind === 'none'}
+                    onClick={() => setStallSalesBoardRange({ kind: 'none' })}
+                    className={cn(
+                      'min-h-9 shrink-0 rounded-lg border px-3 text-sm font-medium transition-colors',
+                      stallSalesBoardRange.kind === 'none'
+                        ? 'border-amber-500/45 bg-amber-600/20 text-amber-200'
+                        : 'border-zinc-700 bg-zinc-950 text-zinc-400 hover:border-amber-600/35',
+                    )}
+                  >
+                    全部
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <DashboardMonthCustomRangePicker
+                      value={
+                        stallSalesBoardRange.kind === 'none'
+                          ? { kind: 'month' }
+                          : stallSalesBoardRange
+                      }
+                      onChange={(m) => setStallSalesBoardRange(m)}
+                      ariaLabel="銷售數據區間"
+                      stretch
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="border-t border-zinc-700/80 pt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2647,55 +2193,11 @@ export default function Dashboard({
           title="盤點落差與呆帳（直營）"
           summary={adminStallGapRange}
           filterSlot={
-            <div className="space-y-2.5">
-              <StallGapQuickPresetRow
-                range={directStallGapRange}
-                onPreset={(key) => setDirectStallGapRange({ kind: 'preset', key })}
-                onPickCustom={() =>
-                  setDirectStallGapRange({
-                    kind: 'custom',
-                    startYmd: directStallGapResolvedYmd.startYmd,
-                    endYmd: directStallGapResolvedYmd.endYmd,
-                  })
-                }
-                isNarrow={isNarrow}
-              />
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-                <span className="text-[11px] text-zinc-500 shrink-0">自訂起訖</span>
-                <input
-                  type="date"
-                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
-                  value={directStallGapResolvedYmd.startYmd}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setDirectStallGapRange({
-                      kind: 'custom',
-                      startYmd: v,
-                      endYmd: directStallGapResolvedYmd.endYmd,
-                    });
-                  }}
-                />
-                <span className="text-zinc-600 text-xs">～</span>
-                <input
-                  type="date"
-                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 tabular-nums"
-                  value={directStallGapResolvedYmd.endYmd}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setDirectStallGapRange({
-                      kind: 'custom',
-                      startYmd: directStallGapResolvedYmd.startYmd,
-                      endYmd: v,
-                    });
-                  }}
-                />
-                <span className="text-[11px] text-zinc-600 tabular-nums">
-                  盤點歸屬日：{directStallGapResolvedYmd.startYmd}～{directStallGapResolvedYmd.endYmd}
-                </span>
-              </div>
-            </div>
+            <DashboardMonthCustomRangePicker
+              value={directStallGapRange}
+              onChange={setDirectStallGapRange}
+              ariaLabel="直營盤點落差區間"
+            />
           }
         />
       )}
@@ -2722,7 +2224,7 @@ export default function Dashboard({
                     id="franchise-picker-title"
                     className="text-base sm:text-lg font-medium text-zinc-100"
                   >
-                    各加盟店營運概況（{summaryRangeLabel(summaryRange)}）
+                    各加盟店營運概況（{dashboardPeriodLabel(summaryPeriod)}）
                   </h3>
                   <p className="text-xs text-zinc-500 mt-0.5">
                     {franchiseStoreBreakdown.length === 0
@@ -2743,9 +2245,9 @@ export default function Dashboard({
             <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5">
               {franchiseStoreBreakdown.length === 0 ? (
                 <p className="text-sm text-zinc-500 text-center py-8">
-                  本期間（{summaryRangeLabel(summaryRange)}）尚無加盟店訂單或盤點資料可彙整。
+                  本期間（{dashboardPeriodLabel(summaryPeriod)}）尚無加盟店訂單或盤點資料可彙整。
                   <br />
-                  可關閉本視窗後切換上方時段（本日／本週／7天／30天／本月／本年）試試。
+                  可關閉本視窗後切換上方「本月」或「自訂時間」試試。
                 </p>
               ) : (
                 <>
@@ -2835,7 +2337,7 @@ export default function Dashboard({
                 <>
                   <h3 className="text-lg font-medium text-zinc-100">商品營收佔比</h3>
                   <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
-                    依訂單建單日・{summaryRangeLabel(productChartsRange)}・直營與加盟批貨
+                    依訂單建單日・{dashboardPeriodLabel(productChartsPeriod)}・直營與加盟批貨
                     <span className="text-zinc-600 ml-1">（點此展開）</span>
                   </p>
                 </>
@@ -2843,7 +2345,7 @@ export default function Dashboard({
                 <>
                   <h3 className="text-lg font-medium text-zinc-100">營收與支出佔比</h3>
                   <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
-                    依訂單建單日・{summaryRangeLabel(productChartsRange)}・本店可視訂單與收支
+                    依訂單建單日・{dashboardPeriodLabel(productChartsPeriod)}・本店可視訂單與收支
                     <span className="text-zinc-600 ml-1">（點此展開）</span>
                   </p>
                 </>
@@ -2864,16 +2366,14 @@ export default function Dashboard({
                 )}
               >
                 <p className="text-xs text-zinc-500 shrink-0">商品營收排行區間（依訂單建單日）</p>
-                <DashboardSummaryRangePicker
-                  value={productChartsRange}
-                  onChange={setProductChartsRange}
-                  isNarrow={isNarrow}
+                <DashboardMonthCustomRangePicker
+                  value={productChartsPeriod}
+                  onChange={setProductChartsPeriod}
                   ariaLabel="商品營收排行區間"
-                  wideGapClass="gap-1"
                 />
               </div>
               <div>
-                <h3 className="text-base font-medium">直營商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
+                <h3 className="text-base font-medium">直營商品營收佔比（{dashboardPeriodLabel(productChartsPeriod)}）</h3>
                 <RevenueRankingBars
                   rows={adminDirectProducts}
                   totalRevenue={adminDirectProducts.reduce((s, r) => s + r.revenue, 0)}
@@ -2884,7 +2384,7 @@ export default function Dashboard({
               </div>
               <div className="border-t border-zinc-800 pt-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="text-base font-medium">加盟批貨商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
+                  <h3 className="text-base font-medium">加盟批貨商品營收佔比（{dashboardPeriodLabel(productChartsPeriod)}）</h3>
                   <div className="flex gap-1.5 overflow-x-auto pb-0.5">
                     {adminFranchiseRevenueScopeOptions.map((opt) => (
                       <button
@@ -2925,15 +2425,13 @@ export default function Dashboard({
                 )}
               >
                 <p className="text-xs text-zinc-500 shrink-0">商品營收排行區間（依訂單建單日・本店資料）</p>
-                <DashboardSummaryRangePicker
-                  value={productChartsRange}
-                  onChange={setProductChartsRange}
-                  isNarrow={isNarrow}
+                <DashboardMonthCustomRangePicker
+                  value={productChartsPeriod}
+                  onChange={setProductChartsPeriod}
                   ariaLabel="商品營收排行區間"
-                  wideGapClass="gap-1"
                 />
               </div>
-              <h3 className="text-base font-medium">商品營收佔比（{summaryRangeLabel(productChartsRange)}）</h3>
+              <h3 className="text-base font-medium">商品營收佔比（{dashboardPeriodLabel(productChartsPeriod)}）</h3>
               <div className="flex-1">
                 <RevenueRankingBars
                   rows={topProducts.map((p) => ({ id: p.id, name: p.name, revenue: p.revenue }))}
@@ -2944,7 +2442,7 @@ export default function Dashboard({
                 />
               </div>
               <div className="border-t border-zinc-800 pt-4">
-                <h3 className="text-base font-medium">支出佔比（{summaryRangeLabel(productChartsRange)}）</h3>
+                <h3 className="text-base font-medium">支出佔比（{dashboardPeriodLabel(productChartsPeriod)}）</h3>
                 <AmountRankingBars
                   rows={nonAdminExpenseRows.map((r) => ({ id: r.id, name: r.name, amount: r.amount, pct: r.pct }))}
                   totalAmount={nonAdminExpenseRows.reduce((s, r) => s + r.amount, 0)}
@@ -2959,17 +2457,19 @@ export default function Dashboard({
         </details>
       </div>
 
-      {isAdmin && adminFinance && (
+      {isAdmin && expenseStructureFinance && (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
           <details className="group">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-amber-500/90">
                   <TrendingUp size={20} className="shrink-0" aria-hidden />
-                  <h3 className="text-lg font-medium text-zinc-100">支出結構表（本月）</h3>
+                  <h3 className="text-lg font-medium text-zinc-100">
+                    支出結構表（{dashboardPeriodLabel(expenseStructurePeriod)}）
+                  </h3>
                 </div>
                 <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
-                  依收入與支出細項加總・{adminFinance.expenseBreakdown.length} 項類別
+                  依收入與支出細項加總・{expenseStructureFinance.expenseBreakdown.length} 項類別
                   <span className="text-zinc-600 ml-1">（點此展開）</span>
                 </p>
               </div>
@@ -2978,24 +2478,31 @@ export default function Dashboard({
                 aria-hidden
               />
             </summary>
-            <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-4 border-t border-zinc-800/80">
+            <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-4 border-t border-zinc-800/80 space-y-4">
+              <div className="max-w-sm">
+                <DashboardMonthCustomRangePicker
+                  value={expenseStructurePeriod}
+                  onChange={setExpenseStructurePeriod}
+                  ariaLabel="支出結構表資料區間"
+                />
+              </div>
               <div className="rounded-xl border border-zinc-800/90 bg-zinc-950/35 p-4">
-                {adminFinance.expenseBreakdown.length === 0 ? (
+                {expenseStructureFinance.expenseBreakdown.length === 0 ? (
                   <p className="text-sm text-zinc-500 flex items-center justify-center py-10 text-center">
-                    本月尚無支出資料可供分析。
+                    {dashboardPeriodLabel(expenseStructurePeriod)}尚無支出資料可供分析。
                   </p>
                 ) : (
                   <AmountRankingBars
-                    rows={adminFinance.expenseBreakdown.map((row, idx) => ({
+                    rows={expenseStructureFinance.expenseBreakdown.map((row, idx) => ({
                       id: idx + 1,
                       name: row.name,
                       amount: row.value,
                       pct: row.pctOfExpense,
                     }))}
-                    totalAmount={adminFinance.expenseBreakdown.reduce((s, r) => s + r.value, 0)}
+                    totalAmount={expenseStructureFinance.expenseBreakdown.reduce((s, r) => s + r.value, 0)}
                     showAll
                     onToggleShowAll={() => {}}
-                    emptyText="本月尚無支出資料可供分析。"
+                    emptyText={`${dashboardPeriodLabel(expenseStructurePeriod)}尚無支出資料可供分析。`}
                     hideToggle
                   />
                 )}

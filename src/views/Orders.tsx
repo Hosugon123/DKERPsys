@@ -1,5 +1,10 @@
 import { useState, useMemo, useEffect, useCallback, useRef, type MouseEvent } from 'react';
-import { Package, CalendarDays, ChevronDown, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
+import { Package, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
+import {
+  DashboardMonthCustomRangePicker,
+  resolveDashboardPeriodYmd,
+  type DashboardPeriodMode,
+} from '../components/DashboardPeriodPicker';
 import { cn } from '../lib/utils';
 import {
   formatSlashYmdWithWeekdayFromYmd,
@@ -80,32 +85,6 @@ const STORE_TYPE_TABS: { id: StoreTypeFilter; label: string }[] = [
 
 /** 加盟店數量增加後再顯示「直營／加盟」類型篩選 */
 const SHOW_ORDERS_STORE_TYPE_FILTER = false;
-
-type DateQuickPreset = 'today' | 'week' | '30d';
-
-function todayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function addDaysToYmd(ymd: string, deltaDays: number): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + deltaDays);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-function thisWeekMonToSunBounds(): { start: string; end: string } {
-  const now = new Date();
-  const dow = now.getDay();
-  const diffToMonday = dow === 0 ? -6 : 1 - dow;
-  const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday);
-  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
-  return {
-    start: `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`,
-    end: `${sun.getFullYear()}-${String(sun.getMonth() + 1).padStart(2, '0')}-${String(sun.getDate()).padStart(2, '0')}`,
-  };
-}
 
 const ORDER_FILTER_SELECT_CLASS =
   'box-border h-9 w-full min-w-0 appearance-none rounded-lg border border-zinc-700/80 bg-zinc-950/80 pl-8 pr-3 text-xs text-zinc-300 focus:border-amber-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50';
@@ -557,9 +536,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const [storeLabelFilter, setStoreLabelFilter] = useState<string>('all');
   /** 建單星期篩選（空＝不篩選） */
   const [activeWeekdays, setActiveWeekdays] = useState<number[]>([]);
-  const [dateRangeFrom, setDateRangeFrom] = useState('');
-  const [dateRangeTo, setDateRangeTo] = useState('');
-  const [dateQuickPreset, setDateQuickPreset] = useState<DateQuickPreset | null>(null);
+  const [orderListPeriod, setOrderListPeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
   /** 出貨：兩階段確認 */
   const [shipModal, setShipModal] = useState<null | { id: string }>(null);
   /** 已出貨改回待出貨 */
@@ -717,26 +694,9 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const showStoreFilter = userRole !== 'franchisee' && storeOptions.length >= 2;
 
   const effectiveDateRange = useMemo(() => {
-    if (!dateRangeFrom || !dateRangeTo) return null;
-    let from = dateRangeFrom;
-    let to = dateRangeTo;
-    if (from > to) [from, to] = [to, from];
-    return { from, to };
-  }, [dateRangeFrom, dateRangeTo]);
-
-  const dateFilterSummaryLabel = useMemo(() => {
-    const parts: string[] = [];
-    if (effectiveDateRange) {
-      parts.push(`${ymdDashToSlash(effectiveDateRange.from)}～${ymdDashToSlash(effectiveDateRange.to)}`);
-    } else if (dateRangeFrom || dateRangeTo) {
-      parts.push('請選完整起迄');
-    }
-    if (activeWeekdays.length === 1) {
-      const wd = ['', '週一', '週二', '週三', '週四', '週五', '週六', '週日'][activeWeekdays[0]!];
-      if (wd) parts.push(wd);
-    }
-    return parts.length > 0 ? parts.join(' · ') : '全部日期';
-  }, [effectiveDateRange, dateRangeFrom, dateRangeTo, activeWeekdays]);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(orderListPeriod);
+    return { from: startYmd, to: endYmd };
+  }, [orderListPeriod]);
 
   const filteredOrders = useMemo(() => {
     const byWeekday = ordersData.filter((order) => {
@@ -766,7 +726,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       return !orderHasStallCountCompleted(o);
     });
     return byStallCount.filter((order) => {
-      if (!effectiveDateRange) return true;
       const o = rawList.find((r) => r.id === order.id);
       if (!o) return false;
       const key = effectiveOrderDateYmd(o);
@@ -795,34 +754,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       setExpandedOrderId(null);
     }
   }, [expandedOrderId, filteredOrders]);
-
-  const applyQuickToday = useCallback(() => {
-    const t = todayYmd();
-    setDateRangeFrom(t);
-    setDateRangeTo(t);
-    setDateQuickPreset('today');
-  }, []);
-
-  const applyQuickWeek = useCallback(() => {
-    const { start, end } = thisWeekMonToSunBounds();
-    setDateRangeFrom(start);
-    setDateRangeTo(end);
-    setDateQuickPreset('week');
-  }, []);
-
-  const applyQuick30Days = useCallback(() => {
-    const end = todayYmd();
-    setDateRangeTo(end);
-    setDateRangeFrom(addDaysToYmd(end, -29));
-    setDateQuickPreset('30d');
-  }, []);
-
-  const clearDateFilter = useCallback(() => {
-    setDateRangeFrom('');
-    setDateRangeTo('');
-    setActiveWeekdays([]);
-    setDateQuickPreset(null);
-  }, []);
 
   const toggleOrder = (id: string) => {
     if (expandedOrderId === id) {
@@ -1226,101 +1157,27 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
             showStoreFilter ? 'sm:grid-cols-2' : 'sm:max-w-md',
           )}
         >
-          <details className="group min-w-0 rounded-xl border border-amber-900/30 bg-zinc-950/60">
-            <summary
-              className={cn(
-                'flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-left',
-                '[&::-webkit-details-marker]:hidden',
-                (effectiveDateRange || activeWeekdays.length > 0) && 'text-amber-200/90',
-              )}
-            >
-              <span className="flex min-w-0 flex-1 items-center gap-2 text-xs text-zinc-400">
-                <CalendarDays size={15} className="shrink-0 text-amber-600/80" aria-hidden />
-                <span className="min-w-0 truncate">
-                  日期：
-                  <span className="font-medium text-amber-200/90">{dateFilterSummaryLabel}</span>
-                </span>
-              </span>
-              <ChevronDown
-                size={15}
-                className="shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180 group-open:text-amber-400"
-                aria-hidden
-              />
-            </summary>
-            <div
-              className="flex flex-col gap-3 border-t border-zinc-800/80 p-3 pt-2.5"
-              role="group"
-              aria-label="日期與建單星期"
-            >
-              <p className="text-[0.6875rem] leading-snug text-zinc-500">
-                以列表上的訂單日期篩選，起迄皆含當日。
-              </p>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(
-                  [
-                    { id: 'today' as const, label: '今天', onClick: applyQuickToday },
-                    { id: 'week' as const, label: '本週', onClick: applyQuickWeek },
-                    { id: '30d' as const, label: '近 30 天', onClick: applyQuick30Days },
-                  ] as const
-                ).map(({ id, label, onClick }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={onClick}
-                    aria-pressed={dateQuickPreset === id}
-                    className={cn(
-                      'box-border min-h-9 rounded-lg border px-1 py-1.5 text-xs font-medium transition-colors',
-                      dateQuickPreset === id
-                        ? 'border-amber-500 bg-amber-600 text-white shadow-sm shadow-amber-900/30'
-                        : 'border-zinc-700 bg-zinc-950/50 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="flex min-w-0 flex-col gap-1">
-                  <span className="text-[0.6875rem] text-zinc-500">從</span>
-                  <input
-                    type="date"
-                    value={dateRangeFrom}
-                    onChange={(e) => {
-                      setDateRangeFrom(e.target.value);
-                      setDateQuickPreset(null);
-                    }}
-                    className="box-border h-9 w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none [color-scheme:dark]"
-                    aria-label="起始日期"
-                  />
-                </label>
-                <label className="flex min-w-0 flex-col gap-1">
-                  <span className="text-[0.6875rem] text-zinc-500">至</span>
-                  <input
-                    type="date"
-                    value={dateRangeTo}
-                    onChange={(e) => {
-                      setDateRangeTo(e.target.value);
-                      setDateQuickPreset(null);
-                    }}
-                    className="box-border h-9 w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none [color-scheme:dark]"
-                    aria-label="結束日期"
-                  />
-                </label>
-              </div>
-              <OrderWeekdayFilter
-                value={activeWeekdays}
-                onChange={setActiveWeekdays}
-                className="border-zinc-800/80 bg-zinc-950/40 px-2 py-1"
-              />
+          <div className="min-w-0 rounded-xl border border-amber-900/30 bg-zinc-950/60 p-3 space-y-3">
+            <DashboardMonthCustomRangePicker
+              value={orderListPeriod}
+              onChange={setOrderListPeriod}
+              ariaLabel="訂單日期區間"
+            />
+            <OrderWeekdayFilter
+              value={activeWeekdays}
+              onChange={setActiveWeekdays}
+              className="border-zinc-800/80 bg-zinc-950/40 px-2 py-1"
+            />
+            {activeWeekdays.length > 0 ? (
               <button
                 type="button"
-                onClick={clearDateFilter}
+                onClick={() => setActiveWeekdays([])}
                 className="box-border min-h-9 w-full rounded-lg border border-zinc-600/70 bg-zinc-950/40 px-2 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500/60 hover:bg-zinc-800/90 hover:text-zinc-100"
               >
-                清除日期篩選
+                清除星期篩選
               </button>
-            </div>
-          </details>
+            ) : null}
+          </div>
 
           {showStoreFilter && (
             <>
