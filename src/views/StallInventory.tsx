@@ -434,17 +434,13 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       setRecomputeMsg('請先從清單選一筆叫貨訂單，再按「植入訂單」帶入帶出。');
       return;
     }
-    void (async () => {
-      const next = recomputeStallOutForStallYmdAndOrder(stallBasisYmd, viewOrderId, snap, { clearRemain: true });
-      setSnap(next);
-      if (viewOrder) {
-        await stallInventoryApi.saveDay(stallBasisYmd, next, stallScopeId);
-        stallBaselineRef.current = stallDaySnapshotFingerprint(next);
-      }
-      setStallListTick((n) => n + 1);
+    const next = recomputeStallOutForStallYmdAndOrder(stallBasisYmd, viewOrderId, snap, {
+      clearRemain: true,
+      persist: false,
+    });
+    setSnap(next);
       setRecomputeMsg('已帶入。剩餘貨量請逐格填寫。');
       setTimeout(() => setRecomputeMsg(null), 5000);
-    })();
   };
 
   return (

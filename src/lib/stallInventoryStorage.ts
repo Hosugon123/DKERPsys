@@ -428,7 +428,7 @@ export function recomputeStallOutForStallYmdAndOrder(
   stallYmd: string,
   orderId: string,
   editorSnap?: DaySnapshot,
-  opts?: { clearRemain?: boolean }
+  opts?: { clearRemain?: boolean; persist?: boolean }
 ): DaySnapshot {
   const o = findOrderByIdInStores(orderId);
   const scopeId = o ? resolveOrderStallStorageScopeId(o) : resolveStallStorageScopeId();
@@ -465,7 +465,9 @@ export function recomputeStallOutForStallYmdAndOrder(
     const nextRemain = clearRemain ? '' : (lines[it.id].remain ?? '');
     lines[it.id] = { out: String(nextOut), remain: nextRemain };
   }
-  saveDay(stallYmd, { ...snap, lines }, scopeId);
+  const nextSnap = { ...snap, lines };
+  if (opts?.persist === false) return nextSnap;
+  saveDay(stallYmd, nextSnap, scopeId);
   return loadDay(stallYmd, scopeId);
 }
 

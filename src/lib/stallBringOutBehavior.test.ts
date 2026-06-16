@@ -83,7 +83,11 @@ describe('stall bring-out edge cases', () => {
 
   it('舊單無 procurementDeductionBasisOrderId：植入帶出不併前一日剩餘', () => {
     seedLegacyOrderWithoutBasisField();
-    saveDay(PREV_YMD, { lines: { [PRODUCT_ID]: { out: '20', remain: '8' } }, updatedAt: 't' });
+    saveDay(PREV_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '8' } },
+      actualRevenue: '',
+      updatedAt: 't',
+    });
     saveSalesRecord(PREV_YMD, {
       lines: { [PRODUCT_ID]: { out: '20', remain: '8' } },
       actualRevenue: '1000',

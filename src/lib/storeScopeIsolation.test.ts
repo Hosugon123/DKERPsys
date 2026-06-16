@@ -18,7 +18,10 @@ const SCOPE_B = `scope:franchisee:${FR_B}`;
 const HQ_SCOPE = 'scope:hq';
 const YMD = '2026-06-10';
 
-const sessionRef = vi.hoisted(() => ({ userId: 'franchisee-a', role: 'franchisee' as const }));
+const sessionRef = vi.hoisted(() => ({
+  userId: 'franchisee-a',
+  role: 'franchisee' as 'franchisee' | 'employee',
+}));
 
 vi.mock('./authSession', () => ({
   readSession: () => ({ userId: sessionRef.userId, role: sessionRef.role }),
@@ -134,8 +137,8 @@ describe('各店帳務 scope 隔離', () => {
   });
 
   it('同日攤上日庫：各 scope 獨立', () => {
-    saveDay(YMD, { lines: { p1: { out: '1', remain: '0' } }, updatedAt: 't1' }, SCOPE_A);
-    saveDay(YMD, { lines: { p1: { out: '9', remain: '5' } }, updatedAt: 't2' }, SCOPE_B);
+    saveDay(YMD, { lines: { p1: { out: '1', remain: '0' } }, actualRevenue: '', updatedAt: 't1' }, SCOPE_A);
+    saveDay(YMD, { lines: { p1: { out: '9', remain: '5' } }, actualRevenue: '', updatedAt: 't2' }, SCOPE_B);
     expect(loadDay(YMD, SCOPE_A).lines.p1?.out).toBe('1');
     expect(loadDay(YMD, SCOPE_B).lines.p1?.out).toBe('9');
   });
