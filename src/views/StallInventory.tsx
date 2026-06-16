@@ -41,7 +41,7 @@ import {
   listUncountedCompletedProcurementOrdersForSession,
   type DaySnapshot,
 } from '../lib/stallInventoryStorage';
-import { orders as ordersApi, ledger as ledgerApi, stallInventoryApi } from '../services/apiService';
+import { orders as ordersApi, ledger as ledgerApi } from '../services/apiService';
 import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { buildStallGapLedgerDraftInput } from '../lib/procurementLedgerDraft';
 import { resolveOrderStallStorageScopeId } from '../lib/scopedStallDateKey';
@@ -118,8 +118,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const [stallCountSubmitting, setStallCountSubmitting] = useState(false);
   /** 盤點落差可選同步至流水帳 */
   const [syncGapToLedger, setSyncGapToLedger] = useState(false);
-  /** 盤點表自動儲存提示 */
-  const [autosaveHint, setAutosaveHint] = useState(false);
   /** 本場盤點鎖定之單一叫貨單：植入帶出、盤點完成押記皆針對此單。 */
   const [viewOrderId, setViewOrderId] = useState(() => restoredStall?.viewOrderId ?? '');
   const skipNextDayLoadRef = useRef(Boolean(restoredStall?.snap));
@@ -191,25 +189,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     { basisYmd: stallBasisYmd, viewOrderId, snap },
     stallDirty,
   );
-
-  const debouncedSnapForAutosave = useDebouncedValue(snap, 1500, stallDirty);
-
-  useEffect(() => {
-    if (!stallDirty || !viewOrderId || !viewOrder) return;
-    let cancelled = false;
-    void (async () => {
-      await stallInventoryApi.saveDay(stallBasisYmd, debouncedSnapForAutosave, stallScopeId, {
-        deferRemotePush: true,
-      });
-      if (cancelled) return;
-      stallBaselineRef.current = stallDaySnapshotFingerprint(debouncedSnapForAutosave);
-      setAutosaveHint(true);
-      window.setTimeout(() => setAutosaveHint(false), 2000);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedSnapForAutosave, stallDirty, viewOrderId, stallListTick, stallBasisYmd, stallScopeId, viewOrder]);
 
   useEffect(() => {
     if (!stallCountConfirmOpen) return;
@@ -474,9 +453,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       </div>
 
       {saveFlash && <p className="text-sm text-emerald-400">已寫入。</p>}
-      {autosaveHint && !saveFlash && (
-        <p className="text-xs text-zinc-500">盤點表已自動儲存至本機。</p>
-      )}
 
       <div
         className="rounded-2xl border border-amber-900/50 bg-amber-950/15 p-4"
