@@ -166,6 +166,7 @@ export const orders = {
           params.lines.map((l) => ({ productId: l.productId, qty: l.qty })),
         );
         if (Object.keys(toDeduct).length > 0) {
+          stallInventory.ensureBasisDayFromOrderSnapshot(basisOrderId);
           stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
         }
       }

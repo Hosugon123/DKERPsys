@@ -12,6 +12,7 @@ import {
   loadBasisOrderRemainForProcurementDeduction,
   recomputeStallOutForStallYmdAndOrder,
   buildProcurementRemainDeductionsFromLines,
+  ensureBasisDayFromOrderSnapshot,
   saveDay,
   applyOrderDeductionToDayRemain,
   getOrderStallCountBasisYmdForDeduction,
@@ -89,6 +90,7 @@ function simulateProcurementCheckout(params: {
       params.lines.map((l) => ({ productId: l.productId, qty: l.qty })),
     );
     if (Object.keys(toDeduct).length > 0) {
+      ensureBasisDayFromOrderSnapshot(basisOrderId);
       applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
     }
   }
@@ -585,6 +587,10 @@ describe('procurement basis after order adjustment', () => {
     expect(Number(loadStallSalesDisplayFromBasisOrder('002202606041').lines[PRODUCT_ID]?.out)).toBe(150);
     expect(Number(loadBasisOrderRemainForProcurementDeduction('002202606041').lines[PRODUCT_ID]?.remain)).toBe(11);
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, '002202606041')[PRODUCT_ID]).toBe(189);
+    ensureBasisDayFromOrderSnapshot('002202606041');
+    applyOrderDeductionToDayRemain(BASIS_YMD, { [PRODUCT_ID]: 5 }, FRANCHISE_SCOPE);
+    expect(Number(loadDayForProcurementFromOrder('002202606041').lines[PRODUCT_ID]?.remain)).toBe(6);
+    expect(Number(getSalesRecord(BASIS_YMD, FRANCHISE_SCOPE)?.lines[PRODUCT_ID]?.remain)).toBe(6);
   });
 
   it('扣盤點剩：僅扣同 scope 已送單之扣庫量，不含總部單', () => {

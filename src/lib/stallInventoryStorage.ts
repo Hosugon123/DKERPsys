@@ -131,6 +131,52 @@ function dayLineRevisionKey(l: DayLine | undefined): string {
   return `${String(l?.out ?? '').trim()}\u001f${String(l?.remain ?? '').trim()}`;
 }
 
+function dayLineUpdatedMs(line: DayLine | undefined): number {
+  const t = Date.parse(String(line?.updatedAt ?? ''));
+  return Number.isFinite(t) ? t : 0;
+}
+
+function dayLineQtyScore(line: DayLine | undefined): number {
+  if (!line) return -1;
+  return Math.abs(num(line.out)) + Math.abs(num(line.remain));
+}
+
+function chooseCatalogDayLine(
+  lines: DaySnapshot['lines'],
+  productId: string,
+  productName: string,
+): DayLine {
+  const candidates: DayLine[] = [];
+  const direct = lines[productId];
+  if (direct) candidates.push(direct);
+  for (const [key, line] of Object.entries(lines)) {
+    if (key === productId) continue;
+    if (key === productName || getSupplyItem(key)?.name === productName) {
+      candidates.push(line);
+    }
+  }
+  if (candidates.length === 0) return { out: '', remain: '' };
+  return candidates.reduce((best, cur) => {
+    const bestMs = dayLineUpdatedMs(best);
+    const curMs = dayLineUpdatedMs(cur);
+    if (curMs !== bestMs) return curMs > bestMs ? cur : best;
+    return dayLineQtyScore(cur) > dayLineQtyScore(best) ? cur : best;
+  });
+}
+
+function catalogDayLineKeysForProduct(lines: DaySnapshot['lines'], productId: string): string[] {
+  const keys = new Set<string>([productId]);
+  const item = getSupplyItem(productId);
+  if (!item) return Array.from(keys);
+  for (const key of Object.keys(lines)) {
+    if (key === productId) continue;
+    if (key === item.name || getSupplyItem(key)?.name === item.name) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys);
+}
+
 function stampChangedDayLines(
   nextLines: DaySnapshot['lines'],
   prevLines: DaySnapshot['lines'] | undefined,
@@ -167,7 +213,7 @@ function stampChangedDayFields(
 function mergeDayWithCurrentCatalog(snap: DaySnapshot): DaySnapshot {
   const lines: DaySnapshot['lines'] = { ...snap.lines };
   for (const it of getAllSupplyItems()) {
-    if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
+    lines[it.id] = chooseCatalogDayLine(lines, it.id, it.name);
   }
   const gapAmt = (snap.revenueGapAmount ?? '').trim();
   return {
@@ -247,7 +293,7 @@ export function applyOrderDeductionToDayRemain(
   scopeId?: string,
 ) {
   const s = loadAll();
-  const prev = readStallDay(s, ymdStr, scopeId) ?? emptyDay();
+  const prev = mergeDayWithCurrentCatalog(readStallDay(s, ymdStr, scopeId) ?? emptyDay());
   const lines = { ...prev.lines } as DaySnapshot['lines'];
   const now = new Date().toISOString();
   for (const it of getAllSupplyItems()) {
@@ -256,10 +302,13 @@ export function applyOrderDeductionToDayRemain(
   for (const [id, rawQty] of Object.entries(deductions)) {
     const qty = roundProcurementQty(Number(rawQty) || 0);
     if (qty <= 0) continue;
+    const keys = catalogDayLineKeysForProduct(lines, id);
     if (!lines[id]) lines[id] = { out: '', remain: '' };
     const cur = num(lines[id].remain);
     const next = roundProcurementQty(Math.max(0, cur - qty));
-    lines[id] = { ...lines[id], remain: String(next), updatedAt: now };
+    for (const key of keys) {
+      lines[key] = { ...(lines[key] ?? lines[id]), remain: String(next), updatedAt: now };
+    }
   }
   const snap: DaySnapshot = {
     ...prev,
@@ -874,6 +923,15 @@ export function syncBasisDayFromOrderSnapshot(orderId: string): void {
     },
     scopeId,
   );
+}
+
+export function ensureBasisDayFromOrderSnapshot(orderId: string): void {
+  const o = findOrderByIdInStores(orderId);
+  const basisYmd = o?.stallCountBasisYmd?.trim();
+  if (!o || !basisYmd || !o.stallCountSnapshot) return;
+  const scopeId = resolveOrderStallStorageScopeId(o);
+  if (getSalesRecord(basisYmd, scopeId)) return;
+  syncBasisDayFromOrderSnapshot(orderId);
 }
 
 export type CommitStallInventoryCompleteResult =

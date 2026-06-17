@@ -113,6 +113,22 @@ function chooseCatalogLine(
   });
 }
 
+function catalogLineKeysForProduct(
+  lines: Record<string, SalesRecordDayLine>,
+  productId: string,
+): string[] {
+  const keys = new Set<string>([productId]);
+  const item = getSupplyItem(productId);
+  if (!item) return Array.from(keys);
+  for (const key of Object.keys(lines)) {
+    if (key === productId) continue;
+    if (key === item.name || getSupplyItem(key)?.name === item.name) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys);
+}
+
 function mergeSnapshotWithCatalog(snap: SalesRecordDaySnapshot): SalesRecordDaySnapshot {
   const lines: Record<string, SalesRecordDayLine> = { ...snap.lines };
   for (const it of getAllSupplyItems()) {
@@ -308,10 +324,13 @@ export function applySalesRecordOrderDeduction(
   for (const [id, rawQty] of Object.entries(deductions)) {
     const qty = roundProcurementQty(Number(rawQty) || 0);
     if (qty <= 0) continue;
+    const keys = catalogLineKeysForProduct(lines, id);
     if (!lines[id]) lines[id] = { out: '', remain: '' };
     const cur = num(lines[id].remain);
     const next = roundProcurementQty(Math.max(0, cur - qty));
-    lines[id] = { ...lines[id], remain: String(next), updatedAt: now };
+    for (const key of keys) {
+      lines[key] = { ...(lines[key] ?? lines[id]), remain: String(next), updatedAt: now };
+    }
   }
   writeRow(
     s,
