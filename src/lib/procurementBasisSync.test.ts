@@ -207,19 +207,41 @@ describe('procurement basis after order adjustment', () => {
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 10 }, ORDER_ID)[PRODUCT_ID]).toBe(3);
   });
 
-  it('扣盤點剩：即時 remain 為 0（已扣庫）時不採凍結快照', () => {
+  it('扣盤點剩：即時 remain 為 0（已透過叫貨單扣庫）時池子用盡', () => {
     seedCompletedOrderWithSnapshot(10);
     saveSalesRecord(BASIS_YMD, {
-      lines: { [PRODUCT_ID]: { out: '20', remain: '0' } },
+      lines: { [PRODUCT_ID]: { out: '20', remain: '10' } },
       actualRevenue: '5000',
-      updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
     });
     saveDay(BASIS_YMD, {
-      lines: { [PRODUCT_ID]: { out: '20', remain: '0' } },
+      lines: { [PRODUCT_ID]: { out: '20', remain: '10' } },
       actualRevenue: '5000',
-      updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    simulateProcurementCheckout({
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', unitPrice: 100, qty: 10, unit: '隻' }],
+      totalAmount: 1000,
+      orderDateYmd: '2026-06-15',
+      procurementDeductionBasisOrderId: ORDER_ID,
     });
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 10 }, ORDER_ID)[PRODUCT_ID]).toBe(10);
+  });
+
+  it('扣盤點剩：即時 remain 為 0 但凍結快照仍有餘且尚無叫貨扣庫（黑輪情境）', () => {
+    seedCompletedOrderWithSnapshot(11);
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '150', remain: '0' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    saveDay(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '150', remain: '0' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(11);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
   });
 
   it('扣盤點剩：銷售紀錄為 0 但攤上日庫仍有餘時可扣減', () => {

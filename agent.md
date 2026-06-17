@@ -29,6 +29,27 @@ S0 守門規則：
 - 每次碰到 S0，至少跑 `npm run lint`、相關 vitest、`npm test`、`npm run build`。若因時間限制不能全跑，必須明確告知未跑項目，且不得把高風險改動說成已完整驗證。
 - 必須補或更新回歸測試；測試要覆蓋真實業務語意，而不是只測函式有回傳。
 
+### 0.2 測試與正式環境驗證（必守）
+
+**原則：以線上正式版為驗證基準，但絕不可污染正式資料。**
+
+- **正式環境 URL**：`https://dksys.vercel.app/`（部署完成後以 `build-version.json` 的 `buildId` 確認是否為目標 commit）。
+- **預設流程**（S0／叫貨扣餘／盤點／同步相關改動必做）：
+  1. 先跑本機 **vitest 回歸**（`localStorage` mock、隔離環境，見下方「允許」）。
+  2. 再對正式版做 **唯讀煙霧檢查**（見下方「允許」），確認 build 已上線、關鍵靜態資源可載入。
+  3. 若需確認 UI 行為，僅做 **不送出、不儲存** 的瀏覽檢查；不得在未隔離環境對正式站執行叫貨送出、盤點完成、刪單、匯入 bundle 等寫入。
+- **允許（不影響正式資料庫／Redis bundle）**：
+  - 本機 `vitest`／`npm test`（mock、`beforeEach` 清空 `localStorage`，不帶正式 `VITE_API_SYNC_TOKEN`）。
+  - 對正式站 **GET**：首頁、`/build-version.json`、靜態 `assets/*`（只讀）。
+  - 正式站登入後 **僅瀏覽、不點送出**：例如打開批貨頁確認扣餘按鈕狀態、帳上售出數字是否顯示（不修改購物車、不送出訂單）。
+- **禁止（會寫入或覆蓋正式資料）**：
+  - 對 `https://dksys.vercel.app/api/sync-bundle` 或任何正式 API 發 **PUT／POST／DELETE**（含測試用 token 推送 bundle）。
+  - 在正式站執行：送出叫貨、盤點完成、改單儲存、刪除訂單、數據中心匯入、流水帳新增等 **任何持久化寫入**。
+  - 使用正式環境的 `VITE_API_SYNC_TOKEN`／`REDIS_URL` 跑自動化腳本或「順手修資料」。
+  - 以正式站為目標跑會觸發 `withRemoteStorageWrite` 且未 mock 的整合測試。
+- **若必須驗證遠端同步行為**：僅能使用 **本機 remote 模式 + 測試用後端／測試 token**，或 **Staging**；不得拿正式 Redis 當測試場。
+- **回報時**應註明：本機 vitest 結果、正式版 `buildId`、是否僅唯讀檢查正式站（勿宣稱「已在正式環境完整 E2E 送單」除非使用者本人於隔離流程下操作）。
+
 S0 常用回歸測試線索：
 
 - 叫貨/扣剩餘：`procurementBasisSync.test.ts`、`procurementBasisVisibility.test.ts`、`stallBringOutBehavior.test.ts`
@@ -250,6 +271,7 @@ S0 常用回歸測試線索：
 5. 遠端模式：高頻寫入是否該用 **`deferRemotePush`**？關鍵提交是否該 **批次寫入**？
 6. 跨模組流程（叫貨→盤點→銷售）是否仍 **三庫一致**？
 7. `npm run lint` 是否通過？有意義的領域變更是否補測試（`vitest`）？
+8. S0 相關改動是否依 §0.2 完成：**本機 vitest + 正式版唯讀煙霧**（未對正式 bundle 寫入）？
 
 ---
 
@@ -281,6 +303,15 @@ npm test          # 或 npm test -- path/to.test.ts
 npm run dev       # port 3000
 ```
 
+**正式環境唯讀煙霧（可選，S0 建議做）**：
+
+```bash
+# 確認正式版 build 是否為預期 commit（唯讀 GET）
+curl -s https://dksys.vercel.app/build-version.json
+```
+
+勿對正式站 `/api/sync-bundle` 做 PUT 或帶正式 token 寫入。詳 §0.2。
+
 遠端模式需對應環境變數與後端 `/api/sync-bundle`；見部署設定。
 
 ---
@@ -288,6 +319,12 @@ npm run dev       # port 3000
 ## 10. 近期改動紀錄（新在上）
 
 > **AI 代理**：完成重要改動後請在此新增一筆；人類換裝置時先看這裡。
+
+### 2026-06-17｜測試策略：以正式版為準、禁止污染正式資料
+
+- **規則**：S0 改動驗證以 `https://dksys.vercel.app/` 為行為基準；本機 vitest 回歸後，對正式站僅允許唯讀煙霧（`build-version.json`、靜態資源、不送出的 UI 瀏覽）。
+- **禁止**：對正式 `/api/sync-bundle` 或正式 Redis 做任何寫入；不得在正式站執行送單、盤點完成、匯入等持久化操作作為自動測試。
+- **位置**：`agent.md` §0.2、§8、§9.3
 
 ### 2026-06-03｜送單／改貨量／盤點／銷售調整 — scope 與雙庫徹底修復
 

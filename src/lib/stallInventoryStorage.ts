@@ -385,15 +385,33 @@ export function loadBasisOrderRemainForProcurementDeduction(orderId: string): Da
   }
   const live = loadDayForProcurementFromOrder(orderId);
   const frozen = loadStallSalesDisplayFromBasisOrder(orderId);
+  const deducted = totalRemainDeductedAgainstBasisOrder(orderId);
   const lines: DaySnapshot['lines'] = { ...live.lines };
   for (const it of getAllSupplyItems()) {
     const liveLine = live.lines[it.id] ?? { out: '', remain: '' };
     const frozenLine = frozen.lines[it.id] ?? { out: '', remain: '' };
-    let remain = liveLine.remain ?? '';
-    if (!isStallRemainEntryValid(remain) && isStallRemainEntryValid(frozenLine.remain)) {
-      remain = frozenLine.remain ?? '';
+    const liveRemainRaw = liveLine.remain ?? '';
+    const liveR = isStallRemainEntryValid(liveRemainRaw)
+      ? roundProcurementQty(num(liveRemainRaw))
+      : 0;
+    const frozenR = isStallRemainEntryValid(frozenLine.remain)
+      ? roundProcurementQty(num(frozenLine.remain))
+      : 0;
+    const poolRemain = roundProcurementQty(Math.max(0, frozenR - (deducted[it.id] ?? 0)));
+
+    let effective = liveR;
+    if (!isStallRemainEntryValid(liveRemainRaw) && poolRemain > 0) {
+      effective = poolRemain;
+    } else if (liveR > 0) {
+      effective = liveR;
+    } else {
+      effective = poolRemain;
     }
-    lines[it.id] = { ...(lines[it.id] ?? liveLine), remain };
+
+    lines[it.id] = {
+      ...(lines[it.id] ?? liveLine),
+      remain: String(effective),
+    };
   }
   return mergeDayWithCurrentCatalog({ ...live, lines });
 }
