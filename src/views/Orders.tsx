@@ -247,13 +247,6 @@ function computeOrderDetailLineMetrics(
   const frozenR = Number(stallSnap?.frozenRetailUnitPriceByItem?.[line.productId]);
   const item = getSupplyItem(line.productId, supplyRetailView);
   const legacyPid = String(line.productId).startsWith('legacy-');
-  const carryRemainQty =
-    carrySnapForDisplay && !legacyPid
-      ? Math.max(
-          0,
-          roundProcurementQty(num(carrySnapForDisplay.lines[line.productId]?.remain)),
-        )
-      : null;
   const orderQtyRounded = roundProcurementQty(Number(line.qty) || 0);
   let c = item
     ? computeLine(rowSnap?.out ?? '', rowSnap?.remain ?? '', item, {
@@ -268,6 +261,15 @@ function computeOrderDetailLineMetrics(
       soldRevenue: c.sold * frozenR,
     };
   }
+  const carryRemainQty =
+    hasRowSnap && c
+      ? c.remain
+      : carrySnapForDisplay && !legacyPid
+        ? Math.max(
+            0,
+            roundProcurementQty(num(carrySnapForDisplay.lines[line.productId]?.remain)),
+          )
+        : null;
   const plannedBringOutQty =
     carryRemainQty !== null
       ? roundProcurementQty(carryRemainQty + orderQtyRounded)

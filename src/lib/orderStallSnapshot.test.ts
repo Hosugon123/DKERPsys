@@ -4,6 +4,12 @@ import {
   stallCountSnapshotPersistedMatches,
   updateStallCountSnapshotByOrderId,
 } from './orderHistoryStorage';
+import {
+  cartAfterDeductingStallRemainFromOrder,
+  loadDayForProcurementFromOrder,
+  syncBasisDayFromOrderSnapshot,
+} from './stallInventoryStorage';
+import { getSalesRecord } from './salesRecordStorage';
 import type { SalesRecordDaySnapshot } from './salesRecordStorage';
 
 vi.mock('./dataScope', () => ({
@@ -81,5 +87,24 @@ describe('updateStallCountSnapshotByOrderId', () => {
       localStorage.getItem('dongshan_franchise_mgmt_orders_v1') ?? '[]',
     ) as { stallCountSnapshot?: SalesRecordDaySnapshot }[];
     expect(stallCountSnapshotPersistedMatches(mgmtRows[0]?.stallCountSnapshot, next)).toBe(true);
+  });
+
+  it('銷售紀錄調整後同步訂單快照、基準日與叫貨扣剩餘依據', () => {
+    localStorage.setItem('dongshan_order_history_v1', JSON.stringify([{ ...baseOrder(), actorRole: 'employee' }]));
+    localStorage.setItem('dongshan_franchise_mgmt_orders_v1', JSON.stringify([]));
+    const next: SalesRecordDaySnapshot = {
+      lines: { p1: { out: '5', remain: '3' } },
+      actualRevenue: '9999',
+      updatedAt: '2026-06-03T13:00:00.000Z',
+    };
+
+    expect(updateStallCountSnapshotByOrderId(ORDER_ID, next).ok).toBe(true);
+    syncBasisDayFromOrderSnapshot(ORDER_ID);
+
+    const orderSnap = readMergedOrderByIdFromStores(ORDER_ID)?.stallCountSnapshot;
+    expect(stallCountSnapshotPersistedMatches(orderSnap, next)).toBe(true);
+    expect(Number(getSalesRecord(BASIS_YMD)?.lines.p1?.remain)).toBe(3);
+    expect(Number(loadDayForProcurementFromOrder(ORDER_ID).lines.p1?.remain)).toBe(3);
+    expect(cartAfterDeductingStallRemainFromOrder({ p1: 10 }, ORDER_ID).p1).toBe(7);
   });
 });
