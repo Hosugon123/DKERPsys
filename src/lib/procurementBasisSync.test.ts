@@ -502,4 +502,97 @@ describe('procurement basis after order adjustment', () => {
     expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(11);
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
   });
+
+  it('扣盤點剩：加盟 scope 快照 id 列 remain=0 但品名 key 仍有餘', () => {
+    const FRANCHISE_SCOPE = 'scope:franchisee:fr-basis-1';
+    const base = {
+      id: ORDER_ID,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 1,
+      lines: [
+        {
+          productId: PRODUCT_ID,
+          name: '測試品項',
+          qty: 10,
+          unitPrice: 100,
+          unit: '隻',
+        },
+      ],
+      actorRole: 'franchisee' as const,
+      scopeId: FRANCHISE_SCOPE,
+      actorUserId: 'fr-basis-1',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: {
+          [PRODUCT_ID]: { out: '', remain: '0' },
+          '測試品項': { out: '150', remain: '11' },
+        },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    localStorage.setItem('dongshan_order_history_v1', JSON.stringify([base]));
+    saveSalesRecord(
+      BASIS_YMD,
+      {
+        lines: { [PRODUCT_ID]: { out: '150', remain: '0' } },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+      FRANCHISE_SCOPE,
+    );
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(11);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
+  });
+
+  it('扣盤點剩：僅扣同 scope 已送單之扣庫量，不含總部單', () => {
+    const FRANCHISE_SCOPE = 'scope:franchisee:fr-basis-2';
+    const franchiseBasis = {
+      id: ORDER_ID,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 1,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 10, unitPrice: 100, unit: '隻' }],
+      actorRole: 'franchisee' as const,
+      scopeId: FRANCHISE_SCOPE,
+      actorUserId: 'fr-basis-2',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: { [PRODUCT_ID]: { out: '20', remain: '11' } },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    const hqChild = {
+      id: 'hq-child-against-franchise-basis',
+      createdAt: `${BASIS_YMD}T22:00:00.000Z`,
+      orderDateYmd: '2026-06-16',
+      updatedAt: `${BASIS_YMD}T22:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 500,
+      payableAmount: 500,
+      itemCount: 11,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 11, unitPrice: 100, unit: '隻' }],
+      actorRole: 'admin' as const,
+      scopeId: 'scope:hq',
+      procurementDeductionBasisOrderId: ORDER_ID,
+    };
+    localStorage.setItem('dongshan_order_history_v1', JSON.stringify([franchiseBasis, hqChild]));
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(11);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
+  });
 });

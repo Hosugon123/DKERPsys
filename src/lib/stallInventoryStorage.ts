@@ -375,28 +375,55 @@ export function loadStallSalesDisplayFromBasisOrder(orderId: string): DaySnapsho
   return loadDayForProcurementFromOrder(orderId);
 }
 
+function frozenLineHasLedgerQty(line: { out: string; remain: string } | undefined): boolean {
+  if (!line) return false;
+  if (num(line.out) > 0) return true;
+  return isStallRemainEntryValid(line.remain) && num(line.remain) > 0;
+}
+
 function resolveFrozenLineForItem(
   snap: DaySnapshot,
   productId: string,
 ): { out: string; remain: string } {
   const direct = snap.lines[productId];
-  if (direct && (isStallRemainEntryValid(direct.remain) || num(direct.out) > 0)) {
-    return direct;
+  if (frozenLineHasLedgerQty(direct)) {
+    return direct!;
   }
   const item = getSupplyItem(productId);
   if (item) {
     for (const [key, line] of Object.entries(snap.lines)) {
       if (key === productId) continue;
-      if (key === item.name && (isStallRemainEntryValid(line.remain) || num(line.out) > 0)) {
+      if (key === item.name && frozenLineHasLedgerQty(line)) {
         return line;
       }
       const keyed = getSupplyItem(key);
-      if (keyed?.name === item.name && (isStallRemainEntryValid(line.remain) || num(line.out) > 0)) {
+      if (keyed?.name === item.name && frozenLineHasLedgerQty(line)) {
         return line;
       }
     }
   }
   return direct ?? { out: '', remain: '' };
+}
+
+/** 快照是否含可讀之帳上售出／剩餘（非僅目錄合併空列）。 */
+function orderHasUsableStallCountSnapshot(o: OrderHistoryEntry | null): boolean {
+  if (!o?.stallCountSnapshot) return false;
+  const merged = mergeSalesRecordWithCatalog(o.stallCountSnapshot);
+  const lines: DaySnapshot['lines'] = { ...merged.lines };
+  for (const it of getAllSupplyItems()) {
+    if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
+  }
+  const frozen = mergeDayWithCurrentCatalog({
+    lines,
+    actualRevenue: merged.actualRevenue,
+    updatedAt: merged.updatedAt,
+    revenueGapAmount: merged.revenueGapAmount,
+    revenueGapReason: merged.revenueGapReason,
+  });
+  for (const it of getAllSupplyItems()) {
+    if (frozenLineHasLedgerQty(resolveFrozenLineForItem(frozen, it.id))) return true;
+  }
+  return false;
 }
 
 function frozenRemainQtyForItem(snap: DaySnapshot, productId: string): number {
@@ -426,7 +453,7 @@ export function loadBasisOrderRemainForProcurementDeduction(orderId: string): Da
   const live = loadDayForProcurementFromOrder(orderId);
   const frozen = loadStallSalesDisplayFromBasisOrder(orderId);
   const deducted = totalRemainDeductedAgainstBasisOrder(orderId);
-  const hasSnapshot = Boolean(basisOrder?.stallCountSnapshot);
+  const hasSnapshot = orderHasUsableStallCountSnapshot(basisOrder);
   const lines: DaySnapshot['lines'] = { ...live.lines };
   for (const it of getAllSupplyItems()) {
     const liveLine = live.lines[it.id] ?? { out: '', remain: '' };
@@ -497,6 +524,8 @@ function totalRemainDeductedAgainstBasisOrder(
   basisOrderId: string,
   excludeOrderId?: string,
 ): Record<string, number> {
+  const basisOrder = findOrderByIdInStores(basisOrderId);
+  const basisScope = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : '';
   const frozen = loadStallSalesDisplayFromBasisOrder(basisOrderId);
   const pool: Record<string, number> = {};
   for (const it of getAllSupplyItems()) {
@@ -507,7 +536,8 @@ function totalRemainDeductedAgainstBasisOrder(
       (o) =>
         o.id !== basisOrderId.trim() &&
         o.procurementDeductionBasisOrderId?.trim() === basisOrderId.trim() &&
-        o.status !== '已取消',
+        o.status !== '已取消' &&
+        (!basisScope || resolveOrderStallStorageScopeId(o) === basisScope),
     )
     .filter((o) => !excludeOrderId || o.id !== excludeOrderId)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
