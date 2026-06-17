@@ -1,5 +1,5 @@
 import { getAllSupplyItems, getSupplyItem, isConsumableItem } from './supplyCatalog';
-import { num, soldFromRow, aggregateStallKpis, roundProcurementQty } from './stallMath';
+import { num, soldFromRow, aggregateStallKpis, roundProcurementQty, isStallRemainEntryValid } from './stallMath';
 import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
@@ -362,6 +362,29 @@ export function loadStallSalesDisplayFromBasisOrder(orderId: string): DaySnapsho
   return loadDayForProcurementFromOrder(orderId);
 }
 
+/**
+ * 批貨「扣盤點剩」用：以參考單即時剩餘為準；若銷售紀錄該品項尚未填 remain，
+ * 則退回訂單凍結快照（與帳上售出顯示一致），避免可見有餘但扣減無效。
+ */
+export function loadBasisOrderRemainForProcurementDeduction(orderId: string): DaySnapshot {
+  if (!orderId) {
+    return mergeDayWithCurrentCatalog(emptyDay());
+  }
+  const live = loadDayForProcurementFromOrder(orderId);
+  const frozen = loadStallSalesDisplayFromBasisOrder(orderId);
+  const lines: DaySnapshot['lines'] = { ...live.lines };
+  for (const it of getAllSupplyItems()) {
+    const liveLine = live.lines[it.id] ?? { out: '', remain: '' };
+    const frozenLine = frozen.lines[it.id] ?? { out: '', remain: '' };
+    let remain = liveLine.remain ?? '';
+    if (!isStallRemainEntryValid(remain) && isStallRemainEntryValid(frozenLine.remain)) {
+      remain = frozenLine.remain ?? '';
+    }
+    lines[it.id] = { ...(lines[it.id] ?? liveLine), remain };
+  }
+  return mergeDayWithCurrentCatalog({ ...live, lines });
+}
+
 /** 寫入扣庫時使用的攤上儲存鍵＝該筆盤點之曆法盤點日 */
 export function getOrderStallCountBasisYmdForDeduction(orderId: string): string | null {
   if (!orderId) return null;
@@ -397,6 +420,7 @@ function findOrderByIdInStores(orderId: string): OrderHistoryEntry | null {
         stallCountBasisYmd: merged.stallCountBasisYmd,
         stallCountCompletedAt: merged.stallCountCompletedAt,
         stallCountSnapshot: merged.stallCountSnapshot,
+        procurementDeductionBasisOrderId: merged.procurementDeductionBasisOrderId,
       };
 }
 
@@ -1002,7 +1026,7 @@ export function cartAfterDeductingStallRemainFromOrder(
   baseQuantities: Record<string, number>,
   orderId: string
 ): Record<string, number> {
-  const day = loadDayForProcurementFromOrder(orderId);
+  const day = loadBasisOrderRemainForProcurementDeduction(orderId);
   return cartAfterDeductingStallRemainFromSnapshot(baseQuantities, day);
 }
 

@@ -9,11 +9,18 @@ import {
   loadDayForProcurement,
   loadDayForProcurementFromOrder,
   loadStallSalesDisplayFromBasisOrder,
+  loadBasisOrderRemainForProcurementDeduction,
   recomputeStallOutForStallYmdAndOrder,
   applyOrderDeductionToDayRemain,
+  getOrderStallCountBasisYmdForDeduction,
   syncBasisDayFromOrderSnapshot,
 } from './stallInventoryStorage';
-import { saveSalesRecord } from './salesRecordStorage';
+import { getSalesRecord, saveSalesRecord } from './salesRecordStorage';
+import {
+  appendProcurementOrderEntry,
+  readMergedOrderByIdFromStores,
+} from './orderHistoryStorage';
+import { resolveOrderStallStorageScopeId } from './scopedStallDateKey';
 
 const PRODUCT_ID = 'test-duck-1';
 
@@ -50,8 +57,41 @@ vi.mock('./sessionActorDisplayName', () => ({
   resolveUserDisplayNameById: () => '測試員',
 }));
 
+vi.mock('./storeCodeStorage', () => ({
+  getStoreCode3: () => '001',
+  normalizeStoreCode3Digits: (s: string) => s,
+}));
+
+let orderSeq = 0;
+vi.mock('./orderSerialId', () => ({
+  allocateOrderSerialId: () => `PROC-TEST-${++orderSeq}`,
+}));
+
 const ORDER_ID = 'order-basis-test-1';
 const BASIS_YMD = '2026-05-20';
+
+/** 模擬 apiService.appendProcurementOrderEntry 之扣庫＋建單 */
+function simulateProcurementCheckout(params: {
+  lines: { productId: string; name: string; unitPrice: number; qty: number; unit: string }[];
+  totalAmount: number;
+  orderDateYmd: string;
+  procurementDeductionBasisOrderId?: string;
+}) {
+  const basisOrderId = params.procurementDeductionBasisOrderId?.trim() ?? '';
+  const basisYmd = getOrderStallCountBasisYmdForDeduction(basisOrderId);
+  if (basisYmd) {
+    const toDeduct: Record<string, number> = {};
+    for (const line of params.lines) toDeduct[line.productId] = line.qty;
+    const basisOrder = basisOrderId ? readMergedOrderByIdFromStores(basisOrderId) : null;
+    const scopeId = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : undefined;
+    applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+  }
+  return appendProcurementOrderEntry({
+    ...params,
+    payableAmount: params.totalAmount,
+    actorRole: 'admin',
+  });
+}
 
 function seedCompletedOrderWithSnapshot(remain: number) {
   const raw = localStorage.getItem('dongshan_franchise_mgmt_orders_v1');
@@ -91,6 +131,7 @@ function seedCompletedOrderWithSnapshot(remain: number) {
 
 describe('procurement basis after order adjustment', () => {
   beforeEach(() => {
+    orderSeq = 0;
     localStorage.clear();
     localStorage.setItem('dongshan_stall_inventory_v1', JSON.stringify({ version: 1, byDate: {} }));
     localStorage.setItem('dongshan_sales_records_v1', JSON.stringify({ version: 1, byDate: {} }));
@@ -147,6 +188,27 @@ describe('procurement basis after order adjustment', () => {
     });
     expect(Number(loadDayForProcurementFromOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(0);
     expect(Number(loadStallSalesDisplayFromBasisOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(10);
+  });
+
+  it('扣盤點剩：即時 remain 未填時退回凍結快照', () => {
+    seedCompletedOrderWithSnapshot(7);
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
+    });
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(7);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 10 }, ORDER_ID)[PRODUCT_ID]).toBe(3);
+  });
+
+  it('扣盤點剩：即時 remain 為 0（已扣庫）時不採凍結快照', () => {
+    seedCompletedOrderWithSnapshot(10);
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '0' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
+    });
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 10 }, ORDER_ID)[PRODUCT_ID]).toBe(10);
   });
 
   it('植入帶出：扣庫後參考剩餘＋叫貨，不重複加凍結快照', () => {
@@ -278,5 +340,75 @@ describe('procurement basis after order adjustment', () => {
       persist: false,
     });
     expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(8);
+  });
+
+  it('完整流程（回歸）：銷售紀錄 remain 未填→常用扣餘→送單扣庫→植入帶出', () => {
+    const NEXT_YMD = '2026-06-15';
+    const FAVORITE_QTY = 250;
+    const SNAPSHOT_REMAIN = 57;
+    const EXPECTED_CART = FAVORITE_QTY - SNAPSHOT_REMAIN;
+
+    seedCompletedOrderWithSnapshot(SNAPSHOT_REMAIN);
+
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '250', remain: '' } },
+      actualRevenue: '7558',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+
+    expect(Number(loadStallSalesDisplayFromBasisOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(
+      SNAPSHOT_REMAIN,
+    );
+    expect(Number(loadDayForProcurementFromOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(0);
+    expect(
+      Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain),
+    ).toBe(SNAPSHOT_REMAIN);
+
+    const favoriteCart = cartAfterDeductingStallRemainFromOrder(
+      { [PRODUCT_ID]: FAVORITE_QTY },
+      ORDER_ID,
+    );
+    expect(favoriteCart[PRODUCT_ID]).toBe(EXPECTED_CART);
+
+    const manualCart = cartAfterDeductingStallRemainFromOrder(
+      { [PRODUCT_ID]: FAVORITE_QTY },
+      ORDER_ID,
+    );
+    expect(manualCart[PRODUCT_ID]).toBe(EXPECTED_CART);
+
+    const newOrderId = simulateProcurementCheckout({
+      lines: [
+        {
+          productId: PRODUCT_ID,
+          name: '測試品項',
+          unitPrice: 100,
+          qty: EXPECTED_CART,
+          unit: '隻',
+        },
+      ],
+      totalAmount: EXPECTED_CART * 100,
+      orderDateYmd: NEXT_YMD,
+      procurementDeductionBasisOrderId: ORDER_ID,
+    });
+
+    expect(Number(loadDayForProcurementFromOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(0);
+    expect(Number(getSalesRecord(BASIS_YMD)?.lines[PRODUCT_ID]?.remain)).toBe(0);
+    expect(Number(readMergedOrderByIdFromStores(ORDER_ID)?.stallCountSnapshot?.lines[PRODUCT_ID]?.remain)).toBe(
+      SNAPSHOT_REMAIN,
+    );
+
+    const breakdown = computeStallOutImportBreakdown(NEXT_YMD, newOrderId);
+    const row = breakdown?.rows.find((r) => r.productId === PRODUCT_ID);
+    expect(breakdown?.chainsPriorStallRemain).toBe(true);
+    expect(breakdown?.carrySource).toEqual({ kind: 'basis_order', orderId: ORDER_ID });
+    expect(row?.prevRemain).toBe(0);
+    expect(row?.orderQty).toBe(EXPECTED_CART);
+    expect(row?.suggestedOut).toBe(EXPECTED_CART);
+
+    const implanted = recomputeStallOutForStallYmdAndOrder(NEXT_YMD, newOrderId, undefined, {
+      clearRemain: true,
+      persist: false,
+    });
+    expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(EXPECTED_CART);
   });
 });

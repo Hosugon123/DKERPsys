@@ -468,6 +468,7 @@ function franchiseMgmtToHistoryEntry(m: FranchiseManagementOrder): OrderHistoryE
     stallCountBasisYmd: m.stallCountBasisYmd,
     stallCountCompletedAt: m.stallCountCompletedAt,
     stallCountSnapshot: m.stallCountSnapshot,
+    procurementDeductionBasisOrderId: m.procurementDeductionBasisOrderId,
   };
 }
 

@@ -50,8 +50,8 @@ import { useSupplyCatalogItems } from '../hooks/useSupplyCatalogItems';
 import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { cn } from '../lib/utils';
 import {
-  loadDayForProcurementFromOrder,
   loadStallSalesDisplayFromBasisOrder,
+  loadBasisOrderRemainForProcurementDeduction,
   cartAfterDeductingStallRemainFromOrder,
   getPreferredProcurementBasisOrderId,
   setPreferredProcurementBasisOrderId,
@@ -278,7 +278,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   }, [stallTick, catalogItems, stallBasisOrderId, supplyRetailView]);
 
   const carryoverRemainByItem = useMemo(() => {
-    const snap = loadDayForProcurementFromOrder(stallBasisOrderId);
+    const snap = loadBasisOrderRemainForProcurementDeduction(stallBasisOrderId);
     const m: Record<string, number> = {};
     for (const item of catalogItems) {
       const line = snap.lines[item.id] ?? { out: '', remain: '' };
@@ -360,6 +360,16 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     (Object.values(cart) as number[]).reduce((a, b) => a + b, 0)
   );
 
+  const cartsEqual = (a: Record<string, number>, b: Record<string, number>) => {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      if (roundProcurementQty(Number(a[k] ?? 0)) !== roundProcurementQty(Number(b[k] ?? 0))) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   /** 與常用訂單「扣盤點剩再帶入」相同：以目前購物車為基準量，扣除所選單據之剩餘後覆寫購物車 */
   const applyManualCartDeductStallBasisRemain = () => {
     setManualBasisDeduceError('');
@@ -374,6 +384,10 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     const next = cartFromFavorite(cartAfterDeductingStallRemainFromOrder(cart, stallBasisOrderId));
     if (Object.keys(next).length === 0) {
       setManualBasisDeduceError('扣除剩餘後暫無需補貨。');
+      return;
+    }
+    if (cartsEqual(next, cart)) {
+      setManualBasisDeduceError('參考單無可扣餘額，或剩餘已大於等於目前叫貨量，數量未變。');
       return;
     }
     setCart(next);
@@ -545,11 +559,20 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const applyFavoriteDeductStallBasisRemain = (f: FavoriteOrder) => {
     setDeleteArmedId(null);
     setFavoriteError('');
+    if (!stallBasisOrderId.trim()) {
+      setFavoriteError('請先選擇「欲扣除餘貨的訂單」，再扣盤點剩帶入。');
+      return;
+    }
+    const base = cartFromFavorite(f.quantities);
     const next = cartFromFavorite(
       cartAfterDeductingStallRemainFromOrder(f.quantities, stallBasisOrderId)
     );
     if (Object.keys(next).length === 0) {
       setFavoriteError('扣減後暫無需補貨。');
+      return;
+    }
+    if (cartsEqual(next, base)) {
+      setFavoriteError('參考單無可扣餘額，或剩餘已大於等於常用單數量，數量未變。');
       return;
     }
     setCart(next);
