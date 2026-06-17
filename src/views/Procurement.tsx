@@ -51,6 +51,7 @@ import { useIsNarrowScreen } from '../hooks/useIsNarrowScreen';
 import { cn } from '../lib/utils';
 import {
   loadDayForProcurementFromOrder,
+  loadStallSalesDisplayFromBasisOrder,
   cartAfterDeductingStallRemainFromOrder,
   getPreferredProcurementBasisOrderId,
   setPreferredProcurementBasisOrderId,
@@ -241,7 +242,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   );
 
   const stallDayKpi = useMemo(() => {
-    const snap = loadDayForProcurementFromOrder(stallBasisOrderId);
+    const snap = loadStallSalesDisplayFromBasisOrder(stallBasisOrderId);
     return aggregateStallKpis(
       catalogItems.map((i) => i.id),
       (id) => snap.lines[id] ?? { out: '', remain: '' },
@@ -250,7 +251,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   }, [stallTick, catalogItems, stallBasisOrderId, supplyRetailView]);
 
   const stallDayRetailSold = useMemo(() => {
-    const snap = loadDayForProcurementFromOrder(stallBasisOrderId);
+    const snap = loadStallSalesDisplayFromBasisOrder(stallBasisOrderId);
     let n = 0;
     for (const item of catalogItems) {
       const it = getSupplyItem(item.id, supplyRetailView);
@@ -262,7 +263,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   }, [stallTick, catalogItems, stallBasisOrderId, supplyRetailView]);
 
   const stallDaySalesRows = useMemo(() => {
-    const snap = loadDayForProcurementFromOrder(stallBasisOrderId);
+    const snap = loadStallSalesDisplayFromBasisOrder(stallBasisOrderId);
     const rows: { item: (typeof catalogItems)[number]; c: ReturnType<typeof computeLine> }[] = [];
     for (const item of catalogItems) {
       const it = getSupplyItem(item.id, supplyRetailView);

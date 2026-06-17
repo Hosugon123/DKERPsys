@@ -4,10 +4,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cartAfterDeductingStallRemainFromOrder,
+  computeStallOutImportBreakdown,
   loadDay,
   loadDayForProcurement,
   loadDayForProcurementFromOrder,
+  loadStallSalesDisplayFromBasisOrder,
   recomputeStallOutForStallYmdAndOrder,
+  applyOrderDeductionToDayRemain,
   syncBasisDayFromOrderSnapshot,
 } from './stallInventoryStorage';
 import { saveSalesRecord } from './salesRecordStorage';
@@ -135,6 +138,17 @@ describe('procurement basis after order adjustment', () => {
     expect(Number(snap.lines[PRODUCT_ID]?.remain)).toBe(5);
   });
 
+  it('帳上售出顯示用 loadStallSalesDisplayFromBasisOrder 仍讀凍結快照 remain', () => {
+    seedCompletedOrderWithSnapshot(10);
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '0' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
+    });
+    expect(Number(loadDayForProcurementFromOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(0);
+    expect(Number(loadStallSalesDisplayFromBasisOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(10);
+  });
+
   it('植入帶出：扣庫後參考剩餘＋叫貨，不重複加凍結快照', () => {
     const BASIS_ORDER = 'basis-order-1';
     const NEW_ORDER = 'new-order-1';
@@ -192,5 +206,77 @@ describe('procurement basis after order adjustment', () => {
     });
     recomputeStallOutForStallYmdAndOrder(NEXT_YMD, NEW_ORDER, undefined, { clearRemain: true });
     expect(Number(loadDay(NEXT_YMD).lines[PRODUCT_ID]?.out)).toBe(10);
+  });
+
+  it('完整流程：批貨扣庫後植入帶出＝即時參考剩餘＋本單叫貨', () => {
+    const BASIS_ORDER = 'basis-order-e2e';
+    const NEW_ORDER = 'new-order-e2e';
+    const NEXT_YMD = '2026-05-22';
+    const basis = {
+      id: BASIS_ORDER,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 10,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 10, unitPrice: 100, unit: '隻' }],
+      actorRole: 'employee' as const,
+      scopeId: 'scope:hq',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: { [PRODUCT_ID]: { out: '20', remain: '8' } },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    localStorage.setItem('dongshan_franchise_mgmt_orders_v1', JSON.stringify([basis]));
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '8' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+
+    const newOrder = {
+      id: NEW_ORDER,
+      createdAt: `${NEXT_YMD}T08:00:00.000Z`,
+      orderDateYmd: NEXT_YMD,
+      updatedAt: `${NEXT_YMD}T08:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 500,
+      payableAmount: 500,
+      itemCount: 5,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 5, unitPrice: 100, unit: '隻' }],
+      actorRole: 'employee' as const,
+      scopeId: 'scope:hq',
+      procurementDeductionBasisOrderId: BASIS_ORDER,
+    };
+    localStorage.setItem(
+      'dongshan_franchise_mgmt_orders_v1',
+      JSON.stringify([basis, newOrder]),
+    );
+
+    applyOrderDeductionToDayRemain(BASIS_YMD, { [PRODUCT_ID]: 5 }, 'scope:hq');
+
+    expect(Number(loadDayForProcurementFromOrder(BASIS_ORDER).lines[PRODUCT_ID]?.remain)).toBe(3);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 10 }, BASIS_ORDER)[PRODUCT_ID]).toBe(7);
+
+    const breakdown = computeStallOutImportBreakdown(NEXT_YMD, NEW_ORDER);
+    const row = breakdown?.rows.find((r) => r.productId === PRODUCT_ID);
+    expect(breakdown?.chainsPriorStallRemain).toBe(true);
+    expect(breakdown?.carrySource).toEqual({ kind: 'basis_order', orderId: BASIS_ORDER });
+    expect(row?.prevRemain).toBe(3);
+    expect(row?.orderQty).toBe(5);
+    expect(row?.suggestedOut).toBe(8);
+
+    const implanted = recomputeStallOutForStallYmdAndOrder(NEXT_YMD, NEW_ORDER, undefined, {
+      clearRemain: true,
+      persist: false,
+    });
+    expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(8);
   });
 });

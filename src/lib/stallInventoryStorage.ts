@@ -326,6 +326,42 @@ export function loadDayForProcurementFromOrder(orderId: string): DaySnapshot {
   return mergeDayWithCurrentCatalog(emptyDay());
 }
 
+/**
+ * 批貨頁「所選盤點單帳上售出」顯示用：以訂單凍結盤點快照為準（與銷售紀錄一致），
+ * 不讀後續叫貨扣庫後的即時 remain。扣庫計算仍用 {@link loadDayForProcurementFromOrder}。
+ */
+export function loadStallSalesDisplayFromBasisOrder(orderId: string): DaySnapshot {
+  if (!orderId) {
+    return mergeDayWithCurrentCatalog(emptyDay());
+  }
+  const o = findOrderByIdInStores(orderId);
+  if (!o) {
+    return mergeDayWithCurrentCatalog(emptyDay());
+  }
+  if (o.stallCountSnapshot) {
+    const merged = mergeSalesRecordWithCatalog(o.stallCountSnapshot);
+    const lines: DaySnapshot['lines'] = { ...merged.lines };
+    for (const it of getAllSupplyItems()) {
+      if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
+    }
+    return mergeDayWithCurrentCatalog({
+      lines,
+      actualRevenue: merged.actualRevenue,
+      updatedAt: merged.updatedAt,
+      revenueGapAmount: merged.revenueGapAmount,
+      revenueGapReason: merged.revenueGapReason,
+    });
+  }
+  if (o.stallCountBasisYmd) {
+    const scopeId = resolveOrderStallStorageScopeId(o);
+    const day = getSalesRecord(o.stallCountBasisYmd, scopeId);
+    if (day) {
+      return loadDayForProcurement(o.stallCountBasisYmd, scopeId);
+    }
+  }
+  return loadDayForProcurementFromOrder(orderId);
+}
+
 /** 寫入扣庫時使用的攤上儲存鍵＝該筆盤點之曆法盤點日 */
 export function getOrderStallCountBasisYmdForDeduction(orderId: string): string | null {
   if (!orderId) return null;
