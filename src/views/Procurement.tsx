@@ -23,7 +23,6 @@ import { buildProcurementLedgerDraftInput } from '../lib/procurementLedgerDraft'
 import {
   displayOrderCreatedByLabel,
   effectiveOrderDateYmd,
-  resolveOrderDataScopeId,
   type OrderHistoryLine,
   type OrderHistoryEntry,
 } from '../lib/orderHistoryStorage';
@@ -76,7 +75,6 @@ import {
   ymdOnOrAfterWeekday,
 } from '../lib/procurementWeekdayReference';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
-import { getDataScopeContext } from '../lib/dataScope';
 import ItemCatalogSettings from './ItemCatalogSettings';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 
@@ -220,12 +218,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   useEffect(() => {
     void (async () => {
       const all = await ordersApi.listOrdersWithStallCountCompleted();
-      const ctx = getDataScopeContext();
-      const scoped = all.filter((o) => {
-        const scope = resolveOrderDataScopeId(o);
-        return Boolean(scope && scope === ctx.scopeId);
-      });
-      setBasisOrdersList(scoped);
+      setBasisOrdersList(all);
     })();
   }, [stallTick]);
 

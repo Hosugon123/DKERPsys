@@ -1336,5 +1336,5 @@ export function listOrdersWithStallCountCompleted(): OrderHistoryEntry[] {
     const tb = b.stallCountCompletedAt ?? '';
     return ta < tb ? 1 : ta > tb ? -1 : 0;
   });
-  return sorted.filter((e) => canAccessOrder(e, ctx));
+  return sorted.filter((e) => canAccessOrderInManagementList(e, ctx));
 }
