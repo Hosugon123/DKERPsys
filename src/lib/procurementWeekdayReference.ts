@@ -1,4 +1,4 @@
-import { getDataScopeContext } from './dataScope';
+import { franchiseeOwnerUserIdFromScopeId, getDataScopeContext } from './dataScope';
 import { addDaysYmd, parseYmd, ymd } from './stallInventoryStorage';
 import { stallSalesBoardRowYmd } from './financeLib';
 import { orderCountsTowardStallEconomics, resolveOrderDataScopeId, type OrderHistoryEntry } from './orderHistoryStorage';
@@ -8,7 +8,7 @@ import {
   mergeSalesRecordWithCatalog,
   type SalesRecordDaySnapshot,
 } from './salesRecordStorage';
-import { getSupplyItem, isConsumableItem, type SupplyRetailView } from './supplyCatalog';
+import { getAllSupplyItems, isConsumableItem, type SupplyRetailView } from './supplyCatalog';
 import { computeLine } from './stallMath';
 
 function resolveStallSnapshotFromOrder(o: OrderHistoryEntry): SalesRecordDaySnapshot | null {
@@ -19,19 +19,46 @@ function resolveStallSnapshotFromOrder(o: OrderHistoryEntry): SalesRecordDaySnap
   return day ? mergeSalesRecordWithCatalog(day) : null;
 }
 
+function franchiseeOwnerForRetail(): string | undefined {
+  return franchiseeOwnerUserIdFromScopeId(getDataScopeContext().scopeId) ?? undefined;
+}
+
 function accumulateSoldQtyByProductFromSnapshot(
   dayMap: Map<string, number>,
   snap: SalesRecordDaySnapshot,
   retailView: SupplyRetailView,
 ) {
-  for (const id of Object.keys(snap.lines)) {
-    const item = getSupplyItem(id, retailView);
-    if (!item || isConsumableItem(item)) continue;
-    const line = snap.lines[id] ?? { out: '', remain: '' };
-    const c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
-    if (c.remainUnfilled) continue;
-    dayMap.set(id, (dayMap.get(id) ?? 0) + c.sold);
+  const ownerId = franchiseeOwnerForRetail();
+  const merged = mergeSalesRecordWithCatalog(snap);
+  for (const it of getAllSupplyItems(retailView, ownerId)) {
+    if (isConsumableItem(it)) continue;
+    const line = merged.lines[it.id] ?? { out: '', remain: '' };
+    const c = computeLine(line.out, line.remain, it, { unitBasis: 'retail' });
+    if (c.remainUnfilled || c.sold <= 0) continue;
+    dayMap.set(it.id, c.sold);
   }
+}
+
+function pickLatestStallOrderForYmd(
+  ymdDash: string,
+  orders: OrderHistoryEntry[],
+  scopeId: string,
+): OrderHistoryEntry | null {
+  let best: OrderHistoryEntry | null = null;
+  for (const o of orders) {
+    if (!orderCountsTowardStallEconomics(o)) continue;
+    if (stallSalesBoardRowYmd(o) !== ymdDash) continue;
+    if (resolveOrderDataScopeId(o) !== scopeId) continue;
+    const snap = resolveStallSnapshotFromOrder(o);
+    if (!snap) continue;
+    if (
+      !best ||
+      String(o.stallCountCompletedAt ?? '').localeCompare(String(best.stallCountCompletedAt ?? '')) > 0
+    ) {
+      best = o;
+    }
+  }
+  return best;
 }
 
 export type ProcurementLastWeekSameDayRef = {
@@ -110,32 +137,28 @@ function soldMapForYmd(
   orders: OrderHistoryEntry[],
   retailView: SupplyRetailView,
 ): { map: Map<string, number>; hasData: boolean } {
+  const scopeId = getDataScopeContext().scopeId;
   const soldByProductId = new Map<string, number>();
-  let fromOrders = false;
 
-  for (const o of orders) {
-    if (!orderCountsTowardStallEconomics(o)) continue;
-    const rowYmd = stallSalesBoardRowYmd(o);
-    if (rowYmd !== ymdDash) continue;
-    const snap = resolveStallSnapshotFromOrder(o);
-    if (!snap) continue;
-    fromOrders = true;
-    accumulateSoldQtyByProductFromSnapshot(soldByProductId, snap, retailView);
+  const salesRaw = getSalesRecord(ymdDash, scopeId);
+  if (salesRaw) {
+    accumulateSoldQtyByProductFromSnapshot(
+      soldByProductId,
+      salesRaw,
+      retailView,
+    );
+    return { map: soldByProductId, hasData: true };
   }
 
-  if (!fromOrders) {
-    const raw = getSalesRecord(ymdDash, getDataScopeContext().scopeId);
-    if (raw) {
-      accumulateSoldQtyByProductFromSnapshot(
-        soldByProductId,
-        mergeSalesRecordWithCatalog(raw),
-        retailView,
-      );
+  const matched = pickLatestStallOrderForYmd(ymdDash, orders, scopeId);
+  if (matched) {
+    const snap = resolveStallSnapshotFromOrder(matched);
+    if (snap) {
+      accumulateSoldQtyByProductFromSnapshot(soldByProductId, snap, retailView);
     }
   }
 
-  const hasData = fromOrders || getSalesRecord(ymdDash, getDataScopeContext().scopeId) !== null;
-  return { map: soldByProductId, hasData };
+  return { map: soldByProductId, hasData: matched !== null };
 }
 
 function listSameWeekdayYmdsBefore(orderDateYmd: string, orders: OrderHistoryEntry[]): string[] {
