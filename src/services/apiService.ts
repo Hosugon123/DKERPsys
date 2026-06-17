@@ -163,7 +163,7 @@ export const orders = {
         const scopeId = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : undefined;
         const toDeduct = stallInventory.buildProcurementRemainDeductionsFromLines(
           basisOrderId,
-          params.lines.map((l) => ({ productId: l.productId, qty: l.qty })),
+          params.lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty })),
         );
         if (Object.keys(toDeduct).length > 0) {
           stallInventory.ensureBasisDayFromOrderSnapshot(basisOrderId);

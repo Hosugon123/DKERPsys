@@ -87,7 +87,7 @@ function simulateProcurementCheckout(params: {
     const scopeId = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : undefined;
     const toDeduct = buildProcurementRemainDeductionsFromLines(
       basisOrderId,
-      params.lines.map((l) => ({ productId: l.productId, qty: l.qty })),
+      params.lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty })),
     );
     if (Object.keys(toDeduct).length > 0) {
       ensureBasisDayFromOrderSnapshot(basisOrderId);
@@ -591,6 +591,45 @@ describe('procurement basis after order adjustment', () => {
     applyOrderDeductionToDayRemain(BASIS_YMD, { [PRODUCT_ID]: 5 }, FRANCHISE_SCOPE);
     expect(Number(loadDayForProcurementFromOrder('002202606041').lines[PRODUCT_ID]?.remain)).toBe(6);
     expect(Number(getSalesRecord(BASIS_YMD, FRANCHISE_SCOPE)?.lines[PRODUCT_ID]?.remain)).toBe(6);
+  });
+
+  it('deducts by productId when the frozen snapshot uses the order line legacy name', () => {
+    const ORDER_ALIAS = 'order-alias-name-1';
+    const LEGACY_NAME = 'legacy duck alias';
+    const base = {
+      id: ORDER_ALIAS,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 1,
+      lines: [{ productId: PRODUCT_ID, name: LEGACY_NAME, qty: 10, unitPrice: 100, unit: 'unit' }],
+      actorRole: 'franchisee' as const,
+      scopeId: 'scope:franchisee:alias-1',
+      actorUserId: 'alias-1',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: {
+          [PRODUCT_ID]: { out: '150', remain: '0' },
+          [LEGACY_NAME]: { out: '150', remain: '9' },
+        },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    localStorage.setItem('dongshan_order_history_v1', JSON.stringify([base]));
+
+    expect(Number(loadStallSalesDisplayFromBasisOrder(ORDER_ALIAS).lines[PRODUCT_ID]?.remain)).toBe(9);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 20 }, ORDER_ALIAS)[PRODUCT_ID]).toBe(11);
+
+    const toDeduct = buildProcurementRemainDeductionsFromLines(ORDER_ALIAS, [
+      { productId: PRODUCT_ID, name: LEGACY_NAME, qty: 6 },
+    ]);
+    expect(toDeduct[PRODUCT_ID]).toBe(6);
   });
 
   it('扣盤點剩：僅扣同 scope 已送單之扣庫量，不含總部單', () => {

@@ -374,13 +374,13 @@ export function loadDayForProcurementFromOrder(orderId: string): DaySnapshot {
     for (const it of getAllSupplyItems()) {
       if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
     }
-    return mergeDayWithCurrentCatalog({
+    return applyOrderLineAliasesToDaySnapshot(mergeDayWithCurrentCatalog({
       lines,
       actualRevenue: merged.actualRevenue,
       updatedAt: merged.updatedAt,
       revenueGapAmount: merged.revenueGapAmount,
       revenueGapReason: merged.revenueGapReason,
-    });
+    }), o);
   }
   if (o.stallCountBasisYmd) {
     return loadDayForProcurement(o.stallCountBasisYmd, scopeId);
@@ -406,13 +406,13 @@ export function loadStallSalesDisplayFromBasisOrder(orderId: string): DaySnapsho
     for (const it of getAllSupplyItems()) {
       if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
     }
-    return mergeDayWithCurrentCatalog({
+    return applyOrderLineAliasesToDaySnapshot(mergeDayWithCurrentCatalog({
       lines,
       actualRevenue: merged.actualRevenue,
       updatedAt: merged.updatedAt,
       revenueGapAmount: merged.revenueGapAmount,
       revenueGapReason: merged.revenueGapReason,
-    });
+    }), o);
   }
   if (o.stallCountBasisYmd) {
     const scopeId = resolveOrderStallStorageScopeId(o);
@@ -517,6 +517,55 @@ function resolveOrderLineProductId(line: { productId: string; name?: string }): 
   return line.productId;
 }
 
+function resolveCatalogProductId(idOrName: string): string {
+  const key = String(idOrName ?? '').trim();
+  if (!key) return key;
+  if (getSupplyItem(key)) return key;
+  const byName = getAllSupplyItems().find((i) => i.name === key);
+  return byName?.id ?? key;
+}
+
+function normalizeQtyRecordProductIds(qtyByKey: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(qtyByKey)) {
+    const productId = resolveCatalogProductId(key);
+    const qty = roundProcurementQty(Number(raw) || 0);
+    if (!productId || qty <= 0) continue;
+    out[productId] = roundProcurementQty((out[productId] ?? 0) + qty);
+  }
+  return out;
+}
+
+function orderLineAliasesByProductId(o: OrderHistoryEntry | null): Record<string, string[]> {
+  const aliases: Record<string, string[]> = {};
+  if (!o) return aliases;
+  for (const line of o.lines ?? []) {
+    const id = resolveOrderLineProductId(line);
+    const name = String(line.name ?? '').trim();
+    if (!id || !name) continue;
+    aliases[id] = Array.from(new Set([...(aliases[id] ?? []), name]));
+  }
+  return aliases;
+}
+
+function applyOrderLineAliasesToDaySnapshot(snap: DaySnapshot, o: OrderHistoryEntry | null): DaySnapshot {
+  const aliases = orderLineAliasesByProductId(o);
+  if (Object.keys(aliases).length === 0) return snap;
+  const lines: DaySnapshot['lines'] = { ...snap.lines };
+  for (const [productId, names] of Object.entries(aliases)) {
+    const direct = lines[productId];
+    if (frozenRemainQtyFromLine(direct) > 0) continue;
+    for (const name of names) {
+      const byName = lines[name];
+      if (frozenRemainQtyFromLine(byName) > 0) {
+        lines[productId] = { ...byName, out: direct?.out || byName.out };
+        break;
+      }
+    }
+  }
+  return { ...snap, lines };
+}
+
 /**
  * 批貨「扣盤點剩」用：與帳上售出（凍結快照）一致，再扣掉已針對此參考單送出的扣庫量。
  * 即時銷售紀錄若有填剩餘且較小，則以即時為準（反映後續扣庫）。
@@ -582,16 +631,17 @@ export function sumProcurementQtyAgainstBasisOrder(basisOrderId: string): Record
  */
 export function buildProcurementRemainDeductionsFromLines(
   basisOrderId: string,
-  lines: { productId: string; qty: number }[],
+  lines: { productId: string; qty: number; name?: string }[],
 ): Record<string, number> {
   const basis = loadBasisOrderRemainForProcurementDeduction(basisOrderId);
   const out: Record<string, number> = {};
   for (const line of lines) {
+    const productId = resolveOrderLineProductId(line);
     const qty = roundProcurementQty(Number(line.qty) || 0);
     if (qty <= 0) continue;
-    const cur = roundProcurementQty(Math.max(0, num(basis.lines[line.productId]?.remain)));
+    const cur = roundProcurementQty(Math.max(0, num(basis.lines[productId]?.remain)));
     const deduct = roundProcurementQty(Math.min(qty, cur));
-    if (deduct > 0) out[line.productId] = deduct;
+    if (deduct > 0) out[productId] = roundProcurementQty((out[productId] ?? 0) + deduct);
   }
   return out;
 }
@@ -1311,7 +1361,8 @@ function cartAfterDeductingStallRemainFromSnapshot(
   day: DaySnapshot
 ): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const [id, raw] of Object.entries(baseQuantities)) {
+  const baseByProductId = normalizeQtyRecordProductIds(baseQuantities);
+  for (const [id, raw] of Object.entries(baseByProductId)) {
     const base = roundProcurementQty(Number(raw) || 0);
     if (base <= 0) continue;
     const remain = roundProcurementQty(Math.max(0, num(day.lines[id]?.remain)));
