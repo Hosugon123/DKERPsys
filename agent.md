@@ -286,13 +286,15 @@ S0 常用回歸測試線索：
 - 新增 **領域規則**（什麼算營收、什麼不算、誰能刪誰）
 - 修正 **效能／遠端同步** 相關陷阱與建議寫法
 - 使用者明確要求記錄的決策
+- **架構路線圖、尚未實作的階段規劃**（見 §11；與 §10 單次改動摘要分開）
 
 ### 9.2 怎麼寫
 
 1. **長期規則** → 更新 §4～§7 對應小節（精簡、可搜尋）。
 2. **單次改動摘要** → 在 §10 **最上方**新增一筆（日期 `YYYY-MM-DD`、標題、改了什麼、為何、關鍵檔案、測試）。
-3. 不要複製整段程式；寫 **檔名 + 函式名 + 行為** 即可。
-4. 若改動 revert 或作廢，在 §10 該筆標註 ~~刪除線~~ 或「已取代」。
+3. **待實作架構／多階段路線** → 更新 §11（標明「規劃中」與當前優先順序）。
+4. 不要複製整段程式；寫 **檔名 + 函式名 + 行為** 即可。
+5. 若改動 revert 或作廢，在 §10 該筆標註 ~~刪除線~~ 或「已取代」。
 
 ### 9.3 換裝置開發快速起手
 
@@ -319,6 +321,12 @@ curl -s https://dksys.vercel.app/build-version.json
 ## 10. 近期改動紀錄（新在上）
 
 > **AI 代理**：完成重要改動後請在此新增一筆；人類換裝置時先看這裡。
+
+### 2026-06-17｜叫貨扣餘架構路線圖（規劃紀錄，尚未實作）
+
+- **背景**：加盟／直營扣盤點剩餘反覆回歸；根因為「剩餘量」多資料源（訂單快照、銷售日、攤上日、後續叫貨單反推）在讀取時合併，而非單一庫存帳本。詳 **§11**。
+- **當前優先**：先完成 S0 bug 修復（`loadBasisOrderRemainForProcurementDeduction`、`resolveFrozenLineForItem` 品名 key、扣庫池同 scope、`Procurement.tsx` 合併數量草稿等）；**勿**在本輪順手做大重構。
+- **後續**：依 §11 階段 0 → 1 逐步收斂；換後端（§11 階段 2）待營運擴店需求再排。
 
 ### 2026-06-17｜測試策略：以正式版為準、禁止污染正式資料
 
@@ -377,6 +385,93 @@ curl -s https://dksys.vercel.app/build-version.json
 - **作法**：雙庫刪除 + 墓碑 `dongshan_deleted_order_ids_v1` + bundle 合併尊重墓碑 + 刪後 `awaitRemotePushIdle` + UI 錯誤提示。
 - **關鍵檔案**：`orderHistoryStorage.ts`、`appDataBundle.ts`、`apiService.ts`
 - **測試**：`orderDelete.test.ts`、`updatedFlowsIntegration.test.ts`
+
+---
+
+## 11. 叫貨扣餘／庫存架構路線圖（規劃中 · 尚未實作）
+
+> **AI 代理**：本節為**決策與待辦紀錄**；使用者明確要求實作某階段前，**不要**擅自啟動大範圍重構。當前仍以 S0 bug 修復與 §0 守門測試為先。
+
+### 11.1 現況診斷（2026-06-17）
+
+| 面向 | 評估 |
+|------|------|
+| 模組划分、`apiService` 閘道、`scope` 隔離、`agent.md` S0 治理 | 方向正確，可延續 |
+| 「剩餘量」資料來源 | **多源推導**（快照／銷售日／攤上日／叫貨單 qty 反推），為扣餘回歸溫床 |
+| 扣庫實作 | 改 `remain` 字串欄位，非可追溯的庫存異動 |
+| 遠端同步 | 整包 JSON merge 適合設定與備份，**不適合** S0 庫存交易的長期終態 |
+| 品項 key | 歷史快照可能用品名；目錄用 `s01` 等 id，需正規化 |
+
+**結論**：產品架構無需推倒；**資料／庫存模型**需從「多快照合併」演進為「單一可扣池 + 異動帳本（業界 stock movement / ledger 模式）」。
+
+### 11.2 業界對照（精簡）
+
+- **盤點完成** → 寫入不可變盤點 session／結存快照 + 一筆庫存異動。
+- **次日叫貨扣前日剩** → 採購單帶 `basis_count_session_id`（或等價 `basisOrderId`），扣減寫 **負向 movement**，餘額查帳本，不在多個 JSON 上現場猜。
+- **多店** → 所有列帶 `store_id`（本專案 `scopeId`），**伺服器端**過濾；避免僅靠客戶端雙庫 merge。
+- **參考**：Odoo `stock.move`、ERPNext Stock Ledger、餐飲 POS 日結＋期初帶入——語意相同，規模可較小。
+
+### 11.3 階段 0｜收斂讀取路徑（1～2 週，仍用 localStorage）
+
+**目標**：S0 扣餘行為只經一個服務，停止新增平行 `load*` 合併函式。
+
+| 待辦 | 說明 |
+|------|------|
+| `getProcurementRemainPool(basisOrderId)` | 唯一對外 API；回傳 `Record<productId, availableQty>` + 可選 `debugSource` |
+| 統一呼叫點 | 批貨「昨日剩貨」、扣餘按鈕、送單 `buildProcurementRemainDeductionsFromLines`、植入帶出 **只讀此 API** |
+| 盤點寫快照正規化 | `setOrderStallCountStamp`／完成盤點時 **lines key 強制轉 catalog id**；舊資料一次性 migration |
+| 帳上售出顯示 | 可仍讀凍結快照，但數字須與 pool 同源或 UI 標註差異原因 |
+| 測試 | 擴充 `procurementBasisSync.test.ts`、`procurementBasisVisibility.test.ts`；加盟 scope + 品名 key 案例 |
+
+**關鍵檔案（預計）**：`stallInventoryStorage.ts`（或新檔 `procurementRemainPool.ts`）、`Procurement.tsx`、`apiService.ts`
+
+### 11.4 階段 1｜StockMovement 本機帳本（1～2 月）
+
+**目標**：可扣池 = 盤點結存 − 已寫入之 `procurement_offset` 異動；不再從後續訂單 `line.qty` 反推。
+
+```typescript
+// 規劃型別（尚未實作）
+type StockMovement = {
+  id: string;
+  storeScopeId: string;
+  productId: string;
+  qtyDelta: number; // 負數 = 扣減
+  reason: 'count_close' | 'procurement_offset' | 'manual_adjust';
+  refType: 'order' | 'count_session';
+  refId: string;
+  basisOrderId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+| 待辦 | 說明 |
+|------|------|
+| 新 storage key | 納入 `DONGSHAN_EXPORT_STORAGE_KEYS` 與 bundle merge 白名單 |
+| 盤點完成 | 寫 `count_close` + 更新 balance 視圖 |
+| 叫貨送出 | 寫 `procurement_offset`（取代或對齊 `applyOrderDeductionToDayRemain`） |
+| 向後相容 | 過渡期雙寫或讀取 fallback，需明確下線日 |
+
+### 11.5 階段 2｜交易級後端（3～6 月，依營運排程）
+
+| 待辦 | 說明 |
+|------|------|
+| PostgreSQL（或等價） | 訂單、盤點 session、movement、balance 分表 |
+| API | S0 寫入走 server transaction；樂觀鎖／`updatedAt` |
+| `VITE_STORAGE_MODE=remote` | bundle 保留備份／主檔；**交易不走整包 PUT** |
+| RLS 或應用層 | `store_id` / `scopeId` 強制；總部代操作加審計欄 |
+
+### 11.6 階段 3｜產品簡化（可選）
+
+- 預設參考單 = 最近一筆已完成盤點訂單（延伸 `getPreferredProcurementBasisOrderId`）。
+- 叫貨頁顯示「建議叫貨 = 目標 − 期初」；扣餘按鈕改「套用建議」。
+- 降低選錯參考單造成的支援成本。
+
+### 11.7 明確不做（除非使用者另議）
+
+- 一次性大重寫 UI 或砍掉雙訂單庫而不做 migration。
+- 在階段 0 完成前引入新平行 `remain` 讀取函式。
+- 以正式 Redis／正式站送單作為自動化測試手段（見 §0.2）。
 
 ---
 

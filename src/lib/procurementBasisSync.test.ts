@@ -552,6 +552,39 @@ describe('procurement basis after order adjustment', () => {
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
   });
 
+  it('扣盤點剩：id 列有帶出但 remain=0 時改讀品名 remain（dk002 類資料）', () => {
+    const FRANCHISE_SCOPE = 'scope:franchisee:fr-dk002-like';
+    const base = {
+      id: '002202606041',
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 8000,
+      payableAmount: 8000,
+      itemCount: 80,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 80, unitPrice: 100, unit: '隻' }],
+      actorRole: 'franchisee' as const,
+      scopeId: FRANCHISE_SCOPE,
+      actorUserId: 'fr-dk002-like',
+      storeLabel: '高雄三民',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: {
+          [PRODUCT_ID]: { out: '150', remain: '0' },
+          '測試品項': { out: '150', remain: '11' },
+        },
+        actualRevenue: '7143',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    localStorage.setItem('dongshan_order_history_v1', JSON.stringify([base]));
+    expect(Number(loadBasisOrderRemainForProcurementDeduction('002202606041').lines[PRODUCT_ID]?.remain)).toBe(11);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, '002202606041')[PRODUCT_ID]).toBe(189);
+  });
+
   it('扣盤點剩：僅扣同 scope 已送單之扣庫量，不含總部單', () => {
     const FRANCHISE_SCOPE = 'scope:franchisee:fr-basis-2';
     const franchiseBasis = {

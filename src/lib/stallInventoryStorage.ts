@@ -381,6 +381,33 @@ function frozenLineHasLedgerQty(line: { out: string; remain: string } | undefine
   return isStallRemainEntryValid(line.remain) && num(line.remain) > 0;
 }
 
+function frozenRemainQtyFromLine(line: { remain: string } | undefined): number {
+  if (!line || !isStallRemainEntryValid(line.remain)) return 0;
+  return roundProcurementQty(Math.max(0, num(line.remain)));
+}
+
+/** 扣餘專用：id 列帶出>0 但 remain=0 時，仍改找品名／別名 key 的正向剩餘。 */
+function resolveFrozenRemainLineForItem(
+  snap: DaySnapshot,
+  productId: string,
+): { out: string; remain: string } {
+  const direct = snap.lines[productId];
+  if (frozenRemainQtyFromLine(direct) > 0) {
+    return direct!;
+  }
+  const item = getSupplyItem(productId);
+  if (item) {
+    for (const [key, line] of Object.entries(snap.lines)) {
+      if (key === productId) continue;
+      if (frozenRemainQtyFromLine(line) <= 0) continue;
+      if (key === item.name) return line;
+      const keyed = getSupplyItem(key);
+      if (keyed?.name === item.name) return line;
+    }
+  }
+  return direct ?? { out: '', remain: '' };
+}
+
 function resolveFrozenLineForItem(
   snap: DaySnapshot,
   productId: string,
@@ -421,15 +448,15 @@ function orderHasUsableStallCountSnapshot(o: OrderHistoryEntry | null): boolean 
     revenueGapReason: merged.revenueGapReason,
   });
   for (const it of getAllSupplyItems()) {
+    if (frozenRemainQtyFromLine(resolveFrozenRemainLineForItem(frozen, it.id)) > 0) return true;
     if (frozenLineHasLedgerQty(resolveFrozenLineForItem(frozen, it.id))) return true;
   }
   return false;
 }
 
 function frozenRemainQtyForItem(snap: DaySnapshot, productId: string): number {
-  const line = resolveFrozenLineForItem(snap, productId);
-  if (!isStallRemainEntryValid(line.remain)) return 0;
-  return roundProcurementQty(Math.max(0, num(line.remain)));
+  const line = resolveFrozenRemainLineForItem(snap, productId);
+  return frozenRemainQtyFromLine(line);
 }
 
 function resolveOrderLineProductId(line: { productId: string; name?: string }): string {
