@@ -8,6 +8,8 @@ import {
   listOrdersWithStallCountCompleted,
   readMergedOrderByIdFromStores,
   setOrderStallCountStamp,
+  stallCountSnapshotPersistedMatches,
+  updateStallCountSnapshotByOrderId,
   updateOrderStatusInEitherStore,
 } from './orderHistoryStorage';
 import {
@@ -15,7 +17,16 @@ import {
   listAccountingLedgerEntriesForScopeId,
 } from './accountingLedgerStorage';
 import { getSalesRecord, saveSalesRecord } from './salesRecordStorage';
-import { commitStallInventoryComplete, loadDay, loadDayForProcurement, saveDay } from './stallInventoryStorage';
+import {
+  applyOrderDeductionToDayRemain,
+  cartAfterDeductingStallRemainFromOrder,
+  commitStallInventoryComplete,
+  loadDay,
+  loadDayForProcurement,
+  loadDayForProcurementFromOrder,
+  saveDay,
+  syncBasisDayFromOrderSnapshot,
+} from './stallInventoryStorage';
 import { buildProcurementLedgerDraftInput, buildStallGapLedgerDraftInput } from './procurementLedgerDraft';
 import { HQ_SCOPE_ID } from './dataScope';
 
@@ -213,5 +224,53 @@ describe('五項更新流程整合', () => {
     expect(listOrdersWithStallCountCompleted().some((o) => o.id === orderId)).toBe(true);
     expect(getSalesRecord(BASIS)?.actualRevenue).toBe('4200');
     expect(readMergedOrderByIdFromStores(orderId)?.stallCountCompletedAt).toBe(snap.updatedAt);
+  });
+
+  it('flow E: completed order snapshot stays frozen while procurement carryover uses live deducted remain', () => {
+    const orderId = appendProcurementOrderEntry({
+      lines: [{ productId: DUCK, name: 'duck', unitPrice: 50, qty: 10, unit: 'bag' }],
+      totalAmount: 500,
+      actorRole: 'admin',
+      orderDateYmd: BASIS,
+    });
+
+    const completed = {
+      lines: { [DUCK]: { out: '10', remain: '3' } },
+      actualRevenue: '4200',
+      updatedAt: '2026-06-10T18:30:00.000Z',
+    };
+    expect(
+      commitStallInventoryComplete({
+        orderId,
+        basisYmd: BASIS,
+        completedAt: completed.updatedAt,
+        recordSnap: completed,
+        stallDaySnap: completed,
+      }).ok,
+    ).toBe(true);
+
+    expect(Number(readMergedOrderByIdFromStores(orderId)?.stallCountSnapshot?.lines[DUCK]?.remain)).toBe(3);
+    expect(Number(getSalesRecord(BASIS)?.lines[DUCK]?.remain)).toBe(3);
+    expect(Number(loadDayForProcurementFromOrder(orderId).lines[DUCK]?.remain)).toBe(3);
+
+    applyOrderDeductionToDayRemain(BASIS, { [DUCK]: 2 }, HQ_SCOPE_ID);
+
+    expect(Number(loadDayForProcurementFromOrder(orderId).lines[DUCK]?.remain)).toBe(1);
+    expect(Number(getSalesRecord(BASIS)?.lines[DUCK]?.remain)).toBe(1);
+    expect(Number(readMergedOrderByIdFromStores(orderId)?.stallCountSnapshot?.lines[DUCK]?.remain)).toBe(3);
+
+    const adjusted = {
+      lines: { [DUCK]: { out: '10', remain: '4' } },
+      actualRevenue: '4300',
+      updatedAt: '2026-06-10T19:00:00.000Z',
+    };
+    expect(updateStallCountSnapshotByOrderId(orderId, adjusted).ok).toBe(true);
+    syncBasisDayFromOrderSnapshot(orderId);
+
+    const orderSnap = readMergedOrderByIdFromStores(orderId)?.stallCountSnapshot;
+    expect(stallCountSnapshotPersistedMatches(orderSnap, adjusted)).toBe(true);
+    expect(Number(getSalesRecord(BASIS)?.lines[DUCK]?.remain)).toBe(4);
+    expect(Number(loadDayForProcurementFromOrder(orderId).lines[DUCK]?.remain)).toBe(4);
+    expect(cartAfterDeductingStallRemainFromOrder({ [DUCK]: 6 }, orderId)[DUCK]).toBe(2);
   });
 });
