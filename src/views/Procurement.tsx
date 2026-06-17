@@ -129,7 +129,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
   /** 手動輸入份數時的草稿（key 存在表示該欄以輸入字串為準） */
   const [qtyInputDraft, setQtyInputDraft] = useState<Record<string, string>>(
-    () => restoredProcurement?.qtyInputDraft ?? {},
+    () => ({ ...(restoredProcurement?.qtyInputDraft ?? {}) }),
   );
   /** 欲扣除之帳上剩餘所依據的「已盤點完成」叫貨單（非僅依曆法日） */
   const [stallBasisOrderId, setStallBasisOrderId] = useState(
@@ -359,7 +359,8 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   /** 合併購物車與尚未 blur 的數量草稿，避免按扣餘時讀到舊 cart。 */
   const buildEffectiveCart = useCallback((): Record<string, number> => {
     const merged: Record<string, number> = { ...cart };
-    for (const [id, draft] of Object.entries(qtyInputDraft)) {
+    const drafts: Record<string, string> = qtyInputDraft;
+    for (const [id, draft] of Object.entries(drafts)) {
       const n = parseQtyInput(draft);
       if (n > 0) merged[id] = n;
       else delete merged[id];
@@ -368,8 +369,9 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   }, [cart, qtyInputDraft]);
 
   const effectiveCartCount = useMemo(() => {
+    const values: number[] = Object.values(buildEffectiveCart());
     return roundProcurementQty(
-      Object.values(buildEffectiveCart()).reduce((a, b) => a + Number(b || 0), 0),
+      values.reduce((a, b) => a + Number(b || 0), 0),
     );
   }, [buildEffectiveCart]);
 

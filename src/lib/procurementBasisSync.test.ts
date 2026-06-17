@@ -581,6 +581,8 @@ describe('procurement basis after order adjustment', () => {
       },
     };
     localStorage.setItem('dongshan_order_history_v1', JSON.stringify([base]));
+    expect(Number(loadStallSalesDisplayFromBasisOrder('002202606041').lines[PRODUCT_ID]?.remain)).toBe(11);
+    expect(Number(loadStallSalesDisplayFromBasisOrder('002202606041').lines[PRODUCT_ID]?.out)).toBe(150);
     expect(Number(loadBasisOrderRemainForProcurementDeduction('002202606041').lines[PRODUCT_ID]?.remain)).toBe(11);
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, '002202606041')[PRODUCT_ID]).toBe(189);
   });

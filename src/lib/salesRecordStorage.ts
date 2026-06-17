@@ -5,7 +5,7 @@ import {
   resolveStallStorageScopeId,
   scopedStallDateKey,
 } from './scopedStallDateKey';
-import { getAllSupplyItems } from './supplyCatalog';
+import { getAllSupplyItems, getSupplyItem } from './supplyCatalog';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
 import { num, roundProcurementQty } from './stallMath';
 
@@ -80,10 +80,43 @@ function writeRow(s: StoreV1, ymd: string, row: Row, scopeId?: string): void {
   }
 }
 
+function lineUpdatedMs(line: SalesRecordDayLine | undefined): number {
+  const t = Date.parse(String(line?.updatedAt ?? ''));
+  return Number.isFinite(t) ? t : 0;
+}
+
+function lineQtyScore(line: SalesRecordDayLine | undefined): number {
+  if (!line) return -1;
+  return Math.abs(num(line.out)) + Math.abs(num(line.remain));
+}
+
+function chooseCatalogLine(
+  lines: Record<string, SalesRecordDayLine>,
+  productId: string,
+  productName: string,
+): SalesRecordDayLine {
+  const candidates: SalesRecordDayLine[] = [];
+  const direct = lines[productId];
+  if (direct) candidates.push(direct);
+  for (const [key, line] of Object.entries(lines)) {
+    if (key === productId) continue;
+    if (key === productName || getSupplyItem(key)?.name === productName) {
+      candidates.push(line);
+    }
+  }
+  if (candidates.length === 0) return { out: '', remain: '' };
+  return candidates.reduce((best, cur) => {
+    const bestMs = lineUpdatedMs(best);
+    const curMs = lineUpdatedMs(cur);
+    if (curMs !== bestMs) return curMs > bestMs ? cur : best;
+    return lineQtyScore(cur) > lineQtyScore(best) ? cur : best;
+  });
+}
+
 function mergeSnapshotWithCatalog(snap: SalesRecordDaySnapshot): SalesRecordDaySnapshot {
   const lines: Record<string, SalesRecordDayLine> = { ...snap.lines };
   for (const it of getAllSupplyItems()) {
-    if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
+    lines[it.id] = chooseCatalogLine(lines, it.id, it.name);
   }
   return { ...snap, lines };
 }
