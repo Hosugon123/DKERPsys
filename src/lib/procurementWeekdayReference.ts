@@ -1,7 +1,7 @@
 import { franchiseeOwnerUserIdFromScopeId, getDataScopeContext } from './dataScope';
 import { addDaysYmd, parseYmd, ymd } from './stallInventoryStorage';
 import { stallSalesBoardRowYmd } from './financeLib';
-import { orderCountsTowardStallEconomics, resolveOrderDataScopeId, type OrderHistoryEntry } from './orderHistoryStorage';
+import { orderCountsTowardStallEconomics, orderMatchesProcurementSoldReferenceScope, resolveOrderDataScopeId, type OrderHistoryEntry } from './orderHistoryStorage';
 import {
   getSalesRecord,
   listSalesRecordMeta,
@@ -132,6 +132,10 @@ export function procurementReferenceSoldRowLabel(
   return `${wd}${modeLabel}`;
 }
 
+function ordersForProcurementSoldReference(orders: OrderHistoryEntry[]): OrderHistoryEntry[] {
+  return orders.filter((o) => orderMatchesProcurementSoldReferenceScope(o));
+}
+
 function soldMapForYmd(
   ymdDash: string,
   orders: OrderHistoryEntry[],
@@ -188,8 +192,9 @@ export function computeProcurementLastWeekSameDaySold(
   orders: OrderHistoryEntry[],
   retailView: SupplyRetailView,
 ): ProcurementLastWeekSameDayRef {
+  const scopedOrders = ordersForProcurementSoldReference(orders);
   const referenceYmd = addDaysYmd(orderDateYmd, -7);
-  const { map, hasData } = soldMapForYmd(referenceYmd, orders, retailView);
+  const { map, hasData } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
   return { referenceYmd, soldByProductId: map, hasCompletedStallDay: hasData };
 }
 
@@ -203,8 +208,9 @@ export function computeProcurementWeekdaySoldReference(
   retailView: SupplyRetailView,
   mode: ProcurementReferenceMode = 'lastWeek',
 ): ProcurementWeekdaySoldRef {
+  const scopedOrders = ordersForProcurementSoldReference(orders);
   if (mode === 'lastWeek') {
-    const base = computeProcurementLastWeekSameDaySold(orderDateYmd, orders, retailView);
+    const base = computeProcurementLastWeekSameDaySold(orderDateYmd, scopedOrders, retailView);
     return {
       ...base,
       mode,
@@ -212,12 +218,12 @@ export function computeProcurementWeekdaySoldReference(
     };
   }
 
-  const qualifyingYmds = listSameWeekdayYmdsBefore(orderDateYmd, orders);
+  const qualifyingYmds = listSameWeekdayYmdsBefore(orderDateYmd, scopedOrders);
   const perDay = new Map<string, Map<string, number>>();
   const activeYmds: string[] = [];
 
   for (const ymdDash of qualifyingYmds) {
-    const { map, hasData } = soldMapForYmd(ymdDash, orders, retailView);
+    const { map, hasData } = soldMapForYmd(ymdDash, scopedOrders, retailView);
     if (!hasData) continue;
     perDay.set(ymdDash, map);
     activeYmds.push(ymdDash);

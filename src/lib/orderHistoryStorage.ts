@@ -2,7 +2,7 @@ import { mergeOrderLikeRecord, recordUpdatedAtMs } from './bundleRecordMerge';
 import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
-import { getDataScopeContext, HQ_SCOPE_ID, resolveFranchiseeRetailOwnerUserId } from './dataScope';
+import { getDataScopeContext, HQ_SCOPE_ID, resolveFranchiseeRetailOwnerUserId, franchiseeOwnerUserIdFromScopeId } from './dataScope';
 import { listSystemUsers } from './systemUsersStorage';
 import { getStoreCode3, normalizeStoreCode3Digits } from './storeCodeStorage';
 import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessionActorDisplayName';
@@ -303,6 +303,26 @@ export function orderIsHeadquartersDirectScoped(
   if (row.actorRole === 'franchisee') return false;
   if (orderIsFranchiseBusinessScoped(row)) return false;
   return row.actorRole === 'admin' || row.actorRole === 'employee';
+}
+
+/**
+ * 批貨頁售出參考（上週／最高／平均／最低）：僅計入目前登入店別。
+ * 直營帳號不含加盟店（即使訂單管理清單為出貨可見）；加盟帳號僅自家 scope。
+ */
+export function orderMatchesProcurementSoldReferenceScope(
+  row: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>,
+  ctx: ReturnType<typeof getDataScopeContext> = getDataScopeContext(),
+): boolean {
+  if (ctx.scopeId === HQ_SCOPE_ID) {
+    return orderIsHeadquartersDirectScoped(row);
+  }
+  const ownerId = franchiseeOwnerUserIdFromScopeId(ctx.scopeId);
+  if (ownerId) {
+    const declared = resolveOrderDataScopeId(row);
+    if (declared === ctx.scopeId) return true;
+    return row.actorRole === 'franchisee' && row.actorUserId === ownerId;
+  }
+  return resolveOrderDataScopeId(row) === ctx.scopeId;
 }
 
 function canAccessOrder(
