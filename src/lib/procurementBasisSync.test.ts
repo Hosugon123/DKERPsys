@@ -459,4 +459,47 @@ describe('procurement basis after order adjustment', () => {
     });
     expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(FAVORITE_QTY);
   });
+
+  it('扣盤點剩：快照以品名為 key 時仍可扣減', () => {
+    const raw = localStorage.getItem('dongshan_franchise_mgmt_orders_v1');
+    const orders = raw ? (JSON.parse(raw) as { id: string }[]) : [];
+    const base = {
+      id: ORDER_ID,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 1,
+      lines: [
+        {
+          productId: PRODUCT_ID,
+          name: '測試品項',
+          qty: 10,
+          unitPrice: 100,
+          unit: '隻',
+        },
+      ],
+      actorRole: 'employee' as const,
+      scopeId: 'scope:hq',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: { '測試品項': { out: '150', remain: '11' } },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    const without = orders.filter((o) => o.id !== ORDER_ID);
+    localStorage.setItem('dongshan_franchise_mgmt_orders_v1', JSON.stringify([...without, base]));
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '150', remain: '0' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(11);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
+  });
 });

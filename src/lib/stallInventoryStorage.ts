@@ -375,41 +375,82 @@ export function loadStallSalesDisplayFromBasisOrder(orderId: string): DaySnapsho
   return loadDayForProcurementFromOrder(orderId);
 }
 
+function resolveFrozenLineForItem(
+  snap: DaySnapshot,
+  productId: string,
+): { out: string; remain: string } {
+  const direct = snap.lines[productId];
+  if (direct && (isStallRemainEntryValid(direct.remain) || num(direct.out) > 0)) {
+    return direct;
+  }
+  const item = getSupplyItem(productId);
+  if (item) {
+    for (const [key, line] of Object.entries(snap.lines)) {
+      if (key === productId) continue;
+      if (key === item.name && (isStallRemainEntryValid(line.remain) || num(line.out) > 0)) {
+        return line;
+      }
+      const keyed = getSupplyItem(key);
+      if (keyed?.name === item.name && (isStallRemainEntryValid(line.remain) || num(line.out) > 0)) {
+        return line;
+      }
+    }
+  }
+  return direct ?? { out: '', remain: '' };
+}
+
+function frozenRemainQtyForItem(snap: DaySnapshot, productId: string): number {
+  const line = resolveFrozenLineForItem(snap, productId);
+  if (!isStallRemainEntryValid(line.remain)) return 0;
+  return roundProcurementQty(Math.max(0, num(line.remain)));
+}
+
+function resolveOrderLineProductId(line: { productId: string; name?: string }): string {
+  if (getSupplyItem(line.productId)) return line.productId;
+  const byName = getAllSupplyItems().find((i) => i.name === line.name);
+  if (byName) return byName.id;
+  const byIdName = getSupplyItem(line.productId);
+  if (byIdName) return line.productId;
+  return line.productId;
+}
+
 /**
- * 批貨「扣盤點剩」用：以參考單即時剩餘為準；若銷售紀錄該品項尚未填 remain，
- * 則退回訂單凍結快照（與帳上售出顯示一致），避免可見有餘但扣減無效。
+ * 批貨「扣盤點剩」用：與帳上售出（凍結快照）一致，再扣掉已針對此參考單送出的扣庫量。
+ * 即時銷售紀錄若有填剩餘且較小，則以即時為準（反映後續扣庫）。
  */
 export function loadBasisOrderRemainForProcurementDeduction(orderId: string): DaySnapshot {
   if (!orderId) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
+  const basisOrder = findOrderByIdInStores(orderId);
   const live = loadDayForProcurementFromOrder(orderId);
   const frozen = loadStallSalesDisplayFromBasisOrder(orderId);
   const deducted = totalRemainDeductedAgainstBasisOrder(orderId);
+  const hasSnapshot = Boolean(basisOrder?.stallCountSnapshot);
   const lines: DaySnapshot['lines'] = { ...live.lines };
   for (const it of getAllSupplyItems()) {
     const liveLine = live.lines[it.id] ?? { out: '', remain: '' };
-    const frozenLine = frozen.lines[it.id] ?? { out: '', remain: '' };
+    const frozenLine = resolveFrozenLineForItem(frozen, it.id);
     const liveRemainRaw = liveLine.remain ?? '';
     const liveR = isStallRemainEntryValid(liveRemainRaw)
       ? roundProcurementQty(num(liveRemainRaw))
       : 0;
-    const frozenR = isStallRemainEntryValid(frozenLine.remain)
-      ? roundProcurementQty(num(frozenLine.remain))
-      : 0;
-    const poolRemain = roundProcurementQty(Math.max(0, frozenR - (deducted[it.id] ?? 0)));
+    const poolRemain = roundProcurementQty(
+      Math.max(0, frozenRemainQtyForItem(frozen, it.id) - (deducted[it.id] ?? 0)),
+    );
 
-    let effective = liveR;
-    if (!isStallRemainEntryValid(liveRemainRaw) && poolRemain > 0) {
+    let effective = poolRemain;
+    if (hasSnapshot) {
       effective = poolRemain;
     } else if (liveR > 0) {
       effective = liveR;
-    } else {
+    } else if (!isStallRemainEntryValid(liveRemainRaw) && poolRemain > 0) {
       effective = poolRemain;
     }
 
     lines[it.id] = {
       ...(lines[it.id] ?? liveLine),
+      out: frozenLine.out || liveLine.out || '',
       remain: String(effective),
     };
   }
@@ -459,25 +500,28 @@ function totalRemainDeductedAgainstBasisOrder(
   const frozen = loadStallSalesDisplayFromBasisOrder(basisOrderId);
   const pool: Record<string, number> = {};
   for (const it of getAllSupplyItems()) {
-    pool[it.id] = roundProcurementQty(Math.max(0, num(frozen.lines[it.id]?.remain)));
+    pool[it.id] = frozenRemainQtyForItem(frozen, it.id);
   }
   const orders = listAllMergedOrdersFromStores()
     .filter(
       (o) =>
-        o.procurementDeductionBasisOrderId?.trim() === basisOrderId.trim() && o.status !== '已取消',
+        o.id !== basisOrderId.trim() &&
+        o.procurementDeductionBasisOrderId?.trim() === basisOrderId.trim() &&
+        o.status !== '已取消',
     )
     .filter((o) => !excludeOrderId || o.id !== excludeOrderId)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const deducted: Record<string, number> = {};
   for (const o of orders) {
     for (const line of o.lines) {
+      const productId = resolveOrderLineProductId(line);
       const qty = roundProcurementQty(Number(line.qty) || 0);
       if (qty <= 0) continue;
-      const avail = pool[line.productId] ?? 0;
+      const avail = pool[productId] ?? 0;
       const d = roundProcurementQty(Math.min(qty, avail));
       if (d <= 0) continue;
-      deducted[line.productId] = roundProcurementQty((deducted[line.productId] ?? 0) + d);
-      pool[line.productId] = roundProcurementQty(Math.max(0, avail - d));
+      deducted[productId] = roundProcurementQty((deducted[productId] ?? 0) + d);
+      pool[productId] = roundProcurementQty(Math.max(0, avail - d));
     }
   }
   return deducted;
@@ -496,7 +540,7 @@ function prevRemainForBringOut(
   if (live > 0) return live;
   const bid = order.procurementDeductionBasisOrderId!.trim();
   const frozen = loadStallSalesDisplayFromBasisOrder(bid);
-  const frozenR = roundProcurementQty(Math.max(0, num(frozen.lines[productId]?.remain)));
+  const frozenR = frozenRemainQtyForItem(frozen, productId);
   const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, order.id)[productId] ?? 0;
   const poolAtOrder = roundProcurementQty(Math.max(0, frozenR - deductedBefore));
   return roundProcurementQty(Math.max(0, Math.min(orderQty, poolAtOrder)));

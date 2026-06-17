@@ -356,9 +356,24 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
     setItemQty(id, current + delta);
   };
 
-  const totalCount = roundProcurementQty(
-    (Object.values(cart) as number[]).reduce((a, b) => a + b, 0)
-  );
+  /** 合併購物車與尚未 blur 的數量草稿，避免按扣餘時讀到舊 cart。 */
+  const buildEffectiveCart = useCallback((): Record<string, number> => {
+    const merged: Record<string, number> = { ...cart };
+    for (const [id, draft] of Object.entries(qtyInputDraft)) {
+      const n = parseQtyInput(draft);
+      if (n > 0) merged[id] = n;
+      else delete merged[id];
+    }
+    return merged;
+  }, [cart, qtyInputDraft]);
+
+  const effectiveCartCount = useMemo(() => {
+    return roundProcurementQty(
+      Object.values(buildEffectiveCart()).reduce((a, b) => a + Number(b || 0), 0),
+    );
+  }, [buildEffectiveCart]);
+
+  const totalCount = effectiveCartCount;
 
   const cartsEqual = (a: Record<string, number>, b: Record<string, number>) => {
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
@@ -381,12 +396,15 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       setManualBasisDeduceError('請先在下方品項輸入叫貨量（當作尚未扣除剩餘前的基準）。');
       return;
     }
-    const next = cartFromFavorite(cartAfterDeductingStallRemainFromOrder(cart, stallBasisOrderId));
+    const effectiveCart = buildEffectiveCart();
+    const next = cartFromFavorite(
+      cartAfterDeductingStallRemainFromOrder(effectiveCart, stallBasisOrderId),
+    );
     if (Object.keys(next).length === 0) {
       setManualBasisDeduceError('扣除剩餘後暫無需補貨。');
       return;
     }
-    if (cartsEqual(next, cart)) {
+    if (cartsEqual(next, effectiveCart)) {
       setManualBasisDeduceError('參考單無可扣餘額，或剩餘已大於等於目前叫貨量，數量未變。');
       return;
     }
@@ -1203,16 +1221,16 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
                 <div className="flex items-center justify-between gap-2">
                   <span>下單數量</span>
                   <span className="tabular-nums text-amber-300">
-                    {q.toLocaleString()}
-                    <LiangJinQtyHint liangQty={q} pieceUnit={priceUnit} className="text-[0.625rem]" /> {priceUnit}
+                    {effectiveOrderQty.toLocaleString()}
+                    <LiangJinQtyHint liangQty={effectiveOrderQty} pieceUnit={priceUnit} className="text-[0.625rem]" /> {priceUnit}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span>預計帶出</span>
                   <span className="tabular-nums text-emerald-300">
-                    {roundProcurementQty((carryoverRemainByItem[catalogItem.id] ?? 0) + q).toLocaleString()}
+                    {roundProcurementQty((carryoverRemainByItem[catalogItem.id] ?? 0) + effectiveOrderQty).toLocaleString()}
                     <LiangJinQtyHint
-                      liangQty={roundProcurementQty((carryoverRemainByItem[catalogItem.id] ?? 0) + q)}
+                      liangQty={roundProcurementQty((carryoverRemainByItem[catalogItem.id] ?? 0) + effectiveOrderQty)}
                       pieceUnit={priceUnit}
                       className="text-[0.625rem]"
                     />{' '}
