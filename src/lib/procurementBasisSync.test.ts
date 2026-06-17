@@ -11,6 +11,8 @@ import {
   loadStallSalesDisplayFromBasisOrder,
   loadBasisOrderRemainForProcurementDeduction,
   recomputeStallOutForStallYmdAndOrder,
+  buildProcurementRemainDeductionsFromLines,
+  saveDay,
   applyOrderDeductionToDayRemain,
   getOrderStallCountBasisYmdForDeduction,
   syncBasisDayFromOrderSnapshot,
@@ -80,11 +82,15 @@ function simulateProcurementCheckout(params: {
   const basisOrderId = params.procurementDeductionBasisOrderId?.trim() ?? '';
   const basisYmd = getOrderStallCountBasisYmdForDeduction(basisOrderId);
   if (basisYmd) {
-    const toDeduct: Record<string, number> = {};
-    for (const line of params.lines) toDeduct[line.productId] = line.qty;
     const basisOrder = basisOrderId ? readMergedOrderByIdFromStores(basisOrderId) : null;
     const scopeId = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : undefined;
-    applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+    const toDeduct = buildProcurementRemainDeductionsFromLines(
+      basisOrderId,
+      params.lines.map((l) => ({ productId: l.productId, qty: l.qty })),
+    );
+    if (Object.keys(toDeduct).length > 0) {
+      applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+    }
   }
   return appendProcurementOrderEntry({
     ...params,
@@ -208,7 +214,27 @@ describe('procurement basis after order adjustment', () => {
       actualRevenue: '5000',
       updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
     });
+    saveDay(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '0' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T19:00:00.000Z`,
+    });
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 10 }, ORDER_ID)[PRODUCT_ID]).toBe(10);
+  });
+
+  it('扣盤點剩：銷售紀錄為 0 但攤上日庫仍有餘時可扣減', () => {
+    seedCompletedOrderWithSnapshot(57);
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '250', remain: '0' } },
+      actualRevenue: '7558',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    saveDay(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '250', remain: '57' } },
+      actualRevenue: '7558',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 250 }, ORDER_ID)[PRODUCT_ID]).toBe(193);
   });
 
   it('植入帶出：扣庫後參考剩餘＋叫貨，不重複加凍結快照', () => {
@@ -401,14 +427,14 @@ describe('procurement basis after order adjustment', () => {
     const row = breakdown?.rows.find((r) => r.productId === PRODUCT_ID);
     expect(breakdown?.chainsPriorStallRemain).toBe(true);
     expect(breakdown?.carrySource).toEqual({ kind: 'basis_order', orderId: ORDER_ID });
-    expect(row?.prevRemain).toBe(0);
+    expect(row?.prevRemain).toBe(SNAPSHOT_REMAIN);
     expect(row?.orderQty).toBe(EXPECTED_CART);
-    expect(row?.suggestedOut).toBe(EXPECTED_CART);
+    expect(row?.suggestedOut).toBe(FAVORITE_QTY);
 
     const implanted = recomputeStallOutForStallYmdAndOrder(NEXT_YMD, newOrderId, undefined, {
       clearRemain: true,
       persist: false,
     });
-    expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(EXPECTED_CART);
+    expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(FAVORITE_QTY);
   });
 });

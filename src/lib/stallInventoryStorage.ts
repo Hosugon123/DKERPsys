@@ -4,6 +4,7 @@ import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
   listOrdersWithStallCountCompleted,
+  listAllMergedOrdersFromStores,
   effectiveOrderDateYmd,
   readMergedOrderByIdFromStores,
   resolveOrderDataScopeId,
@@ -272,7 +273,19 @@ export function applyOrderDeductionToDayRemain(
 /**
  * 批貨、扣庫與參攤上「剩餘」讀取用：若該盤點日已有「銷售紀錄」（盤點完成），
  * **收攤剩餘 (remain)** 以銷售紀錄為準（送單扣庫會與攤上同步寫入），**帶出、實收** 仍以攤上即時資料為準。
+ * 若銷售紀錄誤為 0 但攤上日庫仍有餘，以攤上為準（修復雲端同步或舊資料不一致）。
  */
+function resolveMergedRemainForProcurement(wRemain: string, sRemain: string): string {
+  const wValid = isStallRemainEntryValid(wRemain);
+  const sValid = isStallRemainEntryValid(sRemain);
+  if (sValid && !(num(sRemain) === 0 && wValid && num(wRemain) > 0)) {
+    return sRemain;
+  }
+  if (wValid) return wRemain;
+  if (sValid) return sRemain;
+  return sRemain;
+}
+
 export function loadDayForProcurement(ymdStr: string, scopeId?: string): DaySnapshot {
   const scope = resolveStallStorageScopeId(scopeId);
   const work = loadDay(ymdStr, scope);
@@ -282,7 +295,7 @@ export function loadDayForProcurement(ymdStr: string, scopeId?: string): DaySnap
   for (const it of getAllSupplyItems()) {
     const w = work.lines[it.id] ?? { out: '', remain: '' };
     const s = sales.lines[it.id] ?? { out: '', remain: '' };
-    lines[it.id] = { out: w.out, remain: s.remain };
+    lines[it.id] = { out: w.out, remain: resolveMergedRemainForProcurement(w.remain ?? '', s.remain ?? '') };
   }
   return { ...work, lines };
 }
@@ -383,6 +396,92 @@ export function loadBasisOrderRemainForProcurementDeduction(orderId: string): Da
     lines[it.id] = { ...(lines[it.id] ?? liveLine), remain };
   }
   return mergeDayWithCurrentCatalog({ ...live, lines });
+}
+
+/** 已針對參考單送出之叫貨量合計（依 procurementDeductionBasisOrderId 彙總）。 */
+export function sumProcurementQtyAgainstBasisOrder(basisOrderId: string): Record<string, number> {
+  const sums: Record<string, number> = {};
+  const target = basisOrderId.trim();
+  if (!target) return sums;
+  for (const o of listAllMergedOrdersFromStores()) {
+    if (o.procurementDeductionBasisOrderId?.trim() !== target) continue;
+    if (o.status === '已取消') continue;
+    for (const line of o.lines) {
+      const q = roundProcurementQty(Number(line.qty) || 0);
+      if (q <= 0) continue;
+      sums[line.productId] = roundProcurementQty((sums[line.productId] ?? 0) + q);
+    }
+  }
+  return sums;
+}
+
+/**
+ * 叫貨送出時自參考單剩餘扣庫：每品項最多扣至目前可扣餘額（不會超扣）。
+ */
+export function buildProcurementRemainDeductionsFromLines(
+  basisOrderId: string,
+  lines: { productId: string; qty: number }[],
+): Record<string, number> {
+  const basis = loadBasisOrderRemainForProcurementDeduction(basisOrderId);
+  const out: Record<string, number> = {};
+  for (const line of lines) {
+    const qty = roundProcurementQty(Number(line.qty) || 0);
+    if (qty <= 0) continue;
+    const cur = roundProcurementQty(Math.max(0, num(basis.lines[line.productId]?.remain)));
+    const deduct = roundProcurementQty(Math.min(qty, cur));
+    if (deduct > 0) out[line.productId] = deduct;
+  }
+  return out;
+}
+
+function totalRemainDeductedAgainstBasisOrder(
+  basisOrderId: string,
+  excludeOrderId?: string,
+): Record<string, number> {
+  const frozen = loadStallSalesDisplayFromBasisOrder(basisOrderId);
+  const pool: Record<string, number> = {};
+  for (const it of getAllSupplyItems()) {
+    pool[it.id] = roundProcurementQty(Math.max(0, num(frozen.lines[it.id]?.remain)));
+  }
+  const orders = listAllMergedOrdersFromStores()
+    .filter(
+      (o) =>
+        o.procurementDeductionBasisOrderId?.trim() === basisOrderId.trim() && o.status !== '已取消',
+    )
+    .filter((o) => !excludeOrderId || o.id !== excludeOrderId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const deducted: Record<string, number> = {};
+  for (const o of orders) {
+    for (const line of o.lines) {
+      const qty = roundProcurementQty(Number(line.qty) || 0);
+      if (qty <= 0) continue;
+      const avail = pool[line.productId] ?? 0;
+      const d = roundProcurementQty(Math.min(qty, avail));
+      if (d <= 0) continue;
+      deducted[line.productId] = roundProcurementQty((deducted[line.productId] ?? 0) + d);
+      pool[line.productId] = roundProcurementQty(Math.max(0, avail - d));
+    }
+  }
+  return deducted;
+}
+
+function prevRemainForBringOut(
+  order: OrderHistoryEntry,
+  prevDay: DaySnapshot,
+  productId: string,
+  orderQty: number,
+): number {
+  if (!procurementOrderChainsPriorStallRemain(order)) {
+    return roundProcurementQty(Math.max(0, num(prevDay.lines[productId]?.remain)));
+  }
+  const live = roundProcurementQty(Math.max(0, num(prevDay.lines[productId]?.remain)));
+  if (live > 0) return live;
+  const bid = order.procurementDeductionBasisOrderId!.trim();
+  const frozen = loadStallSalesDisplayFromBasisOrder(bid);
+  const frozenR = roundProcurementQty(Math.max(0, num(frozen.lines[productId]?.remain)));
+  const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, order.id)[productId] ?? 0;
+  const poolAtOrder = roundProcurementQty(Math.max(0, frozenR - deductedBefore));
+  return roundProcurementQty(Math.max(0, Math.min(orderQty, poolAtOrder)));
 }
 
 /** 寫入扣庫時使用的攤上儲存鍵＝該筆盤點之曆法盤點日 */
@@ -517,10 +616,10 @@ export function recomputeStallOutForStallYmdAndOrder(
   const lines: DaySnapshot['lines'] = { ...snap.lines };
   for (const it of getAllSupplyItems()) {
     if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
-    const R = roundProcurementQty(Math.max(0, num(prevDay.lines[it.id]?.remain)));
     const item = getSupplyItem(it.id);
-    const sum =
-      item && isConsumableItem(item) ? 0 : (sumBy[it.id] ?? 0);
+    const orderQty = item && isConsumableItem(item) ? 0 : (sumBy[it.id] ?? 0);
+    const R = prevRemainForBringOut(o, prevDay, it.id, orderQty);
+    const sum = orderQty;
     const nextOut = roundProcurementQty(R + sum);
     const nextRemain = clearRemain ? '' : (lines[it.id].remain ?? '');
     lines[it.id] = { out: String(nextOut), remain: nextRemain };
@@ -578,8 +677,8 @@ export function computeStallOutImportBreakdown(
   for (const it of getAllSupplyItems()) {
     const item = getSupplyItem(it.id);
     if (item && isConsumableItem(item)) continue;
-    const R = roundProcurementQty(Math.max(0, num(prevDay.lines[it.id]?.remain)));
     const orderQty = sumBy[it.id] ?? 0;
+    const R = prevRemainForBringOut(o, prevDay, it.id, orderQty);
     const suggestedOut = roundProcurementQty(R + orderQty);
     if (orderQty <= 0 && R <= 0) continue;
     rows.push({

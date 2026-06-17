@@ -157,13 +157,17 @@ export const orders = {
       const basisOrderId = params.procurementDeductionBasisOrderId?.trim() ?? '';
       const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
       if (basisYmd) {
-        const toDeduct: Record<string, number> = {};
-        for (const line of params.lines) toDeduct[line.productId] = line.qty;
         const basisOrder = basisOrderId
           ? orderHistory.readMergedOrderByIdFromStores(basisOrderId)
           : null;
         const scopeId = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : undefined;
-        stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+        const toDeduct = stallInventory.buildProcurementRemainDeductionsFromLines(
+          basisOrderId,
+          params.lines.map((l) => ({ productId: l.productId, qty: l.qty })),
+        );
+        if (Object.keys(toDeduct).length > 0) {
+          stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+        }
       }
       return orderHistory.appendProcurementOrderEntry(params);
     });
