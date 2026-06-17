@@ -7,6 +7,52 @@
 - 若本機與遠端同時各有新 commit，禁止直接硬推；必須先合併或 rebase，保留兩邊修改意圖，避免多裝置或多助手開發互相覆蓋。
 - 完成修改並推送前，也要再檢查一次遠端是否有新版本，必要時先重新 fetch/rebase 後再 push。
 
+## 0.1 營運核心功能分級與守門規則
+
+### S0：永遠不能壞的營運核心
+
+這一級功能壞掉會直接讓員工、加盟主、管理者不信任系統。任何改動只要碰到相關資料流、UI、storage、同步、權限、金額或訂單狀態，都必須視為高風險。
+
+- 叫貨／批貨：建立訂單、常用訂單帶入、扣除盤點剩餘、昨日剩貨/參考單、送出訂單、加盟自備品扣款。
+- 攤上盤點：植入訂單、填剩餘貨量、已售完、帶出量、送出盤點、盤點快照、銷售紀錄同步。
+- 訂單管理：管理員/員工/加盟主可見性、待出貨/已出貨/已取消、訂單清單、訂單明細。
+- 改單與調整數量：已送出未出貨訂單改量、已出貨訂單盤點快照調整、加盟/直營雙庫同步、最新操作不可被舊資料覆蓋。
+- 金額與結帳：訂單總額、應付金額、自備品扣除、消耗品貨款、實收、落差、流水帳連動、Dashboard 營收/支出主指標。
+- 遠端同步與多端資料一致性：`withRemoteStorageWrite`、bundle merge、scope 隔離、dirty/local wins、刪除墓碑、跨裝置同時操作。
+
+S0 守門規則：
+
+- 修改前先找出會碰到哪些 S0 流程，並在回覆或工作紀錄中明確說明。
+- 不得在輸入中途做正式寫入或觸發會刷新頁面的遠端同步，除非該操作本身就是明確的「送出／儲存／完成」。
+- 不得讓 UI 直接寫 `localStorage`；S0 寫入必須經由 `apiService` 或既有 storage helper，並保留 scope、updatedAt、merge 語意。
+- 不得讓「舊遠端資料、舊分頁、舊快照」覆蓋使用者最新操作。
+- 每次碰到 S0，至少跑 `npm run lint`、相關 vitest、`npm test`、`npm run build`。若因時間限制不能全跑，必須明確告知未跑項目，且不得把高風險改動說成已完整驗證。
+- 必須補或更新回歸測試；測試要覆蓋真實業務語意，而不是只測函式有回傳。
+
+S0 常用回歸測試線索：
+
+- 叫貨/扣剩餘：`procurementBasisSync.test.ts`、`procurementBasisVisibility.test.ts`、`stallBringOutBehavior.test.ts`
+- 盤點/銷售同步：`crossModuleDataIntegrity.test.ts`、`stallQtySync.test.ts`、`orderStallSnapshot.test.ts`、`stallScopeIsolation.test.ts`
+- 改單/訂單管理：`orderLinePatchEitherStore.test.ts`、`orderStatusMerge.test.ts`、`orderEitherStore.test.ts`、`orderFranchiseeVisibility.test.ts`
+- 多端同步/覆蓋：`multiDeviceSync.test.ts`、`remoteSyncHub.test.ts`、`appDataBundleMerge.test.ts`
+- 金額/消耗品/帳務：`financeConsumable.test.ts`、`procurementLedgerDraft.test.ts`、`stallMathLedgerGap.test.ts`
+
+### S1：重要但可快速補救
+
+- 商品目錄、售價顯示、成本結構表、常用訂單管理、日期區間篩選、銷售/盤點輔助視覺化。
+- 守門規則：至少跑 `npm run lint`、相關測試、必要時 `npm run build`；若會影響 S0 資料，升級為 S0。
+
+### S2：低風險體驗與呈現
+
+- 文案、排版、顏色、圖示、非核心統計視覺、說明區塊。
+- 守門規則：至少跑 `npm run lint`；若碰到表單、按鈕、流程入口或手機操作，視影響升級為 S1/S0。
+
+### 開發判斷原則
+
+- 不確定級別時，一律往更高風險級別處理。
+- 員工現場會用的按鈕、加盟主會用的送出流程、管理員會用的改單與金額功能，預設都是 S0。
+- 每次修 S0 bug，必須順手檢查相鄰功能是否共用同一資料流，例如「叫貨扣剩餘」也要看盤點快照、scope、訂單可見性、送出後扣庫。
+
 ---
 # Agent／開發者指引（專案羅盤）
 
