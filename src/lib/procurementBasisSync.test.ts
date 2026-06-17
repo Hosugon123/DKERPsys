@@ -675,4 +675,49 @@ describe('procurement basis after order adjustment', () => {
     expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(11);
     expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
   });
+
+  it('扣盤點剩：盤點完成前送出的子單不佔用可扣池', () => {
+    const FRANCHISE_SCOPE = 'scope:franchisee:fr-basis-early-child';
+    const franchiseBasis = {
+      id: ORDER_ID,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 1,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 10, unitPrice: 100, unit: '隻' }],
+      actorRole: 'franchisee' as const,
+      scopeId: FRANCHISE_SCOPE,
+      actorUserId: 'fr-basis-early-child',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: { [PRODUCT_ID]: { out: '20', remain: '11' } },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    const earlyChild = {
+      id: 'child-before-stall-count',
+      createdAt: `${BASIS_YMD}T17:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T17:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 500,
+      payableAmount: 500,
+      itemCount: 11,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 11, unitPrice: 100, unit: '隻' }],
+      actorRole: 'franchisee' as const,
+      scopeId: FRANCHISE_SCOPE,
+      actorUserId: 'fr-basis-early-child',
+      procurementDeductionBasisOrderId: ORDER_ID,
+    };
+    localStorage.setItem('dongshan_order_history_v1', JSON.stringify([franchiseBasis, earlyChild]));
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(11);
+    expect(cartAfterDeductingStallRemainFromOrder({ [PRODUCT_ID]: 200 }, ORDER_ID)[PRODUCT_ID]).toBe(189);
+  });
 });

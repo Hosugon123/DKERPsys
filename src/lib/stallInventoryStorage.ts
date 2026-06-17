@@ -541,9 +541,14 @@ function orderLineAliasesByProductId(o: OrderHistoryEntry | null): Record<string
   if (!o) return aliases;
   for (const line of o.lines ?? []) {
     const id = resolveOrderLineProductId(line);
-    const name = String(line.name ?? '').trim();
-    if (!id || !name) continue;
-    aliases[id] = Array.from(new Set([...(aliases[id] ?? []), name]));
+    if (!id) continue;
+    const names = new Set<string>();
+    const lineName = String(line.name ?? '').trim();
+    if (lineName) names.add(lineName);
+    const catalogName = String(getSupplyItem(id)?.name ?? '').trim();
+    if (catalogName) names.add(catalogName);
+    if (names.size === 0) continue;
+    aliases[id] = Array.from(new Set([...(aliases[id] ?? []), ...names]));
   }
   return aliases;
 }
@@ -657,6 +662,7 @@ function totalRemainDeductedAgainstBasisOrder(
   for (const it of getAllSupplyItems()) {
     pool[it.id] = frozenRemainQtyForItem(frozen, it.id);
   }
+  const basisCompletedAt = String(basisOrder?.stallCountCompletedAt ?? '').trim();
   const orders = listAllMergedOrdersFromStores()
     .filter(
       (o) =>
@@ -665,6 +671,10 @@ function totalRemainDeductedAgainstBasisOrder(
         o.status !== '已取消' &&
         (!basisScope || resolveOrderStallStorageScopeId(o) === basisScope),
     )
+    .filter((o) => {
+      if (!basisCompletedAt) return false;
+      return String(o.createdAt ?? '').localeCompare(basisCompletedAt) >= 0;
+    })
     .filter((o) => !excludeOrderId || o.id !== excludeOrderId)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const deducted: Record<string, number> = {};
