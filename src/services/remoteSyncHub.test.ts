@@ -45,11 +45,10 @@ describe('remote sync write flushing', () => {
     });
 
     const fetchMock = vi.mocked(globalThis.fetch);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('GET');
-    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('PUT');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
 
-    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}')) as {
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? '{}')) as {
       bundle?: { keys?: Record<string, string | null> };
     };
     expect(body.bundle?.keys?.dongshan_store_code_v1).toBe('"007"');
@@ -62,12 +61,46 @@ describe('remote sync write flushing', () => {
     await syncRemoteAfterDirectLocalMutation();
 
     const fetchMock = vi.mocked(globalThis.fetch);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('PUT');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
 
-    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}')) as {
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? '{}')) as {
       bundle?: { keys?: Record<string, string | null> };
     };
     expect(body.bundle?.keys?.dongshan_store_code_v1).toBe('"008"');
+  });
+
+  it('fetches and merges the cloud bundle only after a version conflict', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, error: 'VERSION_CONFLICT' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, bundle: emptyCloudBundle() }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { withRemoteStorageWrite } = await import('./remoteSyncHub');
+
+    await withRemoteStorageWrite(() => {
+      localStorage.setItem('dongshan_store_code_v1', JSON.stringify('009'));
+    });
+
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('GET');
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe('PUT');
   });
 });

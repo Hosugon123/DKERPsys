@@ -212,20 +212,6 @@ async function mergeCloudWithLocalDirty(
   return JSON.stringify(merged);
 }
 
-async function reconcileLocalBundleWithCloudBeforePush(
-  bundleText: string,
-  dirtyKeys: readonly DongshanStorageKey[],
-): Promise<string> {
-  const cloud = await fetchRemoteBundle();
-  if (isRemoteBundleEffectivelyEmpty(cloud)) return bundleText;
-  const local = parseBundleJson(bundleText) as DongshanDataBundleV1;
-  const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys);
-  const result = importDongshanDataBundle(merged);
-  if (result.ok === false) throw new Error(result.error);
-  noteRemoteBundleUpdatedAt(cloud);
-  return JSON.stringify(merged);
-}
-
 async function pushBundleTextWithAutoMerge(
   bundleText: string,
   dirtyKeys: readonly DongshanStorageKey[],
@@ -233,12 +219,6 @@ async function pushBundleTextWithAutoMerge(
   remoteSyncLocked = false;
   const dirty = dirtyKeys.length > 0 ? dirtyKeys : [...DONGSHAN_EXPORT_STORAGE_KEYS];
   let text = bundleText;
-
-  try {
-    text = await reconcileLocalBundleWithCloudBeforePush(text, dirty);
-  } catch (e) {
-    if (!isNetworkishError(e)) throw e;
-  }
 
   for (let attempt = 0; attempt <= MAX_CONFLICT_MERGE_RETRIES; attempt++) {
     try {

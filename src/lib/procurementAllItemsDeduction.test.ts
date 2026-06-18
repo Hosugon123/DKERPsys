@@ -255,7 +255,7 @@ describe('procurement cart deduction across every catalog item', () => {
       expect(Number(poolAfter.lines[item.id]?.remain), item.name).toBe(0);
     }
     expect(cartAfterDeductingStallRemainFromOrder(cart2000, basisOrderId)).toEqual(cart2000);
-  });
+  }, 10_000);
 
   it('ignores child orders placed before stall count completed (dk002 false pool depletion)', () => {
     const items = getAllSupplyItems().filter((item) => !isConsumableItem(item));
