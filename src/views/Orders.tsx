@@ -28,6 +28,7 @@ import {
   displayOrderLastUpdatedByLabel,
   displayOrderStallCountCompletedByLabel,
   effectiveOrderDateYmd,
+  orderMatchesListDateRange,
   orderHasStallCountCompleted,
   resolveOrderDataScopeId,
   type FranchiseManagementOrder,
@@ -730,9 +731,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     return byStallCount.filter((order) => {
       const o = rawList.find((r) => r.id === order.id);
       if (!o) return false;
-      const key = effectiveOrderDateYmd(o);
-      if (!key) return false;
-      return key >= effectiveDateRange.from && key <= effectiveDateRange.to;
+      return orderMatchesListDateRange(o, effectiveDateRange.from, effectiveDateRange.to);
     });
   }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, effectiveDateRange, ordersData, rawList]);
 

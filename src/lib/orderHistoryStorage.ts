@@ -248,6 +248,19 @@ export function effectiveOrderDateYmd(o: { orderDateYmd?: string; createdAt: str
   return ymdFromCreatedAtLocal(o.createdAt) || raw || '';
 }
 
+/** 待出貨單若歸屬日落在區間外，仍以建單日納入篩選，避免剛送出後在訂單管理找不到。 */
+export function orderMatchesListDateRange(
+  o: { status: FranchiseOrderStatus; createdAt: string; orderDateYmd?: string },
+  from: string,
+  to: string,
+): boolean {
+  const bookYmd = effectiveOrderDateYmd(o);
+  if (bookYmd >= from && bookYmd <= to) return true;
+  if (o.status !== '待出貨') return false;
+  const createdYmd = o.createdAt.slice(0, 10);
+  return createdYmd >= from && createdYmd <= to;
+}
+
 function normalizeOrderDateYmdInput(s: string): string {
   const t = String(s).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
@@ -1089,7 +1102,7 @@ export function updateEditableOrderLinesById(
 }
 
 /**
- * 直營店管理員叫貨 → 訂單管理（專用儲存）；
+ * 直營店管理員／直營員工叫貨 → 訂單管理（專用儲存）；
  * 加盟主／店員叫貨 → 歷史訂單（本清單）。
  */
 export function appendProcurementOrderEntry(params: {
@@ -1114,7 +1127,10 @@ export function appendProcurementOrderEntry(params: {
   } = params;
   const ctx = getDataScopeContext();
   const bookYmd = normalizeOrderDateYmdInput(orderDateYmd);
-  if (actorRole === 'admin') {
+  const isHqDirectProcurement =
+    actorRole === 'admin' ||
+    (actorRole === 'employee' && ctx.scopeId === HQ_SCOPE_ID);
+  if (isHqDirectProcurement) {
     return appendFranchiseManagementOrderInternal({
       lines,
       totalAmount,
