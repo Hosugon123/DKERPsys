@@ -5,6 +5,7 @@ import {
   loadOrderHistory,
   listOrdersWithStallCountCompleted,
   listAllMergedOrdersFromStores,
+  orderMatchesProcurementSoldReferenceScope,
   effectiveOrderDateYmd,
   readMergedOrderByIdFromStores,
   resolveOrderDataScopeId,
@@ -1247,7 +1248,9 @@ export function setPreferredStallBasisYmd(ymdStr: string) {
 
 /** 批貨頁最後選的「欲扣除餘貨的訂單」；預設不指定，僅還原使用者曾明確選過的單號。 */
 export function getPreferredProcurementBasisOrderId(): string {
-  const orders = listOrdersWithStallCountCompleted();
+  const orders = listOrdersWithStallCountCompleted().filter((o) =>
+    orderMatchesProcurementSoldReferenceScope(o),
+  );
   let remembered: string | null = null;
   try {
     remembered = localStorage.getItem(PREF_PROCUREMENT_BASIS_ORDER);

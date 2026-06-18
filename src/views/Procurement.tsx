@@ -23,6 +23,7 @@ import { buildProcurementLedgerDraftInput } from '../lib/procurementLedgerDraft'
 import {
   displayOrderCreatedByLabel,
   effectiveOrderDateYmd,
+  orderMatchesProcurementSoldReferenceScope,
   type OrderHistoryLine,
   type OrderHistoryEntry,
 } from '../lib/orderHistoryStorage';
@@ -219,7 +220,7 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
   useEffect(() => {
     void (async () => {
       const all = await ordersApi.listOrdersWithStallCountCompleted();
-      setBasisOrdersList(all);
+      setBasisOrdersList(all.filter((o) => orderMatchesProcurementSoldReferenceScope(o)));
     })();
   }, [stallTick]);
 
@@ -228,10 +229,9 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       const orders = basisOrdersList;
       if (orders.length === 0) return '';
       if (prev && orders.some((o) => o.id === prev)) return prev;
-      if (prev === '') return '';
       const fromPref = getPreferredProcurementBasisOrderId();
       if (fromPref && orders.some((o) => o.id === fromPref)) return fromPref;
-      return orders[0]!.id;
+      return '';
     });
   }, [basisOrdersList]);
 
@@ -549,7 +549,9 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
         selfSuppliedCostAmount,
         actorRole: userRole,
         orderDateYmd: newOrderDateYmd,
-        procurementDeductionBasisOrderId: stallBasisOrderId,
+        ...(stallBasisOrderId.trim()
+          ? { procurementDeductionBasisOrderId: stallBasisOrderId.trim() }
+          : {}),
       });
       if (syncProcurementToLedger && (userRole === 'admin' || userRole === 'employee')) {
         const draft = buildProcurementLedgerDraftInput({
