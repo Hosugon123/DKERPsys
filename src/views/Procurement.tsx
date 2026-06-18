@@ -12,7 +12,7 @@ import {
   ChevronUp,
   X,
 } from 'lucide-react';
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
 import type { UserRole } from './Orders';
 import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
@@ -105,7 +105,7 @@ type ProcurementWorkDraft = {
   referenceMode: ProcurementReferenceMode;
 };
 
-export default function Procurement({ userRole }: { userRole: UserRole }) {
+export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   const isNarrow = useIsNarrowScreen();
   const restoredProcurement = useRestoreWorkDraft<ProcurementWorkDraft>(WORK_DRAFT_IDS.procurement);
   /** 僅超級管理員可編輯品項、批價、零售；加盟主可編輯本店零售參考價。 */
@@ -1554,4 +1554,4 @@ export default function Procurement({ userRole }: { userRole: UserRole }) {
       )}
     </div>
   );
-}
+});

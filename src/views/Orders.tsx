@@ -1,4 +1,13 @@
-import { useState, useMemo, useEffect, useCallback, useRef, type MouseEvent } from 'react';
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+  startTransition,
+  memo,
+  type MouseEvent,
+} from 'react';
 import { Package, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
 import {
   DashboardMonthCustomRangePicker,
@@ -41,6 +50,7 @@ import {
 import {
   getOrderStallDisplayEconomics,
   getStallDisplayRetailEstAndRemain,
+  type OrderStallDisplayEconomics,
 } from '../lib/orderStallDisplayRevenue';
 import {
   estimatedRetailPerPackage,
@@ -300,14 +310,20 @@ function computeOrderDetailLineMetrics(
 
 /**
  * 訂單列表「預估金額」：已完成盤點用快照 estTotal；否則依叫貨列＋扣庫參考剩餘推算帶出零售預估（與明細表一致）。
+ * @param stall 已算好的盤點經濟欄位，避免重複 aggregate
+ * @param getCarrySnap 同扣庫參考單共用快照（6/17 起每單 loadDayForProcurementFromOrder 造成列表卡頓）
  */
-function plannedEstimatedRetailFromOrder(raw: RawOrder, retailView: SupplyRetailView): number | null {
-  const fromStall = getStallDisplayRetailEstAndRemain(raw, retailView);
-  if (fromStall != null) return fromStall.estTotal;
+function plannedEstimatedRetailFromOrder(
+  raw: RawOrder,
+  retailView: SupplyRetailView,
+  stall: OrderStallDisplayEconomics,
+  getCarrySnap: (order: RawOrder) => CarrySnapForOrderDetail,
+): number | null {
+  if (stall.retailEstAndRemain != null) return stall.retailEstAndRemain.estTotal;
   const lines = raw.lines;
   if (!lines?.length) return null;
   const stallSnap = mergeOrderStallSnapshot(raw);
-  const carrySnap = loadRemainSnapshotForOrderManagementDisplay(raw);
+  const carrySnap = getCarrySnap(raw);
   let total = 0;
   let any = false;
   for (const line of lines) {
@@ -317,6 +333,56 @@ function plannedEstimatedRetailFromOrder(raw: RawOrder, retailView: SupplyRetail
     total += computeOrderDetailLineMetrics(line, stallSnap, carrySnap, retailView).retailEstSub;
   }
   return any ? Math.round(total * 100) / 100 : null;
+}
+
+function buildCheapOrderFinancials(r: RawOrder): OrderFinancialSummary {
+  const payable = r.totalAmount;
+  const selfSuppliedDeduction =
+    isOrderHistoryEntry(r) && r.actorRole === 'franchisee'
+      ? (r.selfSuppliedCostAmount ?? Math.max(0, r.totalAmount - (r.payableAmount ?? r.totalAmount)))
+      : 0;
+  return {
+    procurementAmount: payable,
+    selfSuppliedDeduction,
+    netPayableAmount: Math.max(0, payable - selfSuppliedDeduction),
+    estimatedAmount: null,
+    remainAmount: null,
+    countedRevenueAmount: null,
+    actualIncomeAmount: null,
+  };
+}
+
+function createCarrySnapGetter() {
+  const carrySnapByBasisId = new Map<string, CarrySnapForOrderDetail>();
+  return (raw: RawOrder): CarrySnapForOrderDetail => {
+    const bid =
+      isOrderHistoryEntry(raw) && raw.procurementDeductionBasisOrderId
+        ? raw.procurementDeductionBasisOrderId.trim()
+        : '';
+    if (!bid) return loadRemainSnapshotForOrderManagementDisplay(raw);
+    const hit = carrySnapByBasisId.get(bid);
+    if (hit !== undefined) return hit;
+    const snap = loadRemainSnapshotForOrderManagementDisplay(raw);
+    carrySnapByBasisId.set(bid, snap);
+    return snap;
+  };
+}
+
+function buildStallFinancialFields(
+  r: RawOrder,
+  view: SupplyRetailView,
+  getCarrySnap: (raw: RawOrder) => CarrySnapForOrderDetail,
+): Pick<
+  OrderFinancialSummary,
+  'estimatedAmount' | 'remainAmount' | 'countedRevenueAmount' | 'actualIncomeAmount'
+> {
+  const stall = getOrderStallDisplayEconomics(r, view);
+  return {
+    estimatedAmount: plannedEstimatedRetailFromOrder(r, view, stall, getCarrySnap),
+    remainAmount: stall.retailEstAndRemain?.remGoodsValue ?? null,
+    countedRevenueAmount: stall.soldAtRetail ?? stall.shouldRevenue ?? null,
+    actualIncomeAmount: stall.actualRevenue,
+  };
 }
 
 /** 調整貨量時列小計用：員工顯示預估零售單價，其餘身分用訂單批價。 */
@@ -518,7 +584,57 @@ type OrdersLineEditDraft = {
   original?: OrderHistoryLine[];
 };
 
-export default function Orders({ userRole }: { userRole: UserRole }) {
+const OrderStatusFilterTabs = memo(function OrderStatusFilterTabs({
+  value,
+  onChange,
+}: {
+  value: StatusFilter;
+  onChange: (tab: StatusFilter) => void;
+}) {
+  const [pressedTab, setPressedTab] = useState(value);
+  useEffect(() => {
+    setPressedTab(value);
+  }, [value]);
+
+  const handleSelect = useCallback(
+    (tab: StatusFilter) => {
+      setPressedTab(tab);
+      startTransition(() => onChange(tab));
+    },
+    [onChange],
+  );
+
+  return (
+    <div
+      className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none -mx-0.5 px-0.5"
+      role="tablist"
+      aria-label="訂單狀態"
+    >
+      {ORDER_FILTER_TAB_ORDER.map((tab) => {
+        const isActive = pressedTab === tab;
+        return (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => handleSelect(tab)}
+            className={cn(
+              'box-border inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full border px-3.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm',
+              isActive
+                ? 'bg-amber-600/20 text-amber-500 border-amber-600/30'
+                : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800',
+            )}
+          >
+            {ORDER_STATUS_TAB_LABELS[tab]}
+          </button>
+        );
+      })}
+    </div>
+  );
+});
+
+export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const restoredLineEdit = useRestoreWorkDraft<OrdersLineEditDraft>(WORK_DRAFT_IDS.ordersLineEdit);
   const isHeadquarters = userRole === 'admin';
   /** 訂單明細表「叫貨金額小計」僅加盟主與管理員可見，員工不顯示 */
@@ -538,6 +654,9 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   /** 建單星期篩選（空＝不篩選） */
   const [activeWeekdays, setActiveWeekdays] = useState<number[]>([]);
   const [orderListPeriod, setOrderListPeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
+  const handleOrderListPeriodChange = useCallback((next: DashboardPeriodMode) => {
+    startTransition(() => setOrderListPeriod(next));
+  }, []);
   /** 出貨：兩階段確認 */
   const [shipModal, setShipModal] = useState<null | { id: string }>(null);
   /** 已出貨改回待出貨 */
@@ -556,6 +675,27 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const pickingAutosaveGenRef = useRef(0);
   /** 開始調整貨量時訂單的 updatedAt；雲端拉回較新資料時勿用舊 UI 覆寫 */
   const pickingStorageUpdatedAtRef = useRef(0);
+  const enrichmentPausedRef = useRef(false);
+
+  useEffect(() => {
+    const pause = () => {
+      enrichmentPausedRef.current = true;
+    };
+    const resume = () => {
+      enrichmentPausedRef.current = false;
+    };
+    window.addEventListener('pointerdown', pause, true);
+    window.addEventListener('keydown', pause, true);
+    window.addEventListener('pointerup', resume, true);
+    window.addEventListener('keyup', resume, true);
+    return () => {
+      window.removeEventListener('pointerdown', pause, true);
+      window.removeEventListener('keydown', pause, true);
+      window.removeEventListener('pointerup', resume, true);
+      window.removeEventListener('keyup', resume, true);
+    };
+  }, []);
+
   /** 總部：僅修正各列批價（不改數量），已出貨或已盤點押記亦可 */
   const [priceAdjustOrderId, setPriceAdjustOrderId] = useState<string | null>(null);
   const [priceAdjustLines, setPriceAdjustLines] = useState<OrderHistoryLine[]>([]);
@@ -619,34 +759,22 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     [mgmtOrders, historyOrders]
   );
 
+  const rawById = useMemo(() => new Map(rawList.map((r) => [r.id, r])), [rawList]);
+
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
   const catalogItemsForOrderDetail = useSupplyCatalogItems(userRole);
 
-  const ordersData = useMemo(() => {
-    const view = supplyRetailView;
-    return rawList.map((r) => {
-      const stall = getOrderStallDisplayEconomics(r, view);
-      const payable = r.totalAmount;
-      const selfSuppliedDeduction = isOrderHistoryEntry(r) && r.actorRole === 'franchisee'
-        ? (r.selfSuppliedCostAmount ?? Math.max(0, r.totalAmount - (r.payableAmount ?? r.totalAmount)))
-        : 0;
-      const netPayableAmount = Math.max(0, payable - selfSuppliedDeduction);
-      const remainAmount = stall.retailEstAndRemain?.remGoodsValue ?? null;
-      const estimatedAmount = plannedEstimatedRetailFromOrder(r, view);
-      const financials: OrderFinancialSummary = {
-        procurementAmount: payable,
-        selfSuppliedDeduction,
-        netPayableAmount,
-        estimatedAmount,
-        remainAmount,
-        countedRevenueAmount: stall.soldAtRetail ?? stall.shouldRevenue ?? null,
-        actualIncomeAmount: stall.actualRevenue,
-      };
-      return isFranchiseManagementOrder(r)
-        ? toOrderRowFromMgmt(r, financials)
-        : toOrderRowFromHistory(r, financials);
-    });
-  }, [rawList, supplyRetailView]);
+  /** 列表篩選用輕量列：盤點 KPI 僅對目前分頁延遲計算，避免切換分頁卡頓。 */
+  const ordersData = useMemo(
+    () =>
+      rawList.map((r) => {
+        const financials = buildCheapOrderFinancials(r);
+        return isFranchiseManagementOrder(r)
+          ? toOrderRowFromMgmt(r, financials)
+          : toOrderRowFromHistory(r, financials);
+      }),
+    [rawList],
+  );
 
   /**
    * 從目前可見資料抓出所有「曾經出現過」的店家，作為下拉選項。
@@ -697,7 +825,6 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   }, [orderListPeriod]);
 
   const filteredOrders = useMemo(() => {
-    const rawById = new Map(rawList.map((r) => [r.id, r]));
     const byWeekday = ordersData.filter((order) => {
       const o = rawById.get(order.id);
       if (!o) return false;
@@ -729,7 +856,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       if (!o) return false;
       return orderMatchesListDateRange(o, effectiveDateRange.from, effectiveDateRange.to);
     });
-  }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, effectiveDateRange, ordersData, rawList]);
+  }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, effectiveDateRange, ordersData, rawById]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PAGE_SIZE));
 
@@ -745,6 +872,60 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
     const start = (page - 1) * ORDERS_PAGE_SIZE;
     return filteredOrders.slice(start, start + ORDERS_PAGE_SIZE);
   }, [filteredOrders, page]);
+
+  const [pageFinancialsById, setPageFinancialsById] = useState<
+    Record<string, Pick<OrderFinancialSummary, 'estimatedAmount' | 'remainAmount' | 'countedRevenueAmount' | 'actualIncomeAmount'>>
+  >({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const rows = paginatedOrders;
+    if (rows.length === 0) {
+      setPageFinancialsById({});
+      return () => {
+        cancelled = true;
+      };
+    }
+    const getCarrySnap = createCarrySnapGetter();
+    const acc: Record<
+      string,
+      Pick<OrderFinancialSummary, 'estimatedAmount' | 'remainAmount' | 'countedRevenueAmount' | 'actualIncomeAmount'>
+    > = {};
+    let index = 0;
+
+    const step = () => {
+      if (cancelled) return;
+      if (enrichmentPausedRef.current) {
+        requestAnimationFrame(step);
+        return;
+      }
+      if (index >= rows.length) {
+        setPageFinancialsById(acc);
+        return;
+      }
+      const o = rows[index];
+      const r = rawById.get(o.id);
+      if (r) {
+        acc[o.id] = buildStallFinancialFields(r, supplyRetailView, getCarrySnap);
+      }
+      index += 1;
+      requestAnimationFrame(step);
+    };
+
+    requestAnimationFrame(step);
+    return () => {
+      cancelled = true;
+    };
+  }, [paginatedOrders, rawById, supplyRetailView]);
+
+  const displayOrders = useMemo(
+    () =>
+      paginatedOrders.map((o) => {
+        const fin = pageFinancialsById[o.id];
+        return fin ? { ...o, ...fin } : o;
+      }),
+    [paginatedOrders, pageFinancialsById],
+  );
 
   useEffect(() => {
     if (expandedOrderId && !filteredOrders.some((o) => o.id === expandedOrderId)) {
@@ -1121,32 +1302,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         className="rounded-2xl border border-zinc-800/90 bg-zinc-900/40 p-3 sm:p-4 space-y-3"
         aria-label="訂單篩選"
       >
-        <div
-          className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none -mx-0.5 px-0.5"
-          role="tablist"
-          aria-label="訂單狀態"
-        >
-          {ORDER_FILTER_TAB_ORDER.map((tab) => {
-            const isActive = statusFilter === tab;
-            return (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setStatusFilter(tab)}
-                className={cn(
-                  'box-border inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full border px-3.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm',
-                  isActive
-                    ? 'bg-amber-600/20 text-amber-500 border-amber-600/30'
-                    : 'bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800',
-                )}
-              >
-                {ORDER_STATUS_TAB_LABELS[tab]}
-              </button>
-            );
-          })}
-        </div>
+        <OrderStatusFilterTabs value={statusFilter} onChange={setStatusFilter} />
 
         <div
           className={cn(
@@ -1157,7 +1313,7 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
           <div className="min-w-0 rounded-xl border border-amber-900/30 bg-zinc-950/60 p-3 space-y-3">
             <DashboardMonthCustomRangePicker
               value={orderListPeriod}
-              onChange={setOrderListPeriod}
+              onChange={handleOrderListPeriodChange}
               ariaLabel="訂單日期區間"
             />
             <OrderWeekdayFilter
@@ -1253,12 +1409,13 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
                 : '沒有符合條件的待出貨或已出貨（未盤點）訂單；若要查看已盤點訂單，請點「已盤點」。'}
           </div>
         )}
-        {paginatedOrders.map((order) => {
-          const raw = rawList.find((r) => r.id === order.id);
-          const stallSnap = raw ? mergeOrderStallSnapshot(raw) : null;
-          const carrySnapForDisplay = raw ? loadRemainSnapshotForOrderManagementDisplay(raw) : null;
-          const canEdit = canEditOrderInList(raw, userRole);
+        {displayOrders.map((order) => {
+          const raw = rawById.get(order.id);
           const isExpanded = expandedOrderId === order.id;
+          const stallSnap = isExpanded && raw ? mergeOrderStallSnapshot(raw) : null;
+          const carrySnapForDisplay =
+            isExpanded && raw ? loadRemainSnapshotForOrderManagementDisplay(raw) : null;
+          const canEdit = canEditOrderInList(raw, userRole);
           const isPickingThis =
             canEdit && pickingOrderId === order.id && order.status !== '已取消';
           const isPriceAdjustThis =
@@ -2287,4 +2444,4 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       )}
     </div>
   );
-}
+});

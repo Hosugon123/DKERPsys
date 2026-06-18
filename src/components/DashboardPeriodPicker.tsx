@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -215,7 +215,7 @@ function DashboardCustomPeriodModal({
   );
 }
 
-export function DashboardMonthCustomRangePicker({
+export const DashboardMonthCustomRangePicker = memo(function DashboardMonthCustomRangePicker({
   value,
   onChange,
   ariaLabel = '資料區間',
@@ -230,6 +230,7 @@ export function DashboardMonthCustomRangePicker({
   stretch?: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [customArmed, setCustomArmed] = useState(false);
   const resolved = resolveDashboardPeriodYmd(value);
 
   return (
@@ -239,15 +240,21 @@ export function DashboardMonthCustomRangePicker({
           type="button"
           aria-pressed={value.kind === 'month'}
           className={cn(periodToggleClass(value.kind === 'month'), stretch && 'flex-1')}
-          onClick={() => onChange({ kind: 'month' })}
+          onClick={() => {
+            setCustomArmed(false);
+            onChange({ kind: 'month' });
+          }}
         >
           本月
         </button>
         <button
           type="button"
-          aria-pressed={value.kind === 'custom'}
-          className={cn(periodToggleClass(value.kind === 'custom'), stretch && 'flex-1')}
-          onClick={() => setModalOpen(true)}
+          aria-pressed={value.kind === 'custom' || customArmed}
+          className={cn(periodToggleClass(value.kind === 'custom' || customArmed), stretch && 'flex-1')}
+          onClick={() => {
+            setCustomArmed(true);
+            setModalOpen(true);
+          }}
         >
           自訂時間
         </button>
@@ -261,9 +268,15 @@ export function DashboardMonthCustomRangePicker({
         open={modalOpen}
         initialStart={resolved.startYmd}
         initialEnd={resolved.endYmd}
-        onClose={() => setModalOpen(false)}
-        onConfirm={(startYmd, endYmd) => onChange({ kind: 'custom', startYmd, endYmd })}
+        onClose={() => {
+          setModalOpen(false);
+          setCustomArmed(false);
+        }}
+        onConfirm={(startYmd, endYmd) => {
+          setCustomArmed(false);
+          onChange({ kind: 'custom', startYmd, endYmd });
+        }}
       />
     </div>
   );
-}
+});

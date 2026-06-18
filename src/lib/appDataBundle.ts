@@ -130,21 +130,36 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
 
   const allowed = new Set<string>(DONGSHAN_EXPORT_STORAGE_KEYS as unknown as string[]);
   let importedKeyCount = 0;
+  let storageChanged = false;
   for (const [storageKey, value] of Object.entries(keyBag)) {
     if (!allowed.has(storageKey)) continue;
     if (value === null) {
-      localStorage.removeItem(storageKey);
+      try {
+        if (localStorage.getItem(storageKey) !== null) {
+          localStorage.removeItem(storageKey);
+          storageChanged = true;
+        }
+      } catch {
+        /* ignore */
+      }
       importedKeyCount += 1;
       continue;
     }
     if (typeof value !== 'string') {
       return { ok: false, error: `鍵 ${storageKey} 的值必須為字串或 null。` };
     }
-    localStorage.setItem(storageKey, value);
+    try {
+      if (localStorage.getItem(storageKey) !== value) {
+        localStorage.setItem(storageKey, value);
+        storageChanged = true;
+      }
+    } catch {
+      return { ok: false, error: `無法寫入 ${storageKey}。` };
+    }
     importedKeyCount += 1;
   }
 
-  dispatchPostImportSync();
+  if (storageChanged) dispatchPostImportSync();
   return { ok: true, importedKeyCount };
 }
 

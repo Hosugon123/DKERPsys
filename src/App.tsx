@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useDeferredValue, lazy, Suspense } from 'react';
 import DeployUpdateBanner from './components/DeployUpdateBanner';
 import PullToRefresh from './components/PullToRefresh';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
@@ -15,7 +15,8 @@ import {
 } from './lib/appRefresh';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
-import Dashboard, { type DashboardViewAsTarget } from './views/Dashboard';
+import type { DashboardViewAsTarget } from './views/Dashboard';
+const Dashboard = lazy(() => import('./views/Dashboard'));
 import LoginScreen from './views/LoginScreen';
 import Products from './views/Products';
 import Permissions from './views/Permissions';
@@ -54,6 +55,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [currentView, setCurrentView] = useState('dashboard');
+  const deferredView = useDeferredValue(currentView);
   /** 總部以加盟主視角檢視（view-as）的目標；非 dashboard 頁時自動清除 */
   const [viewAsFranchisee, setViewAsFranchisee] = useState<DashboardViewAsTarget | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -88,9 +90,6 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      if (getStorageMode() === 'remote') {
-        await initRemoteSyncOnAppLoad();
-      }
       const bundleBeforeAuth = serializeDongshanDataBundle();
       ensureAuthBootstrap();
       const s = readSession();
@@ -101,7 +100,10 @@ export default function App() {
       }
       setAuthReady(true);
       if (getStorageMode() === 'remote') {
-        void pushRemoteIfLocalBundleChangedSince(bundleBeforeAuth);
+        void (async () => {
+          await initRemoteSyncOnAppLoad();
+          pushRemoteIfLocalBundleChangedSince(bundleBeforeAuth);
+        })();
       }
     })();
   }, []);
@@ -215,17 +217,19 @@ export default function App() {
     setCurrentView('dashboard');
   };
 
-  const renderView = () => {
+  const renderView = (view: string) => {
     if (!session) return null;
-    switch (currentView) {
+    switch (view) {
       case 'dashboard':
         return (
-          <Dashboard
-            userRole={userRole}
-            viewAsFranchisee={viewAsFranchisee}
-            onSelectFranchisee={(target) => setViewAsFranchisee(target)}
-            onExitViewAs={() => setViewAsFranchisee(null)}
-          />
+          <Suspense fallback={<div className="text-sm text-zinc-500">載入營運概況…</div>}>
+            <Dashboard
+              userRole={userRole}
+              viewAsFranchisee={viewAsFranchisee}
+              onSelectFranchisee={(target) => setViewAsFranchisee(target)}
+              onExitViewAs={() => setViewAsFranchisee(null)}
+            />
+          </Suspense>
         );
       case 'orders':
         return <Orders userRole={userRole} />;
@@ -300,7 +304,7 @@ export default function App() {
           sidebarSwipe={isNarrow ? sidebarSwipe : undefined}
           className="uio-touch-host min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pt-4 md:px-6 md:pb-6 md:pt-6 lg:px-8 lg:pb-8 lg:pt-8"
         >
-          <div key={`${currentView}-${pageRefreshKey}`}>{renderView()}</div>
+          <div key={`${deferredView}-${pageRefreshKey}`}>{renderView(deferredView)}</div>
         </PullToRefresh>
       </div>
       <DeployUpdateBanner />

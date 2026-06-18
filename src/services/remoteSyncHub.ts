@@ -356,12 +356,11 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
   }
 }
 
-export async function pushRemoteIfLocalBundleChangedSince(snapshot: string): Promise<void> {
+export function pushRemoteIfLocalBundleChangedSince(snapshot: string): void {
   if (getStorageMode() !== 'remote') return;
   const now = serializeDongshanDataBundle();
   if (now === snapshot) return;
   scheduleDebouncedPush(snapshot, now);
-  await awaitRemotePushIdle();
 }
 
 export async function syncRemoteAfterDirectLocalMutation(): Promise<void> {

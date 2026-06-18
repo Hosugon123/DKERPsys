@@ -14,7 +14,7 @@ import {
   ChevronDown,
   Database,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, startTransition, type DragEvent } from 'react';
 import { getDefaultMainNavIdsForRole, type MainNavId } from '../lib/sidebarNavConfig';
 import {
   applySavedNavOrder,
@@ -103,6 +103,20 @@ export default function Sidebar({
   const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
   const [reorderMode, setReorderMode] = useState(false);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [optimisticView, setOptimisticView] = useState(currentView);
+
+  useEffect(() => {
+    setOptimisticView(currentView);
+  }, [currentView]);
+
+  const navigateTo = useCallback(
+    (view: string) => {
+      setOptimisticView(view);
+      startTransition(() => setCurrentView(view));
+      setIsOpen(false);
+    },
+    [setCurrentView, setIsOpen],
+  );
 
   const baseMenu = useMemo(() => defaultItemsForRole(userRole), [userRole]);
 
@@ -230,7 +244,7 @@ export default function Sidebar({
         >
           {menuItems.map((item, index) => {
             const Icon = item.icon;
-            const isActive = !reorderMode && currentView === item.id;
+            const isActive = !reorderMode && optimisticView === item.id;
             if (reorderMode) {
               return (
                 <div
@@ -284,10 +298,7 @@ export default function Sidebar({
                 key={item.id}
                 role="listitem"
                 type="button"
-                onClick={() => {
-                  setCurrentView(item.id);
-                  setIsOpen(false);
-                }}
+                onClick={() => navigateTo(item.id)}
                 className={cn(
                   'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-200',
                   isActive
@@ -308,21 +319,20 @@ export default function Sidebar({
               type="button"
               onClick={() => {
                 if (reorderMode) return;
-                setCurrentView('dataHub');
-                setIsOpen(false);
+                navigateTo('dataHub');
               }}
               disabled={reorderMode}
               className={cn(
                 'w-full flex items-center gap-3 p-3 transition-colors duration-200 rounded-lg',
                 reorderMode && 'opacity-40 pointer-events-none',
-                !reorderMode && currentView === 'dataHub'
+                !reorderMode && optimisticView === 'dataHub'
                   ? 'bg-amber-600/10 border-r-4 border-amber-600 text-amber-500'
                   : 'text-zinc-400 hover:bg-zinc-800'
               )}
             >
               <Database
                 size={20}
-                className={!reorderMode && currentView === 'dataHub' ? 'text-amber-500' : 'text-zinc-400'}
+                className={!reorderMode && optimisticView === 'dataHub' ? 'text-amber-500' : 'text-zinc-400'}
               />
               <span className="font-medium">數據中心</span>
             </button>
@@ -332,21 +342,20 @@ export default function Sidebar({
               type="button"
               onClick={() => {
                 if (reorderMode) return;
-                setCurrentView('permissions');
-                setIsOpen(false);
+                navigateTo('permissions');
               }}
               disabled={reorderMode}
               className={cn(
                 'w-full flex items-center gap-3 p-3 transition-colors duration-200 rounded-lg',
                 reorderMode && 'opacity-40 pointer-events-none',
-                !reorderMode && currentView === 'permissions'
+                !reorderMode && optimisticView === 'permissions'
                   ? 'bg-amber-600/10 border-r-4 border-amber-600 text-amber-500'
                   : 'text-zinc-400 hover:bg-zinc-800'
               )}
             >
               <Users
                 size={20}
-                className={!reorderMode && currentView === 'permissions' ? 'text-amber-500' : 'text-zinc-400'}
+                className={!reorderMode && optimisticView === 'permissions' ? 'text-amber-500' : 'text-zinc-400'}
               />
               <span className="font-medium">權限編輯</span>
             </button>
