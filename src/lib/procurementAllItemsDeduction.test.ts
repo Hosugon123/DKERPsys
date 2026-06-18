@@ -7,11 +7,13 @@ import {
 import {
   buildProcurementRemainDeductionsFromLines,
   cartAfterDeductingStallRemainFromOrder,
+  computeStallOutImportBreakdown,
   ensureBasisDayFromOrderSnapshot,
   applyOrderDeductionToDayRemain,
   getOrderStallCountBasisYmdForDeduction,
   loadBasisOrderRemainForProcurementDeduction,
   loadStallSalesDisplayFromBasisOrder,
+  recomputeStallOutForStallYmdAndOrder,
 } from './stallInventoryStorage';
 import { resolveOrderStallStorageScopeId } from './scopedStallDateKey';
 import { getAllSupplyItems, isConsumableItem } from './supplyCatalog';
@@ -228,12 +230,25 @@ describe('procurement cart deduction across every catalog item', () => {
       qty: cart1500[item.id] ?? 0,
       unit: 'unit',
     }));
-    simulateProcurementCheckout({
+    const nextOrderId = simulateProcurementCheckout({
       lines: checkoutLines,
       totalAmount: checkoutLines.reduce((s, l) => s + l.qty, 0),
       orderDateYmd: NEXT_YMD,
       procurementDeductionBasisOrderId: basisOrderId,
     });
+
+    const breakdown = computeStallOutImportBreakdown(NEXT_YMD, nextOrderId);
+    const implanted = recomputeStallOutForStallYmdAndOrder(NEXT_YMD, nextOrderId, undefined, {
+      clearRemain: true,
+      persist: false,
+    });
+    for (const item of items) {
+      const row = breakdown?.rows.find((r) => r.productId === item.id);
+      expect(row?.orderQty, item.name).toBe(1500);
+      expect(row?.prevRemain, item.name).toBe(500);
+      expect(row?.suggestedOut, item.name).toBe(2000);
+      expect(Number(implanted.lines[item.id]?.out), item.name).toBe(2000);
+    }
 
     const poolAfter = loadBasisOrderRemainForProcurementDeduction(basisOrderId);
     for (const item of items) {

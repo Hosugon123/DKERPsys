@@ -644,7 +644,7 @@ export function buildProcurementRemainDeductionsFromLines(
     const productId = resolveOrderLineProductId(line);
     const qty = roundProcurementQty(Number(line.qty) || 0);
     if (qty <= 0) continue;
-    const cur = roundProcurementQty(Math.max(0, num(basis.lines[productId]?.remain)));
+    const cur = frozenRemainQtyForItem(basis, productId);
     const deduct = roundProcurementQty(Math.min(qty, cur));
     if (deduct > 0) out[productId] = roundProcurementQty((out[productId] ?? 0) + deduct);
   }
@@ -1375,7 +1375,7 @@ function cartAfterDeductingStallRemainFromSnapshot(
   for (const [id, raw] of Object.entries(baseByProductId)) {
     const base = roundProcurementQty(Number(raw) || 0);
     if (base <= 0) continue;
-    const remain = roundProcurementQty(Math.max(0, num(day.lines[id]?.remain)));
+    const remain = frozenRemainQtyForItem(day, id);
     const need = roundProcurementQty(Math.max(0, base - remain));
     if (need > 0) out[id] = need;
   }
