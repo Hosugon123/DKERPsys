@@ -108,7 +108,7 @@ export function buildDongshanDataBundleForPush(): DongshanDataBundleV1 {
 }
 
 export function serializeDongshanDataBundle(): string {
-  return JSON.stringify(buildDongshanDataBundle(), null, 2);
+  return JSON.stringify(buildDongshanDataBundle());
 }
 
 export type ImportBundleResult =

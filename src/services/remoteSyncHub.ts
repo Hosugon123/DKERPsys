@@ -287,13 +287,17 @@ function applySyncFailureFromUnknown(e: unknown): void {
   else dispatchStatus('error');
 }
 
-/**
- * 分頁重新可見時更新雲端版本戳記，降低下一筆 PUT 誤判 409 的機率。
- */
+/** 分頁重新可見時更新雲端版本戳記，降低下一筆 PUT 誤判 409 的機率。 */
+let lastVisibilityRefreshMs = 0;
+const VISIBILITY_REFRESH_MIN_MS = 60_000;
+
 export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
   if (getStorageMode() !== 'remote') return;
   // 盤點／表單編輯中或尚有未推送變更時，不從雲端拉回以免覆寫本機草稿
   if (hasUnsavedWork() || hasPendingRemotePush()) return;
+  const now = Date.now();
+  if (now - lastVisibilityRefreshMs < VISIBILITY_REFRESH_MIN_MS) return;
+  lastVisibilityRefreshMs = now;
   try {
     const cloud = await fetchRemoteBundle();
     if (isRemoteBundleEffectivelyEmpty(cloud)) {

@@ -39,10 +39,8 @@ import {
   type UpdateEditableOrderLinesResult,
 } from '../lib/orderHistoryStorage';
 import {
+  getOrderStallDisplayEconomics,
   getStallDisplayRetailEstAndRemain,
-  getStallDisplayShouldRevenue,
-  getStallDisplaySoldAtRetail,
-  getStallDisplayActualRevenue,
 } from '../lib/orderStallDisplayRevenue';
 import {
   estimatedRetailPerPackage,
@@ -627,16 +625,13 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   const ordersData = useMemo(() => {
     const view = supplyRetailView;
     return rawList.map((r) => {
-      const stallRev = getStallDisplayShouldRevenue(r, view);
-      const countedRevenue = getStallDisplaySoldAtRetail(r, view);
-      const actualRevenue = getStallDisplayActualRevenue(r);
-      const stallRetailSummary = getStallDisplayRetailEstAndRemain(r, view);
+      const stall = getOrderStallDisplayEconomics(r, view);
       const payable = r.totalAmount;
       const selfSuppliedDeduction = isOrderHistoryEntry(r) && r.actorRole === 'franchisee'
         ? (r.selfSuppliedCostAmount ?? Math.max(0, r.totalAmount - (r.payableAmount ?? r.totalAmount)))
         : 0;
       const netPayableAmount = Math.max(0, payable - selfSuppliedDeduction);
-      const remainAmount = stallRetailSummary?.remGoodsValue ?? null;
+      const remainAmount = stall.retailEstAndRemain?.remGoodsValue ?? null;
       const estimatedAmount = plannedEstimatedRetailFromOrder(r, view);
       const financials: OrderFinancialSummary = {
         procurementAmount: payable,
@@ -644,8 +639,8 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
         netPayableAmount,
         estimatedAmount,
         remainAmount,
-        countedRevenueAmount: countedRevenue ?? stallRev ?? null,
-        actualIncomeAmount: actualRevenue,
+        countedRevenueAmount: stall.soldAtRetail ?? stall.shouldRevenue ?? null,
+        actualIncomeAmount: stall.actualRevenue,
       };
       return isFranchiseManagementOrder(r)
         ? toOrderRowFromMgmt(r, financials)
@@ -702,8 +697,9 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
   }, [orderListPeriod]);
 
   const filteredOrders = useMemo(() => {
+    const rawById = new Map(rawList.map((r) => [r.id, r]));
     const byWeekday = ordersData.filter((order) => {
-      const o = rawList.find((r) => r.id === order.id);
+      const o = rawById.get(order.id);
       if (!o) return false;
       return orderMatchesActiveWeekdaysFromYmd(effectiveOrderDateYmd(o), activeWeekdays);
     });
@@ -722,14 +718,14 @@ export default function Orders({ userRole }: { userRole: UserRole }) {
       return order.status === '待出貨' || order.status === '已完成';
     });
     const byStallCount = byStatus.filter((order) => {
-      const o = rawList.find((r) => r.id === order.id);
+      const o = rawById.get(order.id);
       if (!o) return false;
       if (statusFilter === '已盤點') return orderHasStallCountCompleted(o);
       if (statusFilter === '已取消') return true;
       return !orderHasStallCountCompleted(o);
     });
     return byStallCount.filter((order) => {
-      const o = rawList.find((r) => r.id === order.id);
+      const o = rawById.get(order.id);
       if (!o) return false;
       return orderMatchesListDateRange(o, effectiveDateRange.from, effectiveDateRange.to);
     });

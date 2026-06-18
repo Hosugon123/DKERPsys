@@ -93,9 +93,6 @@ export default function App() {
       }
       const bundleBeforeAuth = serializeDongshanDataBundle();
       ensureAuthBootstrap();
-      if (getStorageMode() === 'remote') {
-        await pushRemoteIfLocalBundleChangedSince(bundleBeforeAuth);
-      }
       const s = readSession();
       if (s && validateSession(s)) setSession(s);
       else {
@@ -103,6 +100,9 @@ export default function App() {
         setSession(null);
       }
       setAuthReady(true);
+      if (getStorageMode() === 'remote') {
+        void pushRemoteIfLocalBundleChangedSince(bundleBeforeAuth);
+      }
     })();
   }, []);
 

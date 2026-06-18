@@ -90,12 +90,10 @@ export function computeRetailEconomicsFromMergedSnapshot(
   };
 }
 
-function stallSnapshotKpis(
-  o: FranchiseManagementOrder | OrderHistoryEntry,
+function stallSnapshotKpisFromSnap(
+  snap: SalesRecordDaySnapshot,
   retailView: SupplyRetailView,
 ) {
-  const snap = resolveStallSnapshotForOrder(o);
-  if (!snap) return null;
   const frozen = frozenFinancialsFromSnapshot(snap);
   if (frozen) return frozen;
   const itemIds = getAllSupplyItems(retailView)
@@ -110,6 +108,46 @@ function stallSnapshotKpis(
     retailSoldRevenue: retailK.soldAtRetail,
     retailEstTotal: retailK.estTotal,
     retailRemainValue: retailK.remGoodsValue,
+  };
+}
+
+function stallSnapshotKpis(
+  o: FranchiseManagementOrder | OrderHistoryEntry,
+  retailView: SupplyRetailView,
+) {
+  const snap = resolveStallSnapshotForOrder(o);
+  if (!snap) return null;
+  return stallSnapshotKpisFromSnap(snap, retailView);
+}
+
+export type OrderStallDisplayEconomics = {
+  shouldRevenue: number | null;
+  soldAtRetail: number | null;
+  actualRevenue: number | null;
+  retailEstAndRemain: { estTotal: number; remGoodsValue: number } | null;
+};
+
+/** 訂單列表用：一次讀取盤點快照並算出所有顯示用金額，避免重複 aggregate。 */
+export function getOrderStallDisplayEconomics(
+  o: FranchiseManagementOrder | OrderHistoryEntry,
+  retailView: SupplyRetailView,
+): OrderStallDisplayEconomics {
+  const snap = resolveStallSnapshotForOrder(o);
+  if (!snap) {
+    return {
+      shouldRevenue: null,
+      soldAtRetail: null,
+      actualRevenue: null,
+      retailEstAndRemain: null,
+    };
+  }
+  const k = stallSnapshotKpisFromSnap(snap, retailView);
+  const actual = num(snap.actualRevenue);
+  return {
+    shouldRevenue: k.wholesaleSoldCost,
+    soldAtRetail: k.retailSoldRevenue,
+    actualRevenue: Number.isFinite(actual) ? actual : null,
+    retailEstAndRemain: { estTotal: k.retailEstTotal, remGoodsValue: k.retailRemainValue },
   };
 }
 
