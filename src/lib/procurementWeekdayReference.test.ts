@@ -186,6 +186,60 @@ describe('procurement weekday sold reference', () => {
     expect(ref.sampleDayCount).toBe(2);
   });
 
+  it('最高：取營業額最高那一天的各品項售出（非跨日混算）', () => {
+    const PRODUCT_B = 's02';
+    const thuAHigh = stallOrder(
+      {
+        id: 'order-thu-a-high',
+        rowYmd: THURSDAY_A,
+        completedAt: `${THURSDAY_A}T18:00:00.000Z`,
+        remain: '100',
+        out: '200',
+      },
+      franchiseScope,
+    );
+    thuAHigh.stallCountSnapshot = {
+      lines: {
+        [PRODUCT_ID]: { out: '200', remain: '100' },
+        [PRODUCT_B]: { out: '200', remain: '190' },
+        黑輪: { out: '200', remain: '100' },
+        s02: { out: '200', remain: '190' },
+      },
+      actualRevenue: '8000',
+      updatedAt: `${THURSDAY_A}T18:00:00.000Z`,
+    };
+    const thuBLow = stallOrder(
+      {
+        id: 'order-thu-b-low',
+        rowYmd: THURSDAY_B,
+        completedAt: `${THURSDAY_B}T18:00:00.000Z`,
+        remain: '10',
+        out: '200',
+      },
+      franchiseScope,
+    );
+    thuBLow.stallCountSnapshot = {
+      lines: {
+        [PRODUCT_ID]: { out: '200', remain: '10' },
+        [PRODUCT_B]: { out: '200', remain: '50' },
+        黑輪: { out: '200', remain: '10' },
+        s02: { out: '200', remain: '50' },
+      },
+      actualRevenue: '3000',
+      updatedAt: `${THURSDAY_B}T18:00:00.000Z`,
+    };
+
+    const ref = computeProcurementWeekdaySoldReference(
+      ORDER_DATE,
+      [thuAHigh, thuBLow],
+      'headquarter',
+      'max',
+    );
+    expect(ref.referenceYmd).toBe(THURSDAY_A);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(100);
+    expect(ref.soldByProductId.get(PRODUCT_B)).toBe(10);
+  });
+
   it('最高：直營帳號不納入加盟店盤點（僅該店最高）', () => {
     mockCtx.role = 'employee';
     mockCtx.userId = 'hq-emp-1';

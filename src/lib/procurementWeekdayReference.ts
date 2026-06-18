@@ -109,16 +109,41 @@ function totalSoldQtyOnDay(dayMap: Map<string, number>): number {
   return n;
 }
 
-function pickReferenceYmdByDayTotalSold(
+/** 曆日營業額（銷售紀錄或盤點快照 actualRevenue）；無則退回當日售出量合計。 */
+function dayRevenueForYmd(
+  ymdDash: string,
+  orders: OrderHistoryEntry[],
+  dayMap: Map<string, number> | undefined,
+): number | null {
+  const scopeId = getDataScopeContext().scopeId;
+  const salesRaw = getSalesRecord(ymdDash, scopeId);
+  if (salesRaw?.actualRevenue != null && String(salesRaw.actualRevenue).trim() !== '') {
+    const n = Number(String(salesRaw.actualRevenue).replace(/,/g, ''));
+    if (Number.isFinite(n)) return n;
+  }
+  const matched = pickLatestStallOrderForYmd(ymdDash, orders, scopeId);
+  const rev = matched?.stallCountSnapshot?.actualRevenue;
+  if (rev != null && String(rev).trim() !== '') {
+    const n = Number(String(rev).replace(/,/g, ''));
+    if (Number.isFinite(n)) return n;
+  }
+  if (dayMap && dayMap.size > 0) return totalSoldQtyOnDay(dayMap);
+  return null;
+}
+
+function pickReferenceYmdByDayRevenue(
   activeYmds: string[],
+  orders: OrderHistoryEntry[],
   perDay: Map<string, Map<string, number>>,
   pick: 'max' | 'min',
 ): string | undefined {
   if (activeYmds.length === 0) return undefined;
-  return activeYmds.reduce((best, ymd) => {
-    const cur = totalSoldQtyOnDay(perDay.get(ymd) ?? new Map());
-    const prev = totalSoldQtyOnDay(perDay.get(best) ?? new Map());
-    return pick === 'max' ? (cur > prev ? ymd : best) : cur < prev ? ymd : best;
+  return activeYmds.reduce((best, ymdDash) => {
+    const cur = dayRevenueForYmd(ymdDash, orders, perDay.get(ymdDash));
+    const prev = dayRevenueForYmd(best, orders, perDay.get(best));
+    if (cur == null) return best;
+    if (prev == null) return ymdDash;
+    return pick === 'max' ? (cur > prev ? ymdDash : best) : cur < prev ? ymdDash : best;
   });
 }
 
@@ -165,8 +190,11 @@ function soldMapForYmd(
   return { map: soldByProductId, hasData: matched !== null };
 }
 
-function listSameWeekdayYmdsBefore(orderDateYmd: string, orders: OrderHistoryEntry[]): string[] {
-  const targetWd = weekdayIdxMon0FromYmd(orderDateYmd);
+function listSameWeekdayYmdsBefore(
+  orderDateYmd: string,
+  orders: OrderHistoryEntry[],
+  targetWd: number,
+): string[] {
   const ymdSet = new Set<string>();
 
   for (const o of orders) {
@@ -200,15 +228,20 @@ export function computeProcurementLastWeekSameDaySold(
 
 /**
  * 依對照星期與參考模式（最高／平均／上週／最低）計算各品項售出參考量。
- * 最高／平均／最低：與儀表板「同名星期」相同，取訂單歸屬日以前、同星期幾之歷史盤點日。
+ * 僅納入目前登入店別（orders 應已經 orderMatchesProcurementSoldReferenceScope 篩過）。
+ * 最高／最低：取同名星期歷史日中營業額最高／最低「那一天」的各品項售出量（非跨日混算）。
+ * 平均：各品項在歷史同名星期各日的售出量加總 ÷ 有資料天數。
+ * 上週：訂單歸屬日 −7 天。
  */
 export function computeProcurementWeekdaySoldReference(
   orderDateYmd: string,
   orders: OrderHistoryEntry[],
   retailView: SupplyRetailView,
   mode: ProcurementReferenceMode = 'lastWeek',
+  targetWeekdayIdx?: number,
 ): ProcurementWeekdaySoldRef {
   const scopedOrders = ordersForProcurementSoldReference(orders);
+  const targetWd = targetWeekdayIdx ?? weekdayIdxMon0FromYmd(orderDateYmd);
   if (mode === 'lastWeek') {
     const base = computeProcurementLastWeekSameDaySold(orderDateYmd, scopedOrders, retailView);
     return {
@@ -218,7 +251,7 @@ export function computeProcurementWeekdaySoldReference(
     };
   }
 
-  const qualifyingYmds = listSameWeekdayYmdsBefore(orderDateYmd, scopedOrders);
+  const qualifyingYmds = listSameWeekdayYmdsBefore(orderDateYmd, scopedOrders, targetWd);
   const perDay = new Map<string, Map<string, number>>();
   const activeYmds: string[] = [];
 
@@ -227,6 +260,21 @@ export function computeProcurementWeekdaySoldReference(
     if (!hasData) continue;
     perDay.set(ymdDash, map);
     activeYmds.push(ymdDash);
+  }
+
+  const fallbackYmd = activeYmds[activeYmds.length - 1] ?? addDaysYmd(orderDateYmd, -7);
+
+  if (mode === 'max' || mode === 'min') {
+    const referenceYmd =
+      pickReferenceYmdByDayRevenue(activeYmds, scopedOrders, perDay, mode) ?? fallbackYmd;
+    const { map, hasData } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
+    return {
+      referenceYmd,
+      soldByProductId: map,
+      hasCompletedStallDay: hasData,
+      mode,
+      sampleDayCount: activeYmds.length,
+    };
   }
 
   const allIds = new Set<string>();
@@ -238,27 +286,12 @@ export function computeProcurementWeekdaySoldReference(
   for (const id of allIds) {
     const series = activeYmds.map((ymdDash) => perDay.get(ymdDash)?.get(id) ?? 0);
     if (series.every((v) => v === 0)) continue;
-    let value: number;
-    if (mode === 'avg') {
-      value = series.reduce((s, v) => s + v, 0) / series.length;
-    } else if (mode === 'max') {
-      value = Math.max(...series);
-    } else {
-      value = Math.min(...series);
-    }
+    const value = series.reduce((s, v) => s + v, 0) / series.length;
     soldByProductId.set(id, Math.round(value * 1000) / 1000);
   }
 
-  const fallbackYmd = activeYmds[activeYmds.length - 1] ?? addDaysYmd(orderDateYmd, -7);
-  const referenceYmd =
-    mode === 'max'
-      ? pickReferenceYmdByDayTotalSold(activeYmds, perDay, 'max') ?? fallbackYmd
-      : mode === 'min'
-        ? pickReferenceYmdByDayTotalSold(activeYmds, perDay, 'min') ?? fallbackYmd
-        : fallbackYmd;
-
   return {
-    referenceYmd,
+    referenceYmd: fallbackYmd,
     soldByProductId,
     hasCompletedStallDay: activeYmds.length > 0,
     mode,

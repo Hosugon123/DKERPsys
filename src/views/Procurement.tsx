@@ -294,8 +294,9 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
         basisOrdersList,
         supplyRetailView,
         referenceMode,
+        referenceWeekdayIdx,
       ),
-    [newOrderDateYmd, basisOrdersList, supplyRetailView, referenceMode, stallTick],
+    [newOrderDateYmd, basisOrdersList, supplyRetailView, referenceMode, referenceWeekdayIdx, stallTick],
   );
 
   /** 底部「參考」列：上週／最高／最低顯示資料曆日；平均不顯示 */
