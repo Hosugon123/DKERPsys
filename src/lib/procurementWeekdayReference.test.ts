@@ -202,8 +202,6 @@ describe('procurement weekday sold reference', () => {
       lines: {
         [PRODUCT_ID]: { out: '200', remain: '100' },
         [PRODUCT_B]: { out: '200', remain: '190' },
-        黑輪: { out: '200', remain: '100' },
-        s02: { out: '200', remain: '190' },
       },
       actualRevenue: '8000',
       updatedAt: `${THURSDAY_A}T18:00:00.000Z`,
@@ -222,8 +220,6 @@ describe('procurement weekday sold reference', () => {
       lines: {
         [PRODUCT_ID]: { out: '200', remain: '10' },
         [PRODUCT_B]: { out: '200', remain: '50' },
-        黑輪: { out: '200', remain: '10' },
-        s02: { out: '200', remain: '50' },
       },
       actualRevenue: '3000',
       updatedAt: `${THURSDAY_B}T18:00:00.000Z`,
