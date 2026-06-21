@@ -581,6 +581,9 @@ export function loadBasisOrderRemainForProcurementDeduction(orderId: string): Da
     return mergeDayWithCurrentCatalog(emptyDay());
   }
   const basisOrder = findOrderByIdInStores(orderId);
+  if (basisOrder?.status === '已取消') {
+    return mergeDayWithCurrentCatalog(emptyDay());
+  }
   const live = loadDayForProcurementFromOrder(orderId);
   const frozen = loadStallSalesDisplayFromBasisOrder(orderId);
   const deducted = totalRemainDeductedAgainstBasisOrder(orderId);
@@ -717,6 +720,7 @@ function prevRemainForBringOut(
 export function getOrderStallCountBasisYmdForDeduction(orderId: string): string | null {
   if (!orderId) return null;
   const o = findOrderByIdInStores(orderId);
+  if (o?.status === '已取消') return null;
   return o?.stallCountBasisYmd ?? null;
 }
 

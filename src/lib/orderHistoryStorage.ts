@@ -1357,18 +1357,18 @@ export function listOrdersWithStallCountCompleted(): OrderHistoryEntry[] {
   const ctx = getDataScopeContext();
   const byId = new Map<string, OrderHistoryEntry>();
   for (const m of loadFranchiseManagementOrders()) {
-    if (!m.stallCountCompletedAt) continue;
+    if (!orderCountsTowardStallEconomics(m)) continue;
     const entry = franchiseMgmtToHistoryEntry(m);
     const prev = byId.get(m.id);
     byId.set(m.id, prev ? mergeOrderLikeRecord(prev, entry) : entry);
   }
   for (const e of loadOrderHistory()) {
-    if (!e.stallCountCompletedAt) continue;
+    if (!orderCountsTowardStallEconomics(e)) continue;
     const entry = normalizeHistoryEntry(e);
     const prev = byId.get(e.id);
     byId.set(e.id, prev ? mergeOrderLikeRecord(prev, entry) : entry);
   }
-  const sorted = Array.from(byId.values()).sort((a, b) => {
+  const sorted = Array.from(byId.values()).filter(orderCountsTowardStallEconomics).sort((a, b) => {
     const ta = a.stallCountCompletedAt ?? '';
     const tb = b.stallCountCompletedAt ?? '';
     return ta < tb ? 1 : ta > tb ? -1 : 0;
