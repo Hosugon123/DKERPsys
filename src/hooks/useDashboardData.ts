@@ -19,6 +19,20 @@ function salesRecordCacheKey(ymd: string, scopeId: string): string {
   return scopedStallDateKey(scopeId, ymd);
 }
 
+function runWhenDashboardIdle(fn: () => void): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+  const idle = window as Window & {
+    requestIdleCallback?: (cb: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (typeof idle.requestIdleCallback === 'function') {
+    const handle = idle.requestIdleCallback(fn, { timeout: 1200 });
+    return () => idle.cancelIdleCallback?.(handle);
+  }
+  const handle = window.setTimeout(fn, 300);
+  return () => window.clearTimeout(handle);
+}
+
 function mapMgmtToDashboardOrder(m: FranchiseManagementOrder): DashboardOrder {
   return {
     id: m.id,
@@ -50,9 +64,11 @@ function mapMgmtToDashboardOrder(m: FranchiseManagementOrder): DashboardOrder {
 export function useDashboardData(viewAsFranchiseeUserId: string | null) {
   const [orderTick, setOrderTick] = useState(0);
   const [financeTick, setFinanceTick] = useState(0);
+  const [salesRecordTick, setSalesRecordTick] = useState(0);
   const [dashboardOrders, setDashboardOrders] = useState<DashboardOrder[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<AccountingLedgerEntry[]>([]);
   const [salesRecordMap, setSalesRecordMap] = useState<Record<string, SalesRecordDaySnapshot>>({});
+  const [salesRecordsReady, setSalesRecordsReady] = useState(false);
 
   const reloadOrders = useCallback(async () => {
     const [mgmt, history] = await Promise.all([
@@ -75,6 +91,7 @@ export function useDashboardData(viewAsFranchiseeUserId: string | null) {
   }, [viewAsFranchiseeUserId]);
 
   const reloadSalesRecords = useCallback(async () => {
+    setSalesRecordsReady(false);
     const scopeFilter = viewAsFranchiseeUserId ? `scope:franchisee:${viewAsFranchiseeUserId}` : undefined;
     const meta = await salesRecords.listMeta(scopeFilter);
     const entries = await Promise.all(
@@ -88,32 +105,46 @@ export function useDashboardData(viewAsFranchiseeUserId: string | null) {
       if (row) next[row.key] = row.snap;
     }
     setSalesRecordMap(next);
+    setSalesRecordsReady(true);
   }, [viewAsFranchiseeUserId]);
 
-  const reloadAll = useCallback(async () => {
-    await Promise.all([reloadOrders(), reloadLedger(), reloadSalesRecords()]);
-  }, [reloadOrders, reloadLedger, reloadSalesRecords]);
+  const reloadPrimary = useCallback(async () => {
+    await Promise.all([reloadOrders(), reloadLedger()]);
+  }, [reloadOrders, reloadLedger]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      await reloadAll();
+      await reloadPrimary();
       if (cancelled) return;
     })();
     return () => {
       cancelled = true;
     };
-  }, [reloadAll, orderTick, financeTick]);
+  }, [reloadPrimary, orderTick, financeTick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const cancelIdle = runWhenDashboardIdle(() => {
+      if (cancelled) return;
+      void reloadSalesRecords();
+    });
+    return () => {
+      cancelled = true;
+      cancelIdle();
+    };
+  }, [reloadSalesRecords, orderTick, salesRecordTick]);
 
   useEffect(() => {
     const bumpOrders = () => setOrderTick((t) => t + 1);
+    const bumpSalesRecords = () => setSalesRecordTick((t) => t + 1);
     window.addEventListener('orderHistoryUpdated', bumpOrders);
     window.addEventListener('franchiseManagementOrdersUpdated', bumpOrders);
-    window.addEventListener('salesRecordUpdated', bumpOrders);
+    window.addEventListener('salesRecordUpdated', bumpSalesRecords);
     return () => {
       window.removeEventListener('orderHistoryUpdated', bumpOrders);
       window.removeEventListener('franchiseManagementOrdersUpdated', bumpOrders);
-      window.removeEventListener('salesRecordUpdated', bumpOrders);
+      window.removeEventListener('salesRecordUpdated', bumpSalesRecords);
     };
   }, []);
 
@@ -146,7 +177,16 @@ export function useDashboardData(viewAsFranchiseeUserId: string | null) {
       patchRevenueGapReason,
       orderTick,
       financeTick,
+      salesRecordsReady,
     }),
-    [dashboardOrders, ledgerEntries, getSalesRecordCached, patchRevenueGapReason, orderTick, financeTick],
+    [
+      dashboardOrders,
+      ledgerEntries,
+      getSalesRecordCached,
+      patchRevenueGapReason,
+      orderTick,
+      financeTick,
+      salesRecordsReady,
+    ],
   );
 }

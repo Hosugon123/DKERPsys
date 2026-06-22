@@ -38,11 +38,9 @@ import {
   validateSession,
   type AuthSession,
 } from './lib/authSession';
-import { serializeDongshanDataBundle } from './lib/appDataBundle';
 import { getDefaultLandingViewForRole } from './lib/sidebarNavConfig';
 import {
   initRemoteSyncOnAppLoad,
-  pushRemoteIfLocalBundleChangedSince,
   refreshRemoteBundleVersionIfStale,
 } from './services/apiService';
 import { getStorageMode } from './services/storageMode';
@@ -90,7 +88,6 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      const bundleBeforeAuth = serializeDongshanDataBundle();
       ensureAuthBootstrap();
       const s = readSession();
       if (s && validateSession(s)) setSession(s);
@@ -100,10 +97,7 @@ export default function App() {
       }
       setAuthReady(true);
       if (getStorageMode() === 'remote') {
-        void (async () => {
-          await initRemoteSyncOnAppLoad();
-          pushRemoteIfLocalBundleChangedSince(bundleBeforeAuth);
-        })();
+        void initRemoteSyncOnAppLoad();
       }
     })();
   }, []);
