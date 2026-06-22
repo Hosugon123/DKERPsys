@@ -268,4 +268,102 @@ describe('procurement weekday sold reference', () => {
     expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(120);
     expect(ref.referenceYmd).toBe(THURSDAY_B);
   });
+
+  it('最高：未填實收時改用零售推估營業額，不用總售出數量排序', () => {
+    const HIGH_PRICE_PRODUCT = 's20';
+    const lowRevenueHighQty = stallOrder(
+      {
+        id: 'order-thu-a-low-revenue-high-qty',
+        rowYmd: THURSDAY_A,
+        completedAt: `${THURSDAY_A}T18:00:00.000Z`,
+        remain: '0',
+        out: '200',
+      },
+      franchiseScope,
+    );
+    lowRevenueHighQty.stallCountSnapshot = {
+      lines: {
+        [PRODUCT_ID]: { out: '200', remain: '0' },
+      },
+      actualRevenue: '',
+      updatedAt: `${THURSDAY_A}T18:00:00.000Z`,
+    };
+    const highRevenueLowerQty = stallOrder(
+      {
+        id: 'order-thu-b-high-revenue-lower-qty',
+        rowYmd: THURSDAY_B,
+        completedAt: `${THURSDAY_B}T18:00:00.000Z`,
+        remain: '0',
+        out: '120',
+      },
+      franchiseScope,
+    );
+    highRevenueLowerQty.stallCountSnapshot = {
+      lines: {
+        [HIGH_PRICE_PRODUCT]: { out: '120', remain: '0' },
+      },
+      actualRevenue: '',
+      updatedAt: `${THURSDAY_B}T18:00:00.000Z`,
+    };
+
+    const ref = computeProcurementWeekdaySoldReference(
+      ORDER_DATE,
+      [lowRevenueHighQty, highRevenueLowerQty],
+      'headquarter',
+      'max',
+    );
+
+    expect(ref.referenceYmd).toBe(THURSDAY_B);
+    expect(ref.soldByProductId.get(HIGH_PRICE_PRODUCT)).toBe(120);
+    expect(ref.soldByProductId.has(PRODUCT_ID)).toBe(false);
+  });
+
+  it('最低：未填實收時同樣以零售推估營業額選日', () => {
+    const HIGH_PRICE_PRODUCT = 's20';
+    const lowRevenueHighQty = stallOrder(
+      {
+        id: 'order-thu-a-low-revenue-high-qty',
+        rowYmd: THURSDAY_A,
+        completedAt: `${THURSDAY_A}T18:00:00.000Z`,
+        remain: '0',
+        out: '200',
+      },
+      franchiseScope,
+    );
+    lowRevenueHighQty.stallCountSnapshot = {
+      lines: {
+        [PRODUCT_ID]: { out: '200', remain: '0' },
+      },
+      actualRevenue: '',
+      updatedAt: `${THURSDAY_A}T18:00:00.000Z`,
+    };
+    const highRevenueLowerQty = stallOrder(
+      {
+        id: 'order-thu-b-high-revenue-lower-qty',
+        rowYmd: THURSDAY_B,
+        completedAt: `${THURSDAY_B}T18:00:00.000Z`,
+        remain: '0',
+        out: '120',
+      },
+      franchiseScope,
+    );
+    highRevenueLowerQty.stallCountSnapshot = {
+      lines: {
+        [HIGH_PRICE_PRODUCT]: { out: '120', remain: '0' },
+      },
+      actualRevenue: '',
+      updatedAt: `${THURSDAY_B}T18:00:00.000Z`,
+    };
+
+    const ref = computeProcurementWeekdaySoldReference(
+      ORDER_DATE,
+      [lowRevenueHighQty, highRevenueLowerQty],
+      'headquarter',
+      'min',
+    );
+
+    expect(ref.referenceYmd).toBe(THURSDAY_A);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(200);
+    expect(ref.soldByProductId.has(HIGH_PRICE_PRODUCT)).toBe(false);
+  });
 });

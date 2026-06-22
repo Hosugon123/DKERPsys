@@ -109,10 +109,30 @@ function totalSoldQtyOnDay(dayMap: Map<string, number>): number {
   return n;
 }
 
-/** 曆日營業額（銷售紀錄或盤點快照 actualRevenue）；無則退回當日售出量合計。 */
+function estimatedRetailRevenueFromSnapshot(
+  snap: SalesRecordDaySnapshot,
+  retailView: SupplyRetailView,
+): number | null {
+  const ownerId = franchiseeOwnerForRetail();
+  const merged = mergeSalesRecordWithCatalog(snap);
+  let total = 0;
+  let hasSoldLine = false;
+  for (const it of getAllSupplyItems(retailView, ownerId)) {
+    if (isConsumableItem(it)) continue;
+    const line = merged.lines[it.id] ?? { out: '', remain: '' };
+    const c = computeLine(line.out, line.remain, it, { unitBasis: 'retail' });
+    if (c.remainUnfilled || c.sold <= 0) continue;
+    total += c.soldRevenue;
+    hasSoldLine = true;
+  }
+  return hasSoldLine ? total : null;
+}
+
+/** 曆日營業額：優先用實收；未填實收則用銷售/盤點快照按零售參考推估。 */
 function dayRevenueForYmd(
   ymdDash: string,
   orders: OrderHistoryEntry[],
+  retailView: SupplyRetailView,
   dayMap: Map<string, number> | undefined,
 ): number | null {
   const scopeId = getDataScopeContext().scopeId;
@@ -121,11 +141,20 @@ function dayRevenueForYmd(
     const n = Number(String(salesRaw.actualRevenue).replace(/,/g, ''));
     if (Number.isFinite(n)) return n;
   }
+  if (salesRaw) {
+    const estimated = estimatedRetailRevenueFromSnapshot(salesRaw, retailView);
+    if (estimated != null) return estimated;
+  }
   const matched = pickLatestStallOrderForYmd(ymdDash, orders, scopeId);
   const rev = matched?.stallCountSnapshot?.actualRevenue;
   if (rev != null && String(rev).trim() !== '') {
     const n = Number(String(rev).replace(/,/g, ''));
     if (Number.isFinite(n)) return n;
+  }
+  const snap = matched ? resolveStallSnapshotFromOrder(matched) : null;
+  if (snap) {
+    const estimated = estimatedRetailRevenueFromSnapshot(snap, retailView);
+    if (estimated != null) return estimated;
   }
   if (dayMap && dayMap.size > 0) return totalSoldQtyOnDay(dayMap);
   return null;
@@ -135,12 +164,13 @@ function pickReferenceYmdByDayRevenue(
   activeYmds: string[],
   orders: OrderHistoryEntry[],
   perDay: Map<string, Map<string, number>>,
+  retailView: SupplyRetailView,
   pick: 'max' | 'min',
 ): string | undefined {
   if (activeYmds.length === 0) return undefined;
   return activeYmds.reduce((best, ymdDash) => {
-    const cur = dayRevenueForYmd(ymdDash, orders, perDay.get(ymdDash));
-    const prev = dayRevenueForYmd(best, orders, perDay.get(best));
+    const cur = dayRevenueForYmd(ymdDash, orders, retailView, perDay.get(ymdDash));
+    const prev = dayRevenueForYmd(best, orders, retailView, perDay.get(best));
     if (cur == null) return best;
     if (prev == null) return ymdDash;
     return pick === 'max' ? (cur > prev ? ymdDash : best) : cur < prev ? ymdDash : best;
@@ -266,7 +296,7 @@ export function computeProcurementWeekdaySoldReference(
 
   if (mode === 'max' || mode === 'min') {
     const referenceYmd =
-      pickReferenceYmdByDayRevenue(activeYmds, scopedOrders, perDay, mode) ?? fallbackYmd;
+      pickReferenceYmdByDayRevenue(activeYmds, scopedOrders, perDay, retailView, mode) ?? fallbackYmd;
     const { map, hasData } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
     return {
       referenceYmd,
