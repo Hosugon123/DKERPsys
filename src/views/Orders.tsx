@@ -45,6 +45,7 @@ import {
   type OrderHistoryLine,
   orderLineQtyMapsEqual,
   readOrderLinesByIdFromStores,
+  orderMatchesProcurementSoldReferenceScope,
   type UpdateEditableOrderLinesResult,
 } from '../lib/orderHistoryStorage';
 import {
@@ -360,10 +361,11 @@ function createCarrySnapGetter() {
         ? raw.procurementDeductionBasisOrderId.trim()
         : '';
     if (!bid) return loadRemainSnapshotForOrderManagementDisplay(raw);
-    const hit = carrySnapByBasisId.get(bid);
+    const cacheKey = bid ? `${bid}\u001f${raw.id}` : raw.id;
+    const hit = carrySnapByBasisId.get(cacheKey);
     if (hit !== undefined) return hit;
     const snap = loadRemainSnapshotForOrderManagementDisplay(raw);
-    carrySnapByBasisId.set(bid, snap);
+    carrySnapByBasisId.set(cacheKey, snap);
     return snap;
   };
 }
@@ -664,6 +666,11 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const [cancelModal, setCancelModal] = useState<null | { id: string }>(null);
   const [deleteModal, setDeleteModal] = useState<null | { id: string }>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [postDeductModal, setPostDeductModal] = useState<null | { id: string }>(null);
+  const [postDeductBasisId, setPostDeductBasisId] = useState('');
+  const [postDeductError, setPostDeductError] = useState<string | null>(null);
+  const [postDeductSaving, setPostDeductSaving] = useState(false);
+  const [basisOrdersList, setBasisOrdersList] = useState<OrderHistoryEntry[]>([]);
   /** 調整貨量：一次僅編輯一單的實出數量（可增可減） */
   const [pickingOrderId, setPickingOrderId] = useState<string | null>(null);
   const [pickingLines, setPickingLines] = useState<OrderHistoryLine[]>([]);
@@ -730,12 +737,14 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   );
 
   const syncOrders = useCallback(async () => {
-    const [mgmt, hist] = await Promise.all([
+    const [mgmt, hist, basisOrders] = await Promise.all([
       loadMgmtSliceForRole(userRole),
       loadHistorySliceForRole(userRole),
+      ordersApi.listOrdersWithStallCountCompleted(),
     ]);
     setMgmtOrders(mgmt);
     setHistoryOrders(hist);
+    setBasisOrdersList(basisOrders.filter((o) => orderMatchesProcurementSoldReferenceScope(o)));
   }, [userRole]);
 
   useEffect(() => {
@@ -948,6 +957,39 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
     setShipModal({ id: orderId });
   };
 
+  const postDeductBasisOptionsForOrder = useCallback(
+    (raw: RawOrder | null | undefined) => {
+      if (!raw) return [];
+      const createdAt = String(raw.createdAt ?? '');
+      return basisOrdersList.filter((o) => {
+        if (o.id === raw.id) return false;
+        if (createdAt && String(o.stallCountCompletedAt ?? '').localeCompare(createdAt) > 0) {
+          return false;
+        }
+        return true;
+      });
+    },
+    [basisOrdersList],
+  );
+
+  const openPostDeductDialog = (e: MouseEvent<HTMLButtonElement>, orderId: string) => {
+    e.stopPropagation();
+    const raw = rawList.find((o) => o.id === orderId);
+    if (
+      !raw ||
+      !canEditOrderInList(raw, userRole) ||
+      raw.status === '已取消' ||
+      orderHasStallCountCompleted(raw) ||
+      raw.procurementDeductionBasisOrderId?.trim()
+    ) {
+      return;
+    }
+    const options = postDeductBasisOptionsForOrder(raw);
+    setPostDeductModal({ id: orderId });
+    setPostDeductBasisId(options[0]?.id ?? '');
+    setPostDeductError(null);
+  };
+
   const setStatus = (id: string, status: '待出貨' | '已完成' | '已取消') => {
     void (async () => {
       await ordersApi.updateOrderStatusInEitherStore(id, status);
@@ -989,6 +1031,47 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
     if (!cancelModal) return;
     setStatus(cancelModal.id, '已取消');
     setCancelModal(null);
+  };
+
+  const applyPostDeductBasis = () => {
+    if (!postDeductModal || postDeductSaving) return;
+    const orderId = postDeductModal.id;
+    const basisOrderId = postDeductBasisId.trim();
+    if (!basisOrderId) {
+      setPostDeductError('請先選擇要扣除剩餘的前次盤點訂單。');
+      return;
+    }
+    setPostDeductSaving(true);
+    setPostDeductError(null);
+    void (async () => {
+      const res = await ordersApi.applyProcurementDeductionBasisAfterSubmit({
+        orderId,
+        basisOrderId,
+      });
+      setPostDeductSaving(false);
+      if (res.ok === true) {
+        setPostDeductModal(null);
+        setPostDeductBasisId('');
+        await syncOrders();
+        return;
+      }
+      switch (res.reason) {
+        case 'basis_not_found':
+          setPostDeductError('找不到可扣除的盤點訂單，請重新整理後再試。');
+          break;
+        case 'already_has_basis':
+          setPostDeductError('此訂單已經指定過扣餘基準，避免重複扣除，系統不再套用第二次。');
+          break;
+        case 'stall_count_locked':
+          setPostDeductError('此訂單已完成攤上盤點，不能再事後改扣餘基準。');
+          break;
+        case 'canceled':
+          setPostDeductError('此訂單已取消，不能套用扣餘。');
+          break;
+        default:
+          setPostDeductError('找不到此訂單，請重新整理後再試。');
+      }
+    })();
   };
 
   const clearPickingUi = useCallback(() => {
@@ -1246,23 +1329,28 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   }, [pickingOrderId, priceAdjustOrderId, exitPickingEdit, exitPriceAdjust]);
 
   useEffect(() => {
-    if (!shipModal && !revertModal && !cancelModal && !deleteModal) return;
+    if (!shipModal && !revertModal && !cancelModal && !deleteModal && !postDeductModal) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShipModal(null);
         setRevertModal(null);
         setCancelModal(null);
         setDeleteModal(null);
+        setPostDeductModal(null);
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [shipModal, revertModal, cancelModal, deleteModal]);
+  }, [shipModal, revertModal, cancelModal, deleteModal, postDeductModal]);
 
   const shipModalOrder = shipModal ? rawList.find((o) => o.id === shipModal.id) ?? null : null;
   const revertModalOrder = revertModal ? rawList.find((o) => o.id === revertModal.id) ?? null : null;
   const cancelModalOrder = cancelModal ? rawList.find((o) => o.id === cancelModal.id) ?? null : null;
   const deleteModalOrder = deleteModal ? rawList.find((o) => o.id === deleteModal.id) ?? null : null;
+  const postDeductModalOrder = postDeductModal
+    ? rawList.find((o) => o.id === postDeductModal.id) ?? null
+    : null;
+  const postDeductBasisOptions = postDeductBasisOptionsForOrder(postDeductModalOrder);
 
   const pickingDockSummary = useMemo(() => {
     if (!pickingOrderId) return null;
@@ -1476,6 +1564,12 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
           const orderLineCount = order.itemLines.reduce((s, l) => s + l.qty, 0);
           const orderEditLocked = isPickingThis || isPriceAdjustThis;
           const stallLocked = raw ? orderHasStallCountCompleted(raw) : false;
+          const canApplyPostDeduct =
+            Boolean(raw) &&
+            canEdit &&
+            !stallLocked &&
+            order.status !== '已取消' &&
+            !raw?.procurementDeductionBasisOrderId?.trim();
 
           return (
             <div
@@ -1635,6 +1729,22 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                   調整貨量
                                 </button>
                               )}
+                              {!isPickingThis && !isPriceAdjustThis && canApplyPostDeduct && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => openPostDeductDialog(e, order.id)}
+                                  className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-emerald-600/50 bg-emerald-600/15 px-2 text-sm font-semibold text-emerald-100 transition-colors hover:bg-emerald-600/25 hover:border-emerald-500/60 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  事後扣昨日剩餘
+                                </button>
+                              )}
+                              {!isPickingThis &&
+                                !isPriceAdjustThis &&
+                                raw?.procurementDeductionBasisOrderId?.trim() && (
+                                  <span className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-emerald-700/40 bg-emerald-950/30 px-2 text-xs font-medium text-emerald-300/90">
+                                    已扣前次剩餘
+                                  </span>
+                                )}
                               {!isPickingThis &&
                                 !isPriceAdjustThis &&
                                 isHeadquarters &&
@@ -2252,6 +2362,79 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
           onSave={() => savePriceAdjust(priceAdjustOrderId)}
           onCancel={() => exitPriceAdjust()}
         />
+      )}
+
+      {postDeductModal && postDeductModalOrder && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="post-deduct-dialog-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !postDeductSaving) setPostDeductModal(null);
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 p-5 sm:p-6 shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3 id="post-deduct-dialog-title" className="text-lg font-semibold text-[#f5f2ed]">
+              事後扣除昨日剩餘
+            </h3>
+            <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
+              訂單 <span className="font-mono text-zinc-300">{postDeductModalOrder.id}</span>{' '}
+              會補上扣餘基準，並從所選盤點訂單的剩餘量扣掉本次叫貨量。已完成攤上盤點的訂單不能再修改。
+            </p>
+
+            <label htmlFor="post-deduct-basis-order" className="mt-5 block text-sm font-medium text-zinc-300">
+              要扣除剩餘的前次盤點訂單
+            </label>
+            <select
+              id="post-deduct-basis-order"
+              value={postDeductBasisId}
+              onChange={(e) => setPostDeductBasisId(e.target.value)}
+              disabled={postDeductSaving || postDeductBasisOptions.length === 0}
+              className="mt-2 h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {postDeductBasisOptions.length === 0 ? (
+                <option value="">沒有可套用的前次盤點訂單</option>
+              ) : (
+                postDeductBasisOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(o))} ・ {o.id}
+                  </option>
+                ))
+              )}
+            </select>
+
+            <p className="mt-3 text-xs text-zinc-500 leading-relaxed">
+              系統只列出在本訂單建立前已完成盤點的訂單，避免誤扣到未來或不同歸屬的剩餘量。
+            </p>
+            {postDeductError && (
+              <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-950/40 px-3 py-2 text-sm text-rose-300" role="alert">
+                {postDeductError}
+              </p>
+            )}
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPostDeductModal(null)}
+                disabled={postDeductSaving}
+                className="px-4 py-2.5 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-800 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={applyPostDeductBasis}
+                disabled={postDeductSaving || postDeductBasisOptions.length === 0}
+                className="px-4 py-2.5 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {postDeductSaving ? '套用中…' : '確認扣除剩餘'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {shipModal && shipModalOrder && (

@@ -12,6 +12,7 @@ import {
   setOrderStallCountStamp,
   stallCountSnapshotPersistedMatches,
   type OrderHistoryEntry,
+  type OrderHistoryLine,
 } from './orderHistoryStorage';
 import { HQ_SCOPE_ID, getDataScopeContext } from './dataScope';
 import {
@@ -576,7 +577,10 @@ function applyOrderLineAliasesToDaySnapshot(snap: DaySnapshot, o: OrderHistoryEn
  * 批貨「扣盤點剩」用：與帳上售出（凍結快照）一致，再扣掉已針對此參考單送出的扣庫量。
  * 即時銷售紀錄若有填剩餘且較小，則以即時為準（反映後續扣庫）。
  */
-export function loadBasisOrderRemainForProcurementDeduction(orderId: string): DaySnapshot {
+export function loadBasisOrderRemainForProcurementDeduction(
+  orderId: string,
+  opts?: { excludeOrderId?: string },
+): DaySnapshot {
   if (!orderId) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
@@ -586,7 +590,7 @@ export function loadBasisOrderRemainForProcurementDeduction(orderId: string): Da
   }
   const live = loadDayForProcurementFromOrder(orderId);
   const frozen = loadStallSalesDisplayFromBasisOrder(orderId);
-  const deducted = totalRemainDeductedAgainstBasisOrder(orderId);
+  const deducted = totalRemainDeductedAgainstBasisOrder(orderId, opts?.excludeOrderId);
   const hasSnapshot = orderHasUsableStallCountSnapshot(basisOrder);
   const lines: DaySnapshot['lines'] = { ...live.lines };
   for (const it of getAllSupplyItems()) {
@@ -641,8 +645,9 @@ export function sumProcurementQtyAgainstBasisOrder(basisOrderId: string): Record
 export function buildProcurementRemainDeductionsFromLines(
   basisOrderId: string,
   lines: { productId: string; qty: number; name?: string }[],
+  opts?: { excludeOrderId?: string },
 ): Record<string, number> {
-  const basis = loadBasisOrderRemainForProcurementDeduction(basisOrderId);
+  const basis = loadBasisOrderRemainForProcurementDeduction(basisOrderId, opts);
   const out: Record<string, number> = {};
   for (const line of lines) {
     const productId = resolveOrderLineProductId(line);
@@ -794,6 +799,8 @@ function loadRemainSnapshotForProcurementBringOut(
  * 唯舊單改以**訂單歸屬日**之前一日收攤剩餘近似（因明細頁無盤點曆法日）。
  */
 export function loadRemainSnapshotForOrderManagementDisplay(o: {
+  id?: string;
+  lines?: OrderHistoryLine[];
   procurementDeductionBasisOrderId?: string;
   orderDateYmd?: string;
   createdAt: string;
@@ -804,7 +811,33 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
   const bid = o.procurementDeductionBasisOrderId!.trim();
-  return loadDayForProcurementFromOrder(bid);
+  const live = loadDayForProcurementFromOrder(bid);
+  const orderLines = o.lines ?? [];
+  const orderId = o.id?.trim();
+  if (!orderId || orderLines.length === 0) return live;
+
+  const frozen = loadStallSalesDisplayFromBasisOrder(bid);
+  const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, orderId);
+  const lines: DaySnapshot['lines'] = { ...live.lines };
+  for (const line of orderLines) {
+    const productId = resolveOrderLineProductId(line);
+    const orderQty = roundProcurementQty(Number(line.qty) || 0);
+    if (!productId || orderQty <= 0) continue;
+    const liveLine = live.lines[productId] ?? { out: '', remain: '' };
+    const liveRemain = roundProcurementQty(Math.max(0, num(liveLine.remain)));
+    if (liveRemain > 0) continue;
+    const frozenRemain = frozenRemainQtyForItem(frozen, productId);
+    const poolAtOrder = roundProcurementQty(
+      Math.max(0, frozenRemain - (deductedBefore[productId] ?? 0)),
+    );
+    const carryForOrder = roundProcurementQty(Math.max(0, Math.min(orderQty, poolAtOrder)));
+    if (carryForOrder <= 0) continue;
+    lines[productId] = {
+      ...liveLine,
+      remain: String(carryForOrder),
+    };
+  }
+  return mergeDayWithCurrentCatalog({ ...live, lines });
 }
 
 export type StallOutCarryRemainSource =

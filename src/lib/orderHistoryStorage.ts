@@ -725,6 +725,58 @@ export function updateOrderStatusInEitherStore(id: string, status: FranchiseOrde
   if (inHist) updateOrderHistoryStatus(id, status);
 }
 
+export type ApplyProcurementDeductionBasisResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | 'not_found'
+        | 'canceled'
+        | 'stall_count_locked'
+        | 'already_has_basis'
+        | 'empty_basis';
+    };
+
+/**
+ * 事後補上「扣除前次盤點剩餘」參考單。
+ * 僅允許尚未完成盤點、未取消、且原本未指定扣餘基準的訂單，避免已結算快照被回溯改帳。
+ */
+export function updateProcurementDeductionBasisOrderIdInEitherStore(
+  id: string,
+  basisOrderId: string,
+): ApplyProcurementDeductionBasisResult {
+  const basis = basisOrderId.trim();
+  if (!basis) return { ok: false, reason: 'empty_basis' };
+  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
+
+  const rows = [mgmtHit, histHit].filter(Boolean) as Array<
+    FranchiseManagementOrder | OrderHistoryEntry
+  >;
+  if (rows.some((row) => row.status === '已取消')) return { ok: false, reason: 'canceled' };
+  if (rows.some((row) => orderHasStallCountCompleted(row))) {
+    return { ok: false, reason: 'stall_count_locked' };
+  }
+  if (rows.some((row) => row.procurementDeductionBasisOrderId?.trim())) {
+    return { ok: false, reason: 'already_has_basis' };
+  }
+
+  const now = new Date().toISOString();
+  const who = persistableActorDisplayName();
+  const patch = <T extends FranchiseManagementOrder | OrderHistoryEntry>(row: T): T => ({
+    ...row,
+    procurementDeductionBasisOrderId: basis,
+    updatedAt: now,
+    ...(who ? { lastUpdatedByName: who } : {}),
+  });
+
+  let wrote = false;
+  if (mgmtHit) wrote = patchFranchiseManagementOrderById(id, patch) || wrote;
+  if (histHit) wrote = patchOrderHistoryById(id, patch) || wrote;
+  return wrote ? { ok: true } : { ok: false, reason: 'not_found' };
+}
+
 function roundMoney(n: number) {
   return Math.round(n * 100) / 100;
 }

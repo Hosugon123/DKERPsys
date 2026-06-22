@@ -173,6 +173,41 @@ export const orders = {
       return orderHistory.appendProcurementOrderEntry(params);
     });
   },
+  async applyProcurementDeductionBasisAfterSubmit(params: {
+    orderId: string;
+    basisOrderId: string;
+  }): Promise<
+    orderHistory.ApplyProcurementDeductionBasisResult | { ok: false; reason: 'basis_not_found' }
+  > {
+    return withRemoteStorageWrite(() => {
+      const orderId = params.orderId.trim();
+      const basisOrderId = params.basisOrderId.trim();
+      const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
+      if (!basisYmd) return { ok: false, reason: 'basis_not_found' };
+
+      const patchRes = orderHistory.updateProcurementDeductionBasisOrderIdInEitherStore(
+        orderId,
+        basisOrderId,
+      );
+      if (!patchRes.ok) return patchRes;
+
+      const order = orderHistory.readMergedOrderByIdFromStores(orderId);
+      const basisOrder = orderHistory.readMergedOrderByIdFromStores(basisOrderId);
+      if (!order || !basisOrder) return { ok: false, reason: 'not_found' };
+
+      const scopeId = resolveOrderStallStorageScopeId(basisOrder);
+      const toDeduct = stallInventory.buildProcurementRemainDeductionsFromLines(
+        basisOrderId,
+        order.lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty })),
+        { excludeOrderId: orderId },
+      );
+      if (Object.keys(toDeduct).length > 0) {
+        stallInventory.ensureBasisDayFromOrderSnapshot(basisOrderId);
+        stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+      }
+      return { ok: true };
+    });
+  },
   async setOrderStallCountStamp(
     orderId: string,
     fields: {

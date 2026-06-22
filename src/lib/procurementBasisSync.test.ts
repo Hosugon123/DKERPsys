@@ -10,6 +10,7 @@ import {
   loadDayForProcurementFromOrder,
   loadStallSalesDisplayFromBasisOrder,
   loadBasisOrderRemainForProcurementDeduction,
+  loadRemainSnapshotForOrderManagementDisplay,
   recomputeStallOutForStallYmdAndOrder,
   buildProcurementRemainDeductionsFromLines,
   ensureBasisDayFromOrderSnapshot,
@@ -390,6 +391,62 @@ describe('procurement basis after order adjustment', () => {
       persist: false,
     });
     expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(8);
+  });
+
+  it('訂單管理明細：本單把前次剩餘扣到 0 時仍顯示當時昨剩餘帶出', () => {
+    const BASIS_ORDER = 'basis-order-order-detail-display';
+    const NEW_ORDER = 'new-order-order-detail-display';
+    const NEXT_YMD = '2026-05-22';
+    const basis = {
+      id: BASIS_ORDER,
+      createdAt: `${BASIS_YMD}T10:00:00.000Z`,
+      orderDateYmd: BASIS_YMD,
+      updatedAt: `${BASIS_YMD}T12:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '已完成' as const,
+      totalAmount: 1000,
+      payableAmount: 1000,
+      itemCount: 10,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 10, unitPrice: 100, unit: '隻' }],
+      actorRole: 'employee' as const,
+      scopeId: 'scope:hq',
+      stallCountBasisYmd: BASIS_YMD,
+      stallCountCompletedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: { [PRODUCT_ID]: { out: '20', remain: '5' } },
+        actualRevenue: '5000',
+        updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+      },
+    };
+    const newOrder = {
+      id: NEW_ORDER,
+      createdAt: `${NEXT_YMD}T08:00:00.000Z`,
+      orderDateYmd: NEXT_YMD,
+      updatedAt: `${NEXT_YMD}T08:00:00.000Z`,
+      source: 'procurement' as const,
+      status: '待出貨' as const,
+      totalAmount: 500,
+      payableAmount: 500,
+      itemCount: 5,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 5, unitPrice: 100, unit: '隻' }],
+      actorRole: 'employee' as const,
+      scopeId: 'scope:hq',
+      procurementDeductionBasisOrderId: BASIS_ORDER,
+    };
+    localStorage.setItem(
+      'dongshan_franchise_mgmt_orders_v1',
+      JSON.stringify([basis, newOrder]),
+    );
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '20', remain: '5' } },
+      actualRevenue: '5000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+
+    applyOrderDeductionToDayRemain(BASIS_YMD, { [PRODUCT_ID]: 5 }, 'scope:hq');
+
+    expect(Number(loadDayForProcurementFromOrder(BASIS_ORDER).lines[PRODUCT_ID]?.remain)).toBe(0);
+    expect(Number(loadRemainSnapshotForOrderManagementDisplay(newOrder).lines[PRODUCT_ID]?.remain)).toBe(5);
   });
 
   it('完整流程（回歸）：銷售紀錄 remain 未填→常用扣餘→送單扣庫→植入帶出', () => {
