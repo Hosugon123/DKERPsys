@@ -702,10 +702,17 @@ function StallGapDashboardSection({
   /** 置於 `<details>` 展開後、統計與表格明細之上（篩選不佔用 summary 列） */
   filterSlot?: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
-      <details className="group">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden">
+      <details className="group" open={open}>
+      <summary
+        className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden"
+        onClick={(e) => {
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
+      >
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-medium text-zinc-200">{title}</h3>
           <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
@@ -733,6 +740,7 @@ function StallGapDashboardSection({
           aria-hidden
         />
       </summary>
+      {open ? (
       <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-0 space-y-4 border-t border-zinc-800/80">
       {filterSlot ? <div className="pt-4 pb-4 border-b border-zinc-800/80">{filterSlot}</div> : null}
       <div className="grid lg:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -825,6 +833,7 @@ function StallGapDashboardSection({
         <p className="text-xs text-zinc-600">本期無盤點短收或落差登記資料。</p>
       )}
       </div>
+      ) : null}
       </details>
     </div>
   );
@@ -876,6 +885,9 @@ export default function Dashboard({
   const [showAllFranchise, setShowAllFranchise] = useState(false);
   const [showAllSelf, setShowAllSelf] = useState(false);
   const [showAllExpenseSelf, setShowAllExpenseSelf] = useState(false);
+  const [stallSalesBoardOpen, setStallSalesBoardOpen] = useState(false);
+  const [productChartsOpen, setProductChartsOpen] = useState(false);
+  const [expenseStructureOpen, setExpenseStructureOpen] = useState(false);
   const [franchiseRevenueScope, setFranchiseRevenueScope] = useState(FRANCHISE_REVENUE_SCOPE_ALL);
   /** 各加盟店挑選浮層；點頂端按鈕才顯示，不佔主頁版面 */
   const [franchisePickerOpen, setFranchisePickerOpen] = useState(false);
@@ -922,10 +934,10 @@ export default function Dashboard({
   }, [isAdmin, financeTick, orderTick, adminFinancePeriod]);
 
   const expenseStructureFinance = useMemo(() => {
-    if (!isAdmin) return null;
+    if (!isAdmin || !expenseStructureOpen) return null;
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(expenseStructurePeriod);
     return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
-  }, [isAdmin, financeTick, orderTick, expenseStructurePeriod]);
+  }, [isAdmin, expenseStructureOpen, financeTick, orderTick, expenseStructurePeriod]);
 
   /** 總部營運總覽 KPI：直營店實際營收、加盟批貨、消耗品代收、總支出、淨利 */
   const adminHqOverviewMetrics = useMemo(() => {
@@ -990,19 +1002,19 @@ export default function Dashboard({
 
   /** 總部直營：每日經濟指標（加盟視角略過以降低不必要計算） */
   const hqDirectStallEconomicsByYmd = useMemo(() => {
-    if (franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
+    if (!stallSalesBoardOpen || franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
     return buildDirectStallEconomicsByYmd(effectiveOrders, HQ_STALL_VIEW);
-  }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick]);
+  }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick, stallSalesBoardOpen]);
 
   /** 指定加盟店：已完成盤點之訂單＋孤立銷售紀錄（加盟零售價視角） */
   const franchiseStoreEconomicsByYmd = useMemo(() => {
-    if (!franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
+    if (!stallSalesBoardOpen || !franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
     return buildFranchiseStallEconomicsByYmd(
       effectiveOrders,
       FRANCHISE_STALL_VIEW,
       franchiseStallSalesBoardOwnerUserId,
     );
-  }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick]);
+  }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick, stallSalesBoardOpen]);
 
   const stallSalesEconomicsByYmd = franchiseStallSalesBoardOwnerUserId
     ? franchiseStoreEconomicsByYmd
@@ -1324,14 +1336,14 @@ export default function Dashboard({
 
   /** 本店／view-as：與總部相同，依「建單日」落在區間內之已完成訂單（僅 effectiveOrders） */
   const nonAdminProductChartOrders = useMemo(() => {
-    if (isAdmin) return [];
+    if (isAdmin || !productChartsOpen) return [];
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(productChartsPeriod);
     return effectiveOrders.filter((o) => {
       if (o.status !== '已完成') return false;
       const ymd0 = effectiveOrderDateYmd(o);
       return ymd0 >= startYmd && ymd0 <= endYmd;
     });
-  }, [effectiveOrders, isAdmin, productChartsPeriod]);
+  }, [effectiveOrders, isAdmin, productChartsOpen, productChartsPeriod]);
 
   const topProducts = useMemo(() => {
     if (isAdmin) return [];
@@ -1357,7 +1369,7 @@ export default function Dashboard({
   );
 
   const nonAdminExpenseRows = useMemo(() => {
-    if (isAdmin) return [];
+    if (isAdmin || !productChartsOpen) return [];
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(productChartsPeriod);
     const byName = new Map<string, number>();
     if (franchiseOperatingExpenseModel) {
@@ -1398,20 +1410,21 @@ export default function Dashboard({
     effectiveOrders,
     franchiseOperatingExpenseModel,
     isAdmin,
+    productChartsOpen,
     productChartsPeriod,
     ledgerForView,
     nonAdminProductChartOrders,
   ]);
 
   const adminProductChartOrders = useMemo(() => {
-    if (!isAdmin) return [];
+    if (!isAdmin || !productChartsOpen) return [];
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(productChartsPeriod);
     return dashboardOrders.filter((o) => {
       if (o.status !== '已完成') return false;
       const ymd0 = effectiveOrderDateYmd(o);
       return ymd0 >= startYmd && ymd0 <= endYmd;
     });
-  }, [dashboardOrders, isAdmin, productChartsPeriod]);
+  }, [dashboardOrders, isAdmin, productChartsOpen, productChartsPeriod]);
 
   const adminStallGapRange = useMemo(() => {
     if (!isAdmin) return null;
@@ -1884,15 +1897,12 @@ export default function Dashboard({
 
       {showStallSalesBoard ? (
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
-        <details className="group">
+        <details className="group" open={stallSalesBoardOpen}>
           <summary
             className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-5 text-left [&::-webkit-details-marker]:hidden"
             onClick={(e) => {
-              const summary = e.currentTarget;
-              const detailsEl = summary.parentElement;
-              if (!detailsEl || detailsEl.tagName !== 'DETAILS') return;
               e.preventDefault();
-              (detailsEl as HTMLDetailsElement).open = !(detailsEl as HTMLDetailsElement).open;
+              setStallSalesBoardOpen((v) => !v);
             }}
           >
             <div className="min-w-0 flex-1">
@@ -1905,6 +1915,7 @@ export default function Dashboard({
               aria-hidden
             />
           </summary>
+          {stallSalesBoardOpen ? (
           <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
             <StallRevenueBaselinePanel scopeId={stallRevenueBaselineScopeId} />
             <div className="rounded-xl border border-zinc-600/80 bg-zinc-900/70 p-3 sm:p-4 space-y-3 ring-1 ring-amber-600/10">
@@ -2183,6 +2194,7 @@ export default function Dashboard({
               </div>
             </div>
           </div>
+          ) : null}
         </details>
       </div>
       ) : null}
@@ -2330,8 +2342,14 @@ export default function Dashboard({
       )}
 
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
-        <details className="group">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden">
+        <details className="group" open={productChartsOpen}>
+          <summary
+            className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden"
+            onClick={(e) => {
+              e.preventDefault();
+              setProductChartsOpen((v) => !v);
+            }}
+          >
             <div className="min-w-0 flex-1">
               {isAdmin ? (
                 <>
@@ -2356,6 +2374,7 @@ export default function Dashboard({
               aria-hidden
             />
           </summary>
+          {productChartsOpen ? (
           <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-4 border-t border-zinc-800/80 flex flex-col gap-5 bg-zinc-900/30">
           {isAdmin ? (
             <>
@@ -2454,13 +2473,20 @@ export default function Dashboard({
             </>
           )}
           </div>
+          ) : null}
         </details>
       </div>
 
-      {isAdmin && expenseStructureFinance && (
+      {isAdmin && (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/35">
-          <details className="group">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden">
+          <details className="group" open={expenseStructureOpen}>
+            <summary
+              className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 sm:p-6 text-left [&::-webkit-details-marker]:hidden"
+              onClick={(e) => {
+                e.preventDefault();
+                setExpenseStructureOpen((v) => !v);
+              }}
+            >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-amber-500/90">
                   <TrendingUp size={20} className="shrink-0" aria-hidden />
@@ -2469,7 +2495,7 @@ export default function Dashboard({
                   </h3>
                 </div>
                 <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
-                  依收入與支出細項加總・{expenseStructureFinance.expenseBreakdown.length} 項類別
+                  依收入與支出細項加總
                   <span className="text-zinc-600 ml-1">（點此展開）</span>
                 </p>
               </div>
@@ -2478,6 +2504,7 @@ export default function Dashboard({
                 aria-hidden
               />
             </summary>
+            {expenseStructureOpen && expenseStructureFinance ? (
             <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-4 border-t border-zinc-800/80 space-y-4">
               <div className="max-w-sm">
                 <DashboardMonthCustomRangePicker
@@ -2508,6 +2535,7 @@ export default function Dashboard({
                 )}
               </div>
             </div>
+            ) : null}
           </details>
         </div>
       )}
