@@ -1144,7 +1144,6 @@ export function updateEditableOrderLinesById(
   nextLines: OrderHistoryLine[]
 ): UpdateEditableOrderLinesResult {
   const totals = aggregateOrderLinesForSave(nextLines);
-  if (totals.lines.length === 0) return { ok: false, reason: 'empty' };
   const res = patchOrderLinesInEitherStore(id, totals, 'editable');
   if (res.ok === true) return res;
   if (res.reason === 'not_pending') return { ok: false, reason: 'not_found' };

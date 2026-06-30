@@ -64,4 +64,32 @@ describe('updateEditableOrderLinesById (dual store)', () => {
     expect(hist[0]?.lines[0]?.qty).toBe(7);
     expect(orderLineQtyMapsEqual(readOrderLinesByIdFromStores(ORDER_ID) ?? [], [line(7)])).toBe(true);
   });
+
+  it('allows order management to save an unshipped order with all quantities set to zero', () => {
+    const res = updateEditableOrderLinesById(ORDER_ID, [line(0)]);
+    expect(res.ok).toBe(true);
+
+    const mgmt = JSON.parse(
+      localStorage.getItem('dongshan_franchise_mgmt_orders_v1') ?? '[]',
+    ) as Array<{
+      lines: OrderHistoryLine[];
+      itemCount: number;
+      totalAmount: number;
+      payableAmount: number;
+    }>;
+    const hist = JSON.parse(localStorage.getItem('dongshan_order_history_v1') ?? '[]') as Array<{
+      lines: OrderHistoryLine[];
+      itemCount: number;
+      totalAmount: number;
+      payableAmount: number;
+    }>;
+
+    for (const row of [mgmt[0], hist[0]]) {
+      expect(row?.lines).toEqual([]);
+      expect(row?.itemCount).toBe(0);
+      expect(row?.totalAmount).toBe(0);
+      expect(row?.payableAmount).toBe(0);
+    }
+    expect(orderLineQtyMapsEqual(readOrderLinesByIdFromStores(ORDER_ID) ?? [], [line(0)])).toBe(true);
+  });
 });
