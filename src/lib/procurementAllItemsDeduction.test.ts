@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendProcurementOrderEntry,
   readMergedOrderByIdFromStores,
+  removeProcurementDeductionBasisOrderIdInEitherStore,
   setOrderStallCountStamp,
-  updateProcurementDeductionBasisOrderIdInEitherStore,
+  updateProcurementDeductionBasisOrderLinesInEitherStore,
 } from './orderHistoryStorage';
 import {
   buildProcurementRemainDeductionsFromLines,
@@ -13,8 +14,10 @@ import {
   applyOrderDeductionToDayRemain,
   getOrderStallCountBasisYmdForDeduction,
   loadBasisOrderRemainForProcurementDeduction,
+  loadRemainSnapshotForOrderManagementDisplay,
   loadStallSalesDisplayFromBasisOrder,
   recomputeStallOutForStallYmdAndOrder,
+  restoreOrderDeductionToDayRemain,
 } from './stallInventoryStorage';
 import { resolveOrderStallStorageScopeId } from './scopedStallDateKey';
 import { getAllSupplyItems, isConsumableItem } from './supplyCatalog';
@@ -153,7 +156,7 @@ describe('procurement cart deduction across every catalog item', () => {
     }
   });
 
-  it('allows a submitted order to deduct prior completed remain afterward without double-counting itself', () => {
+  it('事後扣除：扣前單剩餘、顯示昨剩、帶出量與叫貨金額皆重算正確', () => {
     const item = getAllSupplyItems().find((x) => !isConsumableItem(x));
     expect(item).toBeTruthy();
     if (!item) return;
@@ -179,27 +182,116 @@ describe('procurement cart deduction across every catalog item', () => {
     ).toBe(true);
 
     const childId = appendProcurementOrderEntry({
-      lines: [{ productId: item.id, name: item.name, unitPrice: 1, qty: 3, unit: item.pieceUnit }],
-      totalAmount: 3,
-      payableAmount: 3,
+      lines: [{ productId: item.id, name: item.name, unitPrice: 2, qty: 10, unit: item.pieceUnit }],
+      totalAmount: 20,
+      payableAmount: 20,
       actorRole: 'franchisee',
       orderDateYmd: NEXT_YMD,
     });
 
-    expect(updateProcurementDeductionBasisOrderIdInEitherStore(childId, basisId)).toEqual({
-      ok: true,
-    });
     const toDeduct = buildProcurementRemainDeductionsFromLines(
       basisId,
-      [{ productId: item.id, name: item.name, qty: 3 }],
+      [{ productId: item.id, name: item.name, qty: 10 }],
       { excludeOrderId: childId },
     );
-    expect(toDeduct[item.id]).toBe(3);
+    expect(toDeduct[item.id]).toBe(4);
+    const beforeOrder = readMergedOrderByIdFromStores(childId);
+    expect(beforeOrder?.lines[0]?.qty).toBe(10);
+    const nextLines = beforeOrder!.lines.map((line) => ({
+      ...line,
+      qty: Math.max(0, line.qty - (toDeduct[line.productId] ?? 0)),
+    }));
+
+    expect(updateProcurementDeductionBasisOrderLinesInEitherStore(childId, basisId, nextLines)).toEqual({
+      ok: true,
+    });
     ensureBasisDayFromOrderSnapshot(basisId);
     applyOrderDeductionToDayRemain(BASIS_YMD, toDeduct, FRANCHISE_SCOPE);
 
-    expect(readMergedOrderByIdFromStores(childId)?.procurementDeductionBasisOrderId).toBe(basisId);
-    expect(Number(loadBasisOrderRemainForProcurementDeduction(basisId).lines[item.id]?.remain)).toBe(1);
+    const afterOrder = readMergedOrderByIdFromStores(childId);
+    const yesterdayRemainForDisplay = Number(
+      loadRemainSnapshotForOrderManagementDisplay(afterOrder!).lines[item.id]?.remain,
+    );
+    const orderQtyAfterDeduct = Number(afterOrder?.lines[0]?.qty);
+
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(basisId).lines[item.id]?.remain)).toBe(0);
+    expect(afterOrder?.procurementDeductionBasisOrderId).toBe(basisId);
+    expect(yesterdayRemainForDisplay).toBe(4);
+    expect(orderQtyAfterDeduct).toBe(6);
+    expect(yesterdayRemainForDisplay + orderQtyAfterDeduct).toBe(10);
+    expect(afterOrder?.totalAmount).toBe(12);
+    expect(afterOrder?.payableAmount).toBe(12);
+  });
+
+  it('複數剩餘盤點單：昨剩合併帶出，抽離單張後會補回訂單與剩餘', () => {
+    const item = getAllSupplyItems().find((x) => !isConsumableItem(x));
+    expect(item).toBeTruthy();
+    if (!item) return;
+    const makeBasis = (remain: number, ymdStr: string) => {
+      const id = appendProcurementOrderEntry({
+        lines: [{ productId: item.id, name: item.name, unitPrice: 1, qty: 10, unit: item.pieceUnit }],
+        totalAmount: 10,
+        payableAmount: 10,
+        actorRole: 'franchisee',
+        orderDateYmd: ymdStr,
+      });
+      expect(
+        setOrderStallCountStamp(id, {
+          basisYmd: ymdStr,
+          completedAt: `${ymdStr}T21:00:00.000Z`,
+          snapshot: {
+            lines: { [item.id]: { out: '10', remain: String(remain) } },
+            actualRevenue: '0',
+            updatedAt: `${ymdStr}T21:00:00.000Z`,
+          },
+        }),
+      ).toBe(true);
+      return id;
+    };
+    const basisA = makeBasis(3, BASIS_YMD);
+    const basisB = makeBasis(2, '2026-06-15');
+    const childId = appendProcurementOrderEntry({
+      lines: [{ productId: item.id, name: item.name, unitPrice: 2, qty: 10, unit: item.pieceUnit }],
+      totalAmount: 20,
+      payableAmount: 20,
+      actorRole: 'franchisee',
+      orderDateYmd: NEXT_YMD,
+    });
+    const applied = {
+      [basisA]: { [item.id]: 3 },
+      [basisB]: { [item.id]: 2 },
+    };
+    expect(
+      updateProcurementDeductionBasisOrderLinesInEitherStore(
+        childId,
+        [basisA, basisB],
+        [{ productId: item.id, name: item.name, unitPrice: 2, qty: 5, unit: item.pieceUnit }],
+        applied,
+      ),
+    ).toEqual({ ok: true });
+    ensureBasisDayFromOrderSnapshot(basisA);
+    ensureBasisDayFromOrderSnapshot(basisB);
+    applyOrderDeductionToDayRemain(BASIS_YMD, applied[basisA], FRANCHISE_SCOPE);
+    applyOrderDeductionToDayRemain('2026-06-15', applied[basisB], FRANCHISE_SCOPE);
+
+    const afterOrder = readMergedOrderByIdFromStores(childId)!;
+    const carry = Number(loadRemainSnapshotForOrderManagementDisplay(afterOrder).lines[item.id]?.remain);
+    const breakdown = computeStallOutImportBreakdown(NEXT_YMD, childId);
+    const row = breakdown?.rows.find((r) => r.productId === item.id);
+    expect(afterOrder.lines[0]?.qty).toBe(5);
+    expect(afterOrder.totalAmount).toBe(10);
+    expect(carry).toBe(5);
+    expect(row?.prevRemain).toBe(5);
+    expect(row?.suggestedOut).toBe(10);
+
+    const detached = removeProcurementDeductionBasisOrderIdInEitherStore(childId, basisA);
+    expect(detached).toEqual({ ok: true, restoredQty: { [item.id]: 3 } });
+    if (detached.ok) restoreOrderDeductionToDayRemain(BASIS_YMD, detached.restoredQty, FRANCHISE_SCOPE);
+    const detachedOrder = readMergedOrderByIdFromStores(childId)!;
+    expect(detachedOrder.lines[0]?.qty).toBe(8);
+    expect(detachedOrder.totalAmount).toBe(16);
+    expect(detachedOrder.procurementDeductionBasisOrderIds).toEqual([basisB]);
+    expect(Number(loadBasisOrderRemainForProcurementDeduction(basisA).lines[item.id]?.remain)).toBe(3);
   });
 
   it('deducts 500 remain when snapshot uses catalog names (dk002 id remain=0 pattern)', () => {

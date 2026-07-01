@@ -343,3 +343,29 @@ export function applySalesRecordOrderDeduction(
   );
   saveStore(s);
 }
+
+export function restoreSalesRecordOrderDeduction(
+  ymdStr: string,
+  restored: Record<string, number>,
+  scopeId?: string,
+) {
+  const s = loadStore();
+  const row = readRow(s, ymdStr, scopeId);
+  if (!row) return;
+  const prev = mergeSnapshotWithCatalog(row.snapshot);
+  const lines: SalesRecordDaySnapshot['lines'] = { ...prev.lines };
+  const now = new Date().toISOString();
+  for (const [id, rawQty] of Object.entries(restored)) {
+    const qty = roundProcurementQty(Number(rawQty) || 0);
+    if (qty <= 0) continue;
+    const keys = catalogLineKeysForProduct(lines, id);
+    if (!lines[id]) lines[id] = { out: '', remain: '' };
+    const cur = num(lines[id].remain);
+    const next = roundProcurementQty(cur + qty);
+    for (const key of keys) {
+      lines[key] = { ...(lines[key] ?? lines[id]), remain: String(next), updatedAt: now };
+    }
+  }
+  writeRow(s, ymdStr, { ...row, snapshot: { ...prev, lines, updatedAt: now } }, scopeId);
+  saveStore(s);
+}

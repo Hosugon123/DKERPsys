@@ -98,83 +98,9 @@ export const PROCUREMENT_WEEKDAY_LABELS = [
   '週日',
 ] as const;
 
-/** 批貨底部「參考」列是否顯示資料曆日：上週／最高／最低顯示；平均不顯示 */
+/** 批貨底部「參考」列是否顯示資料曆日；最高／最低／平均是跨日品項統計，不對應單一天 */
 export function shouldShowProcurementReferenceDate(mode: ProcurementReferenceMode): boolean {
-  return mode === 'lastWeek' || mode === 'max' || mode === 'min';
-}
-
-function totalSoldQtyOnDay(dayMap: Map<string, number>): number {
-  let n = 0;
-  for (const v of dayMap.values()) n += v;
-  return n;
-}
-
-function estimatedRetailRevenueFromSnapshot(
-  snap: SalesRecordDaySnapshot,
-  retailView: SupplyRetailView,
-): number | null {
-  const ownerId = franchiseeOwnerForRetail();
-  const merged = mergeSalesRecordWithCatalog(snap);
-  let total = 0;
-  let hasSoldLine = false;
-  for (const it of getAllSupplyItems(retailView, ownerId)) {
-    if (isConsumableItem(it)) continue;
-    const line = merged.lines[it.id] ?? { out: '', remain: '' };
-    const c = computeLine(line.out, line.remain, it, { unitBasis: 'retail' });
-    if (c.remainUnfilled || c.sold <= 0) continue;
-    total += c.soldRevenue;
-    hasSoldLine = true;
-  }
-  return hasSoldLine ? total : null;
-}
-
-/** 曆日營業額：優先用實收；未填實收則用銷售/盤點快照按零售參考推估。 */
-function dayRevenueForYmd(
-  ymdDash: string,
-  orders: OrderHistoryEntry[],
-  retailView: SupplyRetailView,
-  dayMap: Map<string, number> | undefined,
-): number | null {
-  const scopeId = getDataScopeContext().scopeId;
-  const salesRaw = getSalesRecord(ymdDash, scopeId);
-  if (salesRaw?.actualRevenue != null && String(salesRaw.actualRevenue).trim() !== '') {
-    const n = Number(String(salesRaw.actualRevenue).replace(/,/g, ''));
-    if (Number.isFinite(n)) return n;
-  }
-  if (salesRaw) {
-    const estimated = estimatedRetailRevenueFromSnapshot(salesRaw, retailView);
-    if (estimated != null) return estimated;
-  }
-  const matched = pickLatestStallOrderForYmd(ymdDash, orders, scopeId);
-  const rev = matched?.stallCountSnapshot?.actualRevenue;
-  if (rev != null && String(rev).trim() !== '') {
-    const n = Number(String(rev).replace(/,/g, ''));
-    if (Number.isFinite(n)) return n;
-  }
-  const snap = matched ? resolveStallSnapshotFromOrder(matched) : null;
-  if (snap) {
-    const estimated = estimatedRetailRevenueFromSnapshot(snap, retailView);
-    if (estimated != null) return estimated;
-  }
-  if (dayMap && dayMap.size > 0) return totalSoldQtyOnDay(dayMap);
-  return null;
-}
-
-function pickReferenceYmdByDayRevenue(
-  activeYmds: string[],
-  orders: OrderHistoryEntry[],
-  perDay: Map<string, Map<string, number>>,
-  retailView: SupplyRetailView,
-  pick: 'max' | 'min',
-): string | undefined {
-  if (activeYmds.length === 0) return undefined;
-  return activeYmds.reduce((best, ymdDash) => {
-    const cur = dayRevenueForYmd(ymdDash, orders, retailView, perDay.get(ymdDash));
-    const prev = dayRevenueForYmd(best, orders, retailView, perDay.get(best));
-    if (cur == null) return best;
-    if (prev == null) return ymdDash;
-    return pick === 'max' ? (cur > prev ? ymdDash : best) : cur < prev ? ymdDash : best;
-  });
+  return mode === 'lastWeek';
 }
 
 export function procurementReferenceSoldRowLabel(
@@ -259,8 +185,7 @@ export function computeProcurementLastWeekSameDaySold(
 /**
  * 依對照星期與參考模式（最高／平均／上週／最低）計算各品項售出參考量。
  * 僅納入目前登入店別（orders 應已經 orderMatchesProcurementSoldReferenceScope 篩過）。
- * 最高／最低：取同名星期歷史日中營業額最高／最低「那一天」的各品項售出量（非跨日混算）。
- * 平均：各品項在歷史同名星期各日的售出量加總 ÷ 有資料天數。
+ * 最高／最低／平均：與營運概況的售出量統計一致，各品項各自用歷史同名星期序列計算。
  * 上週：訂單歸屬日 −7 天。
  */
 export function computeProcurementWeekdaySoldReference(
@@ -294,19 +219,6 @@ export function computeProcurementWeekdaySoldReference(
 
   const fallbackYmd = activeYmds[activeYmds.length - 1] ?? addDaysYmd(orderDateYmd, -7);
 
-  if (mode === 'max' || mode === 'min') {
-    const referenceYmd =
-      pickReferenceYmdByDayRevenue(activeYmds, scopedOrders, perDay, retailView, mode) ?? fallbackYmd;
-    const { map, hasData } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
-    return {
-      referenceYmd,
-      soldByProductId: map,
-      hasCompletedStallDay: hasData,
-      mode,
-      sampleDayCount: activeYmds.length,
-    };
-  }
-
   const allIds = new Set<string>();
   for (const dayMap of perDay.values()) {
     for (const id of dayMap.keys()) allIds.add(id);
@@ -316,7 +228,12 @@ export function computeProcurementWeekdaySoldReference(
   for (const id of allIds) {
     const series = activeYmds.map((ymdDash) => perDay.get(ymdDash)?.get(id) ?? 0);
     if (series.every((v) => v === 0)) continue;
-    const value = series.reduce((s, v) => s + v, 0) / series.length;
+    const value =
+      mode === 'max'
+        ? Math.max(...series)
+        : mode === 'min'
+          ? Math.min(...series)
+          : series.reduce((s, v) => s + v, 0) / series.length;
     soldByProductId.set(id, Math.round(value * 1000) / 1000);
   }
 

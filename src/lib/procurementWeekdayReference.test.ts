@@ -130,7 +130,7 @@ describe('procurement weekday sold reference', () => {
 
     const ref = computeProcurementWeekdaySoldReference(ORDER_DATE, orders, 'headquarter', 'max');
     expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(180);
-    expect(ref.referenceYmd).toBe(THURSDAY_A);
+    expect(ref.sampleDayCount).toBe(2);
   });
 
   it('最高：有銷售紀錄時以銷售紀錄為準，不疊加訂單快照', () => {
@@ -231,9 +231,8 @@ describe('procurement weekday sold reference', () => {
       'headquarter',
       'max',
     );
-    expect(ref.referenceYmd).toBe(THURSDAY_A);
-    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(100);
-    expect(ref.soldByProductId.get(PRODUCT_B)).toBe(10);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(190);
+    expect(ref.soldByProductId.get(PRODUCT_B)).toBe(150);
   });
 
   it('最高：直營帳號不納入加盟店盤點（僅該店最高）', () => {
@@ -266,10 +265,10 @@ describe('procurement weekday sold reference', () => {
 
     const ref = computeProcurementWeekdaySoldReference(ORDER_DATE, orders, 'headquarter', 'max');
     expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(120);
-    expect(ref.referenceYmd).toBe(THURSDAY_B);
+    expect(ref.sampleDayCount).toBe(1);
   });
 
-  it('最高：未填實收時改用零售推估營業額，不用總售出數量排序', () => {
+  it('最高：改用銷售統計同算法，各品項各自取最高售出量', () => {
     const HIGH_PRICE_PRODUCT = 's20';
     const lowRevenueHighQty = stallOrder(
       {
@@ -313,12 +312,12 @@ describe('procurement weekday sold reference', () => {
       'max',
     );
 
-    expect(ref.referenceYmd).toBe(THURSDAY_B);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(200);
     expect(ref.soldByProductId.get(HIGH_PRICE_PRODUCT)).toBe(120);
-    expect(ref.soldByProductId.has(PRODUCT_ID)).toBe(false);
+    expect(ref.sampleDayCount).toBe(2);
   });
 
-  it('最低：未填實收時同樣以零售推估營業額選日', () => {
+  it('最低：改用銷售統計同算法，各品項各自取最低售出量', () => {
     const HIGH_PRICE_PRODUCT = 's20';
     const lowRevenueHighQty = stallOrder(
       {
@@ -362,8 +361,8 @@ describe('procurement weekday sold reference', () => {
       'min',
     );
 
-    expect(ref.referenceYmd).toBe(THURSDAY_A);
-    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(200);
-    expect(ref.soldByProductId.has(HIGH_PRICE_PRODUCT)).toBe(false);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(0);
+    expect(ref.soldByProductId.get(HIGH_PRICE_PRODUCT)).toBe(0);
+    expect(ref.sampleDayCount).toBe(2);
   });
 });

@@ -11,6 +11,7 @@ import {
   resolveOrderDataScopeId,
   setOrderStallCountStamp,
   stallCountSnapshotPersistedMatches,
+  normalizeProcurementDeductionBasisOrderIds,
   type OrderHistoryEntry,
   type OrderHistoryLine,
 } from './orderHistoryStorage';
@@ -26,6 +27,7 @@ import {
 import {
   getSalesRecord,
   applySalesRecordOrderDeduction,
+  restoreSalesRecordOrderDeduction,
   mergeSalesRecordWithCatalog,
   saveSalesRecord,
   type SalesRecordDaySnapshot,
@@ -319,6 +321,31 @@ export function applyOrderDeductionToDayRemain(
   };
   saveDay(ymdStr, snap, scopeId);
   applySalesRecordOrderDeduction(ymdStr, deductions, scopeId);
+}
+
+export function restoreOrderDeductionToDayRemain(
+  ymdStr: string,
+  restored: Record<string, number>,
+  scopeId?: string,
+) {
+  const s = loadAll();
+  const prev = mergeDayWithCurrentCatalog(readStallDay(s, ymdStr, scopeId) ?? emptyDay());
+  const lines = { ...prev.lines } as DaySnapshot['lines'];
+  const now = new Date().toISOString();
+  for (const [id, rawQty] of Object.entries(restored)) {
+    const qty = roundProcurementQty(Number(rawQty) || 0);
+    if (qty <= 0) continue;
+    const keys = catalogDayLineKeysForProduct(lines, id);
+    if (!lines[id]) lines[id] = { out: '', remain: '' };
+    const cur = num(lines[id].remain);
+    const next = roundProcurementQty(cur + qty);
+    for (const key of keys) {
+      lines[key] = { ...(lines[key] ?? lines[id]), remain: String(next), updatedAt: now };
+    }
+  }
+  const snap: DaySnapshot = { ...prev, lines, updatedAt: now };
+  saveDay(ymdStr, snap, scopeId);
+  restoreSalesRecordOrderDeduction(ymdStr, restored, scopeId);
 }
 
 /**
@@ -628,7 +655,7 @@ export function sumProcurementQtyAgainstBasisOrder(basisOrderId: string): Record
   const target = basisOrderId.trim();
   if (!target) return sums;
   for (const o of listAllMergedOrdersFromStores()) {
-    if (o.procurementDeductionBasisOrderId?.trim() !== target) continue;
+    if (!normalizeProcurementDeductionBasisOrderIds(o).includes(target)) continue;
     if (o.status === '已取消') continue;
     for (const line of o.lines) {
       const q = roundProcurementQty(Number(line.qty) || 0);
@@ -676,7 +703,7 @@ function totalRemainDeductedAgainstBasisOrder(
     .filter(
       (o) =>
         o.id !== basisOrderId.trim() &&
-        o.procurementDeductionBasisOrderId?.trim() === basisOrderId.trim() &&
+        normalizeProcurementDeductionBasisOrderIds(o).includes(basisOrderId.trim()) &&
         o.status !== '已取消' &&
         (!basisScope || resolveOrderStallStorageScopeId(o) === basisScope),
     )
@@ -688,6 +715,19 @@ function totalRemainDeductedAgainstBasisOrder(
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const deducted: Record<string, number> = {};
   for (const o of orders) {
+    const appliedForTarget = o.procurementDeductionAppliedQtyByBasisOrderId?.[basisOrderId.trim()];
+    if (appliedForTarget && Object.keys(appliedForTarget).length > 0) {
+      for (const [productId, rawQty] of Object.entries(appliedForTarget)) {
+        const qty = roundProcurementQty(Number(rawQty) || 0);
+        if (qty <= 0) continue;
+        const avail = pool[productId] ?? 0;
+        const d = roundProcurementQty(Math.min(qty, avail));
+        if (d <= 0) continue;
+        deducted[productId] = roundProcurementQty((deducted[productId] ?? 0) + d);
+        pool[productId] = roundProcurementQty(Math.max(0, avail - d));
+      }
+      continue;
+    }
     for (const line of o.lines) {
       const productId = resolveOrderLineProductId(line);
       const qty = roundProcurementQty(Number(line.qty) || 0);
@@ -713,11 +753,21 @@ function prevRemainForBringOut(
   }
   const live = roundProcurementQty(Math.max(0, num(prevDay.lines[productId]?.remain)));
   if (live > 0) return live;
-  const bid = order.procurementDeductionBasisOrderId!.trim();
-  const frozen = loadStallSalesDisplayFromBasisOrder(bid);
-  const frozenR = frozenRemainQtyForItem(frozen, productId);
-  const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, order.id)[productId] ?? 0;
-  const poolAtOrder = roundProcurementQty(Math.max(0, frozenR - deductedBefore));
+  const basisIds = normalizeProcurementDeductionBasisOrderIds(order);
+  const applied = basisIds.reduce(
+    (s, bid) =>
+      roundProcurementQty(
+        s + (order.procurementDeductionAppliedQtyByBasisOrderId?.[bid]?.[productId] ?? 0),
+      ),
+    0,
+  );
+  if (applied > 0) return applied;
+  const poolAtOrder = basisIds.reduce((s, bid) => {
+    const frozen = loadStallSalesDisplayFromBasisOrder(bid);
+    const frozenR = frozenRemainQtyForItem(frozen, productId);
+    const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, order.id)[productId] ?? 0;
+    return roundProcurementQty(s + Math.max(0, frozenR - deductedBefore));
+  }, 0);
   return roundProcurementQty(Math.max(0, Math.min(orderQty, poolAtOrder)));
 }
 
@@ -758,6 +808,8 @@ function findOrderByIdInStores(orderId: string): OrderHistoryEntry | null {
         stallCountCompletedAt: merged.stallCountCompletedAt,
         stallCountSnapshot: merged.stallCountSnapshot,
         procurementDeductionBasisOrderId: merged.procurementDeductionBasisOrderId,
+        procurementDeductionBasisOrderIds: merged.procurementDeductionBasisOrderIds,
+        procurementDeductionAppliedQtyByBasisOrderId: merged.procurementDeductionAppliedQtyByBasisOrderId,
       };
 }
 
@@ -765,10 +817,23 @@ function findOrderByIdInStores(orderId: string): OrderHistoryEntry | null {
  * 是否於叫貨送出時選了「欲扣除餘貨的訂單」。
  * 未選（`''`）或舊單無此欄（`undefined`）時，盤點「植入訂單」不併入參考剩餘。
  */
-function procurementOrderChainsPriorStallRemain(o: { procurementDeductionBasisOrderId?: string }): boolean {
-  const raw = o.procurementDeductionBasisOrderId;
-  if (raw === undefined) return false;
-  return raw.trim() !== '';
+function procurementOrderChainsPriorStallRemain(o: {
+  procurementDeductionBasisOrderId?: string;
+  procurementDeductionBasisOrderIds?: string[];
+}): boolean {
+  return normalizeProcurementDeductionBasisOrderIds(o).length > 0;
+}
+
+function addSnapshots(a: DaySnapshot, b: DaySnapshot): DaySnapshot {
+  const lines: DaySnapshot['lines'] = { ...a.lines };
+  for (const [productId, line] of Object.entries(b.lines)) {
+    const cur = lines[productId] ?? { out: '', remain: '' };
+    lines[productId] = {
+      out: String(roundProcurementQty(num(cur.out) + num(line.out))),
+      remain: String(roundProcurementQty(num(cur.remain) + num(line.remain))),
+    };
+  }
+  return mergeDayWithCurrentCatalog({ ...a, lines });
 }
 
 /**
@@ -779,6 +844,8 @@ function procurementOrderChainsPriorStallRemain(o: { procurementDeductionBasisOr
 function loadRemainSnapshotForProcurementBringOut(
   o: {
     procurementDeductionBasisOrderId?: string;
+    procurementDeductionBasisOrderIds?: string[];
+    procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
     orderDateYmd?: string;
     createdAt: string;
     scopeId?: string;
@@ -790,8 +857,11 @@ function loadRemainSnapshotForProcurementBringOut(
   if (!procurementOrderChainsPriorStallRemain(o)) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
-  const bid = o.procurementDeductionBasisOrderId!.trim();
-  return loadDayForProcurementFromOrder(bid);
+  let out = mergeDayWithCurrentCatalog(emptyDay());
+  for (const bid of normalizeProcurementDeductionBasisOrderIds(o)) {
+    out = addSnapshots(out, loadDayForProcurementFromOrder(bid));
+  }
+  return out;
 }
 
 /**
@@ -802,6 +872,8 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
   id?: string;
   lines?: OrderHistoryLine[];
   procurementDeductionBasisOrderId?: string;
+  procurementDeductionBasisOrderIds?: string[];
+  procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
   orderDateYmd?: string;
   createdAt: string;
   scopeId?: string;
@@ -810,14 +882,15 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
   if (!procurementOrderChainsPriorStallRemain(o)) {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
-  const bid = o.procurementDeductionBasisOrderId!.trim();
-  const live = loadDayForProcurementFromOrder(bid);
+  const basisIds = normalizeProcurementDeductionBasisOrderIds(o);
+  let live = mergeDayWithCurrentCatalog(emptyDay());
+  for (const bid of basisIds) {
+    live = addSnapshots(live, loadDayForProcurementFromOrder(bid));
+  }
   const orderLines = o.lines ?? [];
   const orderId = o.id?.trim();
   if (!orderId || orderLines.length === 0) return live;
 
-  const frozen = loadStallSalesDisplayFromBasisOrder(bid);
-  const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, orderId);
   const lines: DaySnapshot['lines'] = { ...live.lines };
   for (const line of orderLines) {
     const productId = resolveOrderLineProductId(line);
@@ -826,11 +899,23 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
     const liveLine = live.lines[productId] ?? { out: '', remain: '' };
     const liveRemain = roundProcurementQty(Math.max(0, num(liveLine.remain)));
     if (liveRemain > 0) continue;
-    const frozenRemain = frozenRemainQtyForItem(frozen, productId);
-    const poolAtOrder = roundProcurementQty(
-      Math.max(0, frozenRemain - (deductedBefore[productId] ?? 0)),
+    const appliedCarry = basisIds.reduce(
+      (s, bid) =>
+        roundProcurementQty(
+          s + (o.procurementDeductionAppliedQtyByBasisOrderId?.[bid]?.[productId] ?? 0),
+        ),
+      0,
     );
-    const carryForOrder = roundProcurementQty(Math.max(0, Math.min(orderQty, poolAtOrder)));
+    const fallbackCarry = basisIds.reduce((s, bid) => {
+      const frozen = loadStallSalesDisplayFromBasisOrder(bid);
+      const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, orderId);
+      const frozenRemain = frozenRemainQtyForItem(frozen, productId);
+      const poolAtOrder = roundProcurementQty(
+        Math.max(0, frozenRemain - (deductedBefore[productId] ?? 0)),
+      );
+      return roundProcurementQty(s + Math.min(orderQty, poolAtOrder));
+    }, 0);
+    const carryForOrder = appliedCarry > 0 ? appliedCarry : fallbackCarry;
     if (carryForOrder <= 0) continue;
     lines[productId] = {
       ...liveLine,
@@ -933,9 +1018,9 @@ export function computeStallOutImportBreakdown(
 
   let carrySource: StallOutCarryRemainSource | null = null;
   if (chainsPriorStallRemain) {
-    const bid = o.procurementDeductionBasisOrderId?.trim();
-    if (bid) {
-      carrySource = { kind: 'basis_order', orderId: bid };
+    const bids = normalizeProcurementDeductionBasisOrderIds(o);
+    if (bids.length > 0) {
+      carrySource = { kind: 'basis_order', orderId: bids.join('、') };
     }
   }
 

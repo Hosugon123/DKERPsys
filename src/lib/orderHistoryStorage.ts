@@ -89,6 +89,10 @@ export type OrderHistoryEntry = {
    * 未定義之舊單：盤點「植入訂單」仍併入前一日收攤剩餘（相容舊行為）。
    */
   procurementDeductionBasisOrderId?: string;
+  /** 新制：可同時扣多張盤點單剩餘；舊欄位仍保留相容單一基準。 */
+  procurementDeductionBasisOrderIds?: string[];
+  /** 每張扣餘基準單實際扣掉的品項數量；事後扣餘會用它還原昨剩餘帶出。 */
+  procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
 };
 
 const STORAGE_KEY = 'dongshan_order_history_v1';
@@ -154,7 +158,23 @@ export type FranchiseManagementOrder = {
    * 批貨送出時所選「欲扣除餘貨的訂單」單號；空字串＝不指定。舊單無此欄時盤點公式仍併入前日剩餘。
    */
   procurementDeductionBasisOrderId?: string;
+  procurementDeductionBasisOrderIds?: string[];
+  procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
 };
+
+export function normalizeProcurementDeductionBasisOrderIds(input: {
+  procurementDeductionBasisOrderId?: string;
+  procurementDeductionBasisOrderIds?: string[];
+}): string[] {
+  const ids: string[] = [];
+  const add = (raw: string | undefined) => {
+    const id = raw?.trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  add(input.procurementDeductionBasisOrderId);
+  for (const id of input.procurementDeductionBasisOrderIds ?? []) add(id);
+  return ids;
+}
 
 function franchiseeUserIdFromScopeId(scopeId: string): string | null {
   const m = /^scope:franchisee:(.+)$/.exec(scopeId);
@@ -502,6 +522,8 @@ function franchiseMgmtToHistoryEntry(m: FranchiseManagementOrder): OrderHistoryE
     stallCountCompletedAt: m.stallCountCompletedAt,
     stallCountSnapshot: m.stallCountSnapshot,
     procurementDeductionBasisOrderId: m.procurementDeductionBasisOrderId,
+    procurementDeductionBasisOrderIds: m.procurementDeductionBasisOrderIds,
+    procurementDeductionAppliedQtyByBasisOrderId: m.procurementDeductionAppliedQtyByBasisOrderId,
   };
 }
 
@@ -659,6 +681,8 @@ function appendFranchiseManagementOrderInternal(params: {
   selfSuppliedCostAmount?: number;
   orderDateYmd: string;
   procurementDeductionBasisOrderId?: string;
+  procurementDeductionBasisOrderIds?: string[];
+  procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
 }): string {
   const {
     lines,
@@ -667,6 +691,8 @@ function appendFranchiseManagementOrderInternal(params: {
     selfSuppliedCostAmount,
     orderDateYmd,
     procurementDeductionBasisOrderId,
+    procurementDeductionBasisOrderIds,
+    procurementDeductionAppliedQtyByBasisOrderId,
   } = params;
   const itemCount = roundProcurementQty(lines.reduce((s, l) => s + l.qty, 0));
   const now = new Date().toISOString();
@@ -691,6 +717,12 @@ function appendFranchiseManagementOrderInternal(params: {
     lastUpdatedByName: who,
     ...(procurementDeductionBasisOrderId !== undefined
       ? { procurementDeductionBasisOrderId }
+      : {}),
+    ...(procurementDeductionBasisOrderIds !== undefined
+      ? { procurementDeductionBasisOrderIds }
+      : {}),
+    ...(procurementDeductionAppliedQtyByBasisOrderId !== undefined
+      ? { procurementDeductionAppliedQtyByBasisOrderId }
       : {}),
   };
   saveFranchiseManagementOrders([entry, ...loadFranchiseManagementOrdersAll()]);
@@ -734,8 +766,13 @@ export type ApplyProcurementDeductionBasisResult =
         | 'canceled'
         | 'stall_count_locked'
         | 'already_has_basis'
-        | 'empty_basis';
+        | 'empty_basis'
+        | 'empty_after_deduction';
     };
+
+export type RemoveProcurementDeductionBasisResult =
+  | { ok: true; restoredQty: Record<string, number> }
+  | { ok: false; reason: 'not_found' | 'canceled' | 'stall_count_locked' | 'basis_not_attached' };
 
 /**
  * 事後補上「扣除前次盤點剩餘」參考單。
@@ -745,8 +782,19 @@ export function updateProcurementDeductionBasisOrderIdInEitherStore(
   id: string,
   basisOrderId: string,
 ): ApplyProcurementDeductionBasisResult {
-  const basis = basisOrderId.trim();
-  if (!basis) return { ok: false, reason: 'empty_basis' };
+  return updateProcurementDeductionBasisOrderLinesInEitherStore(id, [basisOrderId]);
+}
+
+export function updateProcurementDeductionBasisOrderLinesInEitherStore(
+  id: string,
+  basisOrderId: string | string[],
+  nextLines?: OrderHistoryLine[],
+  appliedQtyByBasisOrderId?: Record<string, Record<string, number>>,
+): ApplyProcurementDeductionBasisResult {
+  const basisIds = Array.isArray(basisOrderId)
+    ? normalizeProcurementDeductionBasisOrderIds({ procurementDeductionBasisOrderIds: basisOrderId })
+    : normalizeProcurementDeductionBasisOrderIds({ procurementDeductionBasisOrderId: basisOrderId });
+  if (basisIds.length === 0) return { ok: false, reason: 'empty_basis' };
   const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
   const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
   if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
@@ -758,15 +806,38 @@ export function updateProcurementDeductionBasisOrderIdInEitherStore(
   if (rows.some((row) => orderHasStallCountCompleted(row))) {
     return { ok: false, reason: 'stall_count_locked' };
   }
-  if (rows.some((row) => row.procurementDeductionBasisOrderId?.trim())) {
+  if (rows.some((row) => normalizeProcurementDeductionBasisOrderIds(row).length > 0)) {
     return { ok: false, reason: 'already_has_basis' };
+  }
+
+  const totals = nextLines ? aggregateOrderLinesForSave(nextLines) : null;
+  if (nextLines && totals && totals.lines.length === 0) {
+    return { ok: false, reason: 'empty_after_deduction' };
   }
 
   const now = new Date().toISOString();
   const who = persistableActorDisplayName();
   const patch = <T extends FranchiseManagementOrder | OrderHistoryEntry>(row: T): T => ({
     ...row,
-    procurementDeductionBasisOrderId: basis,
+    ...(totals
+      ? {
+          lines: stampChangedOrderLines(totals.lines, row.lines, now, row.updatedAt),
+          itemCount: totals.itemCount,
+          totalAmount: totals.totalAmount,
+          payableAmount: totals.totalAmount,
+          selfSuppliedCostAmount:
+            'actorRole' in row
+              ? calculateSelfSuppliedCostAmount(
+                  totals.lines,
+                  row.actorRole,
+                  franchiseeRetailOwnerIdForOrder(row),
+                )
+              : 0,
+        }
+      : {}),
+    procurementDeductionBasisOrderId: basisIds[0],
+    procurementDeductionBasisOrderIds: basisIds,
+    procurementDeductionAppliedQtyByBasisOrderId: appliedQtyByBasisOrderId,
     updatedAt: now,
     ...(who ? { lastUpdatedByName: who } : {}),
   });
@@ -775,6 +846,61 @@ export function updateProcurementDeductionBasisOrderIdInEitherStore(
   if (mgmtHit) wrote = patchFranchiseManagementOrderById(id, patch) || wrote;
   if (histHit) wrote = patchOrderHistoryById(id, patch) || wrote;
   return wrote ? { ok: true } : { ok: false, reason: 'not_found' };
+}
+
+export function removeProcurementDeductionBasisOrderIdInEitherStore(
+  id: string,
+  basisOrderId: string,
+): RemoveProcurementDeductionBasisResult {
+  const target = basisOrderId.trim();
+  if (!target) return { ok: false, reason: 'basis_not_attached' };
+  const mgmtHit = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
+  const histHit = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  if (!mgmtHit && !histHit) return { ok: false, reason: 'not_found' };
+  const rows = [mgmtHit, histHit].filter(Boolean) as Array<
+    FranchiseManagementOrder | OrderHistoryEntry
+  >;
+  if (rows.some((row) => row.status === '已取消')) return { ok: false, reason: 'canceled' };
+  if (rows.some((row) => orderHasStallCountCompleted(row))) {
+    return { ok: false, reason: 'stall_count_locked' };
+  }
+  const baseRow = rows[0]!;
+  const ids = normalizeProcurementDeductionBasisOrderIds(baseRow);
+  if (!ids.includes(target)) return { ok: false, reason: 'basis_not_attached' };
+  const restoredQty = baseRow.procurementDeductionAppliedQtyByBasisOrderId?.[target] ?? {};
+  const nextIds = ids.filter((x) => x !== target);
+  const now = new Date().toISOString();
+  const who = persistableActorDisplayName();
+  const patch = <T extends FranchiseManagementOrder | OrderHistoryEntry>(row: T): T => {
+    const applied = { ...(row.procurementDeductionAppliedQtyByBasisOrderId ?? {}) };
+    const rowRestored = applied[target] ?? restoredQty;
+    delete applied[target];
+    const nextLines = row.lines.map((line) => ({
+      ...line,
+      qty: roundProcurementQty(Number(line.qty) + (rowRestored[line.productId] ?? 0)),
+    }));
+    const totals = aggregateOrderLinesForSave(nextLines);
+    return {
+      ...row,
+      lines: stampChangedOrderLines(totals.lines, row.lines, now, row.updatedAt),
+      itemCount: totals.itemCount,
+      totalAmount: totals.totalAmount,
+      payableAmount: totals.totalAmount,
+      selfSuppliedCostAmount:
+        'actorRole' in row
+          ? calculateSelfSuppliedCostAmount(totals.lines, row.actorRole, franchiseeRetailOwnerIdForOrder(row))
+          : 0,
+      procurementDeductionBasisOrderId: nextIds[0] ?? '',
+      procurementDeductionBasisOrderIds: nextIds,
+      procurementDeductionAppliedQtyByBasisOrderId: applied,
+      updatedAt: now,
+      ...(who ? { lastUpdatedByName: who } : {}),
+    };
+  };
+  let wrote = false;
+  if (mgmtHit) wrote = patchFranchiseManagementOrderById(id, patch) || wrote;
+  if (histHit) wrote = patchOrderHistoryById(id, patch) || wrote;
+  return wrote ? { ok: true, restoredQty } : { ok: false, reason: 'not_found' };
 }
 
 function roundMoney(n: number) {
@@ -1166,6 +1292,8 @@ export function appendProcurementOrderEntry(params: {
   orderDateYmd: string;
   /** 批貨頁選取之扣庫參考單號；傳空字串表示不指定 */
   procurementDeductionBasisOrderId?: string;
+  procurementDeductionBasisOrderIds?: string[];
+  procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
 }): string {
   const {
     lines,
@@ -1175,6 +1303,8 @@ export function appendProcurementOrderEntry(params: {
     actorRole,
     orderDateYmd,
     procurementDeductionBasisOrderId,
+    procurementDeductionBasisOrderIds,
+    procurementDeductionAppliedQtyByBasisOrderId,
   } = params;
   const ctx = getDataScopeContext();
   const bookYmd = normalizeOrderDateYmdInput(orderDateYmd);
@@ -1229,6 +1359,12 @@ export function appendProcurementOrderEntry(params: {
     lastUpdatedByName: who,
     ...(procurementDeductionBasisOrderId !== undefined
       ? { procurementDeductionBasisOrderId }
+      : {}),
+    ...(procurementDeductionBasisOrderIds !== undefined
+      ? { procurementDeductionBasisOrderIds }
+      : {}),
+    ...(procurementDeductionAppliedQtyByBasisOrderId !== undefined
+      ? { procurementDeductionAppliedQtyByBasisOrderId }
       : {}),
   };
 
