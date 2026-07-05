@@ -7,7 +7,82 @@ const REDIS_ENV_KEY = 'REDIS_URL';
 let redisClient = null;
 let redisConnecting = null;
 
-async function getRedis() {
+function hrMs(start) {
+  return Number(process.hrtime.bigint() - start) / 1_000_000;
+}
+
+function perfEnabled() {
+  return String(process.env.PERFORMANCE_DEBUG || '').toLowerCase() === 'true';
+}
+
+function slowThresholdMs() {
+  const n = Number(process.env.PERFORMANCE_SLOW_MS || 1000);
+  return Number.isFinite(n) && n >= 0 ? n : 1000;
+}
+
+function makePerfTrace(req) {
+  const started = process.hrtime.bigint();
+  const items = [];
+  let finished = false;
+  return {
+    mark(name, durationMs, detail) {
+      items.push({ name, durationMs, detail });
+    },
+    async time(name, fn, detail) {
+      const s = process.hrtime.bigint();
+      try {
+        return await fn();
+      } finally {
+        items.push({ name, durationMs: hrMs(s), detail });
+      }
+    },
+    attach(res) {
+      const finishBeforeSend = () => {
+        if (!finished) this.finish(res, res.statusCode || 200);
+      };
+      const originalJson = res.json.bind(res);
+      res.json = (body) => {
+        finishBeforeSend();
+        return originalJson(body);
+      };
+      const originalSend = res.send?.bind(res);
+      if (originalSend) {
+        res.send = (body) => {
+          finishBeforeSend();
+          return originalSend(body);
+        };
+      }
+      const originalEnd = res.end.bind(res);
+      res.end = (...args) => {
+        finishBeforeSend();
+        return originalEnd(...args);
+      };
+    },
+    finish(res, statusCode) {
+      if (finished) return;
+      finished = true;
+      const totalMs = hrMs(started);
+      const serverTiming = [
+        `total;dur=${totalMs.toFixed(1)}`,
+        ...items.map((item) => `${item.name.replace(/[^a-zA-Z0-9_-]/g, '_')};dur=${item.durationMs.toFixed(1)}`),
+      ].join(', ');
+      if (!res.headersSent) res.setHeader('Server-Timing', serverTiming);
+      if (perfEnabled() || totalMs >= slowThresholdMs()) {
+        console.info('[perf][sync-bundle]', {
+          method: req.method,
+          statusCode,
+          totalMs: Math.round(totalMs),
+          items: items.map((item) => ({
+            ...item,
+            durationMs: Math.round(item.durationMs),
+          })),
+        });
+      }
+    },
+  };
+}
+
+async function getRedis(perf) {
   if (redisClient && redisClient.isOpen) return redisClient;
   if (redisConnecting) return redisConnecting;
 
@@ -21,7 +96,8 @@ async function getRedis() {
     /* 交由呼叫端統一回傳錯誤 */
   });
 
-  redisConnecting = client.connect().then(() => {
+  redisConnecting = perf.time('redis_connect', async () => {
+    await client.connect();
     redisClient = client;
     return client;
   });
@@ -103,6 +179,15 @@ function parseJsonBodyMaybe(body) {
   return null;
 }
 
+function stringifyJsonMeasured(perf, name, value) {
+  const s = process.hrtime.bigint();
+  try {
+    return JSON.stringify(value);
+  } finally {
+    perf.mark(name, hrMs(s));
+  }
+}
+
 function readUpdatedAt(bundle) {
   const ts = bundle?.updatedAt;
   return typeof ts === 'number' && Number.isFinite(ts) ? ts : 0;
@@ -119,34 +204,49 @@ function isCloudBundleEmpty(bundle) {
 }
 
 export default async function handler(req, res) {
+  const perf = makePerfTrace(req);
+  perf.attach(res);
+  let statusCode = 500;
   try {
     res.setHeader('Cache-Control', 'no-store');
     if (!originAllowed(req)) {
+      statusCode = 403;
       return forbidden(res);
     }
 
-    const redis = await getRedis();
+    const redis = await perf.time('redis_ready', () => getRedis(perf));
     const expected = String(process.env.API_SYNC_TOKEN || '').trim();
     const got = readBearer(req);
     if (!expected || !got || got !== expected) {
+      statusCode = 401;
       return unauthorized(res);
     }
 
     if (req.method === 'GET') {
-      const raw = await redis.get(KV_KEY);
-      const stored = parseJsonBodyMaybe(raw);
+      const raw = await perf.time('redis_get', () => redis.get(KV_KEY));
+      perf.mark('redis_get_bytes', 0, { chars: typeof raw === 'string' ? raw.length : 0 });
+      const stored = await perf.time('json_parse', async () => parseJsonBodyMaybe(raw));
       if (stored && typeof stored === 'object') {
+        statusCode = 200;
         return res.status(200).json({ ok: true, bundle: stored });
       }
+      statusCode = 200;
       return res.status(200).json({ ok: true, bundle: emptyBundle() });
     }
 
     if (req.method === 'PUT') {
-      const body = parseJsonBodyMaybe(req.body);
-      if (!body) return badRequest(res, 'invalid json body');
+      const body = await perf.time('body_parse', async () => parseJsonBodyMaybe(req.body), {
+        bodyType: typeof req.body,
+        chars: typeof req.body === 'string' ? req.body.length : undefined,
+      });
+      if (!body) {
+        statusCode = 400;
+        return badRequest(res, 'invalid json body');
+      }
 
       const bundle = body.bundle;
       if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+        statusCode = 400;
         return badRequest(res, 'invalid bundle');
       }
 
@@ -156,8 +256,9 @@ export default async function handler(req, res) {
           ? body.syncedFromUpdatedAt
           : incomingUpdatedAt;
 
-      const rawCloud = await redis.get(KV_KEY);
-      const cloudBundle = parseJsonBodyMaybe(rawCloud);
+      const rawCloud = await perf.time('redis_get_before_put', () => redis.get(KV_KEY));
+      perf.mark('redis_get_before_put_bytes', 0, { chars: typeof rawCloud === 'string' ? rawCloud.length : 0 });
+      const cloudBundle = await perf.time('json_parse_cloud', async () => parseJsonBodyMaybe(rawCloud));
       const cloudUpdatedAt =
         cloudBundle && typeof cloudBundle === 'object' && !isCloudBundleEmpty(cloudBundle)
           ? readUpdatedAt(cloudBundle)
@@ -174,12 +275,19 @@ export default async function handler(req, res) {
         updatedAt: incomingUpdatedAt > 0 ? incomingUpdatedAt : Date.now(),
       };
 
-      await redis.set(KV_KEY, JSON.stringify(storedBundle));
+      const storedText = stringifyJsonMeasured(perf, 'json_stringify_store', storedBundle);
+      perf.mark('redis_set_bytes', 0, { chars: storedText.length });
+      await perf.time('redis_set', () => redis.set(KV_KEY, storedText));
+      statusCode = 200;
       return res.status(200).json({ ok: true });
     }
 
+    statusCode = 405;
     return res.status(405).json({ ok: false, error: 'method not allowed' });
   } catch (e) {
+    statusCode = 500;
     return internalError(res, e);
+  } finally {
+    if (!res.headersSent) perf.finish(res, statusCode);
   }
 }

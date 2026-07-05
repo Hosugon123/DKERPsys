@@ -90,6 +90,7 @@ import {
 } from '../lib/dashboardRevenueBaselineStorage';
 import { computeLine } from '../lib/stallMath';
 import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
+import { isPerformanceDebugEnabled, reportPerfMetric, timeSync } from '../lib/performanceDebug';
 
 const HQ_STALL_VIEW = 'headquarter' as const;
 const FRANCHISE_STALL_VIEW = 'franchisee' as const;
@@ -114,6 +115,8 @@ type DirectStallGapRangeMode = DashboardPeriodMode;
 type StallSalesBoardRangeMode = { kind: 'none' } | DashboardPeriodMode;
 type ExpenseShareRow = { id: number; name: string; amount: number; pct: number };
 const RANK_DEFAULT_LIMIT = 10;
+const STALL_SALES_BOARD_PAGE_SIZE = 10;
+const STALL_SALES_BOARD_MOBILE_PAGE_SIZE = 5;
 type RevenueRankRow = { id: number; name: string; revenue: number; pct?: number };
 type AmountRankRow = { id: number; name: string; amount: number; pct?: number };
 const FRANCHISE_REVENUE_SCOPE_ALL = 'all';
@@ -413,6 +416,52 @@ function accumulateSoldQtyByProductFromSnapshot(
 
 function formatWeekdaySoldQty(n: number): string {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 3, minimumFractionDigits: 0 });
+}
+
+function StallSalesPagination({
+  page,
+  totalPages,
+  totalRows,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  totalRows: number;
+  pageSize: number;
+  onPageChange: (nextPage: number) => void;
+}) {
+  if (totalRows <= pageSize) return null;
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalRows);
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950/35 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs text-zinc-500">
+        目前顯示第 {start}-{end} 筆，共 {totalRows.toLocaleString('zh-TW')} 筆
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="min-h-9 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs font-medium text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          上一頁
+        </button>
+        <span className="text-xs tabular-nums text-zinc-500">
+          {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="min-h-9 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs font-medium text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          下一頁
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function resolveDirectStallGapYmdRange(mode: DirectStallGapRangeMode): { startYmd: string; endYmd: string } {
@@ -903,6 +952,8 @@ export default function Dashboard({
   const [stallSalesBoardRange, setStallSalesBoardRange] = useState<StallSalesBoardRangeMode>({
     kind: 'none',
   });
+  const [stallSalesBoardPage, setStallSalesBoardPage] = useState(1);
+  const [stallSalesInsightsOpen, setStallSalesInsightsOpen] = useState(false);
   /** 對照「本週／上週／上上週…」之同名星期：0＝週一 … 6＝週日 */
   /** null＝不篩星期，表格為區間內逐日；0–6＝週一…週日同名星期對照 */
   const [weekdayChainFocusIdx, setWeekdayChainFocusIdx] = useState<number | null>(null);
@@ -925,7 +976,16 @@ export default function Dashboard({
 
   useEffect(() => {
     setStallBoardFocusYmd(null);
+    setStallSalesBoardPage(1);
+    setStallSalesInsightsOpen(false);
   }, [weekdayChainFocusIdx, stallSalesBoardRange]);
+
+  useEffect(() => {
+    if (!stallSalesBoardOpen) {
+      setStallSalesBoardPage(1);
+      setStallSalesInsightsOpen(false);
+    }
+  }, [stallSalesBoardOpen]);
 
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
@@ -1003,16 +1063,22 @@ export default function Dashboard({
   /** 總部直營：每日經濟指標（加盟視角略過以降低不必要計算） */
   const hqDirectStallEconomicsByYmd = useMemo(() => {
     if (!stallSalesBoardOpen || franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
-    return buildDirectStallEconomicsByYmd(effectiveOrders, HQ_STALL_VIEW);
+    return timeSync('dashboard.direct-sales.build-hq-economics', () =>
+      buildDirectStallEconomicsByYmd(effectiveOrders, HQ_STALL_VIEW),
+    );
   }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick, stallSalesBoardOpen]);
 
   /** 指定加盟店：已完成盤點之訂單＋孤立銷售紀錄（加盟零售價視角） */
   const franchiseStoreEconomicsByYmd = useMemo(() => {
     if (!stallSalesBoardOpen || !franchiseStallSalesBoardOwnerUserId) return new Map<string, DirectStallDayEconomics>();
-    return buildFranchiseStallEconomicsByYmd(
-      effectiveOrders,
-      FRANCHISE_STALL_VIEW,
-      franchiseStallSalesBoardOwnerUserId,
+    return timeSync(
+      'dashboard.direct-sales.build-franchise-economics',
+      () =>
+        buildFranchiseStallEconomicsByYmd(
+          effectiveOrders,
+          FRANCHISE_STALL_VIEW,
+          franchiseStallSalesBoardOwnerUserId,
+        ),
     );
   }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick, stallSalesBoardOpen]);
 
@@ -1078,6 +1144,44 @@ export default function Dashboard({
     weekdayChainFocusIdx,
   ]);
 
+  const stallSalesBoardSummary = useMemo(() => {
+    let dayCount = 0;
+    let expectedRetail = 0;
+    let actual = 0;
+    let gap = 0;
+    let latestYmd = '';
+    for (const row of stallWeekdayChainRows) {
+      const eco = row.eco;
+      if (!eco) continue;
+      dayCount += 1;
+      expectedRetail += eco.expectedRetail;
+      if (eco.actual != null) actual += eco.actual;
+      if (eco.gap != null) gap += eco.gap;
+      if (!latestYmd || row.ymd > latestYmd) latestYmd = row.ymd;
+    }
+    return { dayCount, expectedRetail, actual, gap, latestYmd };
+  }, [stallWeekdayChainRows]);
+
+  const stallSalesBoardTotalPages = Math.max(
+    1,
+    Math.ceil(
+      stallWeekdayChainRows.length /
+        (isNarrow ? STALL_SALES_BOARD_MOBILE_PAGE_SIZE : STALL_SALES_BOARD_PAGE_SIZE),
+    ),
+  );
+  const stallSalesBoardPageSize = isNarrow
+    ? STALL_SALES_BOARD_MOBILE_PAGE_SIZE
+    : STALL_SALES_BOARD_PAGE_SIZE;
+
+  useEffect(() => {
+    setStallSalesBoardPage((page) => Math.min(Math.max(1, page), stallSalesBoardTotalPages));
+  }, [stallSalesBoardTotalPages]);
+
+  const visibleStallWeekdayChainRows = useMemo(() => {
+    const start = (stallSalesBoardPage - 1) * stallSalesBoardPageSize;
+    return stallWeekdayChainRows.slice(start, start + stallSalesBoardPageSize);
+  }, [stallSalesBoardPage, stallSalesBoardPageSize, stallWeekdayChainRows]);
+
   const calendarWeekFocusYmd = useMemo(() => {
     if (stallBoardFocusYmd && stallWeekdayChainRows.some((r) => r.ymd === stallBoardFocusYmd)) {
       return stallBoardFocusYmd;
@@ -1137,6 +1241,12 @@ export default function Dashboard({
 
   /** 與「銷售統計」相同之曆日集合：各品項當日售出量加總後，再算平均／最高／最低 */
   const sameWeekdayProductSoldStats = useMemo(() => {
+    if (!stallSalesInsightsOpen) {
+      return {
+        dayCount: 0,
+        rows: [] as { id: string; name: string; avg: number; max: number; min: number }[],
+      };
+    }
     const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
     const { startYmd, endYmd } = stallSalesBoardResolvedYmd;
@@ -1233,6 +1343,33 @@ export default function Dashboard({
     franchiseStallSalesBoardOwnerUserId,
     orderTick,
     getSalesRecordCached,
+    stallSalesInsightsOpen,
+  ]);
+
+  useEffect(() => {
+    if (!stallSalesBoardOpen || !isPerformanceDebugEnabled()) return;
+    const detail = {
+      title: franchiseStallSalesBoardOwnerUserId ? 'franchise-stall-sales' : 'direct-stall-sales',
+      range: stallSalesBoardRangeLabel(stallSalesBoardRange),
+      matchedDays: stallWeekdayChainRows.length,
+      renderedRows: visibleStallWeekdayChainRows.length,
+      page: stallSalesBoardPage,
+      totalPages: stallSalesBoardTotalPages,
+      productStatsLoaded: stallSalesInsightsOpen,
+      productRows: sameWeekdayProductSoldStats.rows.length,
+    };
+    reportPerfMetric({ name: 'dashboard.direct-sales.render-state', details: detail });
+    console.info('[Direct Sales Performance]', detail);
+  }, [
+    franchiseStallSalesBoardOwnerUserId,
+    sameWeekdayProductSoldStats.rows.length,
+    stallSalesBoardOpen,
+    stallSalesBoardPage,
+    stallSalesBoardRange,
+    stallSalesBoardTotalPages,
+    stallSalesInsightsOpen,
+    stallWeekdayChainRows.length,
+    visibleStallWeekdayChainRows.length,
   ]);
 
   const showFranchiseStallSalesBoard = franchiseStallSalesBoardOwnerUserId != null;
@@ -1981,6 +2118,42 @@ export default function Dashboard({
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/45 p-3">
+                <p className="text-[11px] text-zinc-500">符合日期</p>
+                <p className="mt-1 text-lg font-light tabular-nums text-zinc-100">
+                  {stallSalesBoardSummary.dayCount.toLocaleString('zh-TW')} 天
+                </p>
+              </div>
+              <div className="rounded-xl border border-rose-900/35 bg-rose-950/15 p-3">
+                <p className="text-[11px] text-rose-200/75">應有營業額</p>
+                <p className="mt-1 text-lg font-light tabular-nums text-rose-200">
+                  {moneyTW(stallSalesBoardSummary.expectedRetail)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-amber-900/35 bg-amber-950/15 p-3">
+                <p className="text-[11px] text-amber-200/75">實收營業額</p>
+                <p className="mt-1 text-lg font-light tabular-nums text-amber-200">
+                  {moneyTW(stallSalesBoardSummary.actual)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-zinc-700 bg-zinc-900/75 p-3">
+                <p className="text-[11px] text-zinc-400">總落差</p>
+                <p
+                  className={cn(
+                    'mt-1 text-lg font-light tabular-nums',
+                    stallSalesBoardSummary.gap > 0
+                      ? 'text-emerald-300'
+                      : stallSalesBoardSummary.gap < 0
+                        ? 'text-rose-300'
+                        : 'text-zinc-400',
+                  )}
+                >
+                  {moneySignedInt(stallSalesBoardSummary.gap)}
+                </p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
               <div className="xl:col-span-8 space-y-4 min-w-0">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -2032,6 +2205,14 @@ export default function Dashboard({
                   </div>
                 </div>
 
+                <StallSalesPagination
+                  page={stallSalesBoardPage}
+                  totalPages={stallSalesBoardTotalPages}
+                  totalRows={stallWeekdayChainRows.length}
+                  pageSize={stallSalesBoardPageSize}
+                  onPageChange={setStallSalesBoardPage}
+                />
+
                 <div className="overflow-x-auto rounded-lg border border-zinc-800">
                   <table className="w-full min-w-[920px] text-left text-sm">
                     <thead className="bg-zinc-900/90 border-b border-zinc-800 text-zinc-500 text-xs">
@@ -2047,7 +2228,7 @@ export default function Dashboard({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800/70">
-                      {stallWeekdayChainRows.map((row) => {
+                      {visibleStallWeekdayChainRows.map((row) => {
                         const eco = row.eco;
                         const isFocus = row.ymd === calendarWeekFocusYmd;
                         return (
@@ -2106,6 +2287,14 @@ export default function Dashboard({
                   </table>
                 </div>
 
+                <StallSalesPagination
+                  page={stallSalesBoardPage}
+                  totalPages={stallSalesBoardTotalPages}
+                  totalRows={stallWeekdayChainRows.length}
+                  pageSize={stallSalesBoardPageSize}
+                  onPageChange={setStallSalesBoardPage}
+                />
+
                 <p className="text-[11px] text-zinc-500">
                   {weekdayChainFocusIdx === null
                     ? stallSalesBoardRange.kind === 'none'
@@ -2153,18 +2342,33 @@ export default function Dashboard({
                   </div>
                   {sameWeekdayActualStats.dayCount > 0 && (
                     <div className="space-y-2.5 pt-1 border-b border-zinc-800/70 pb-2">
-                      <p className="text-base font-medium text-sky-200/85">
-                        售出量統計
-                      </p>
-                      {sameWeekdayProductSoldStats.rows.length > 0 ? (
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-base font-medium text-sky-200/85">
+                          ??????
+                        </p>
+                        {!stallSalesInsightsOpen ? (
+                          <button
+                            type="button"
+                            onClick={() => setStallSalesInsightsOpen(true)}
+                            className="min-h-8 rounded-lg border border-sky-700/60 bg-sky-950/60 px-2.5 text-xs font-medium text-sky-100 hover:border-sky-500/70"
+                          >
+                            ????
+                          </button>
+                        ) : null}
+                      </div>
+                      {!stallSalesInsightsOpen ? (
+                        <p className="rounded-lg border border-sky-900/40 bg-sky-950/25 px-3 py-2 text-sm text-sky-100/70">
+                          ????????????????????????????????????
+                        </p>
+                      ) : sameWeekdayProductSoldStats.rows.length > 0 ? (
                         <div className="overflow-x-auto rounded-lg border border-zinc-800/80 max-h-52 sm:max-h-64 overflow-y-auto -mx-0.5 px-0.5">
                           <table className="w-full min-w-[280px] text-left text-sm sm:text-base">
                             <thead className="sticky top-0 bg-sky-950/95 text-zinc-500 border-b border-zinc-800/80 text-sm sm:text-base">
                               <tr>
-                                <th className="py-2 pr-2 pl-1 font-medium">品項</th>
-                                <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">平均</th>
-                                <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">最高</th>
-                                <th className="py-2 pl-1.5 pr-1 font-medium text-right whitespace-nowrap">最低</th>
+                                <th className="py-2 pr-2 pl-1 font-medium">??</th>
+                                <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">??</th>
+                                <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">??</th>
+                                <th className="py-2 pl-1.5 pr-1 font-medium text-right whitespace-nowrap">??</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
@@ -2186,7 +2390,7 @@ export default function Dashboard({
                           </table>
                         </div>
                       ) : (
-                        <p className="text-sm sm:text-base text-zinc-600">尚無可匯總之盤點售出明細（或非販售品）。</p>
+                        <p className="text-sm sm:text-base text-zinc-600">?????????????</p>
                       )}
                     </div>
                   )}

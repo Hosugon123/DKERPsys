@@ -14,6 +14,69 @@ npm test
 npm run build
 ```
 
+## 效能量測與 PWA 檢查
+
+系統讀取緩慢不得只靠感覺判斷。每次懷疑登入、首頁、Dashboard、PWA 或 API 變慢時，先跑以下量測，保留 `reports/performance/` 產出的 JSON 與 Markdown 報告，再決定是否重構。
+
+```bash
+npm run perf:test
+npm run perf:mobile
+npm run perf:pwa
+npm run perf:report
+```
+
+預設量測目標是正式站：
+
+```text
+https://dksys.vercel.app
+```
+
+可用環境變數改目標與次數：
+
+```bash
+PERF_BASE_URL=https://dksys.vercel.app PERF_ITERATIONS=5 PERF_LOAD_ITERATIONS=10 npm run perf:report
+```
+
+如果要量測授權後的 `/api/sync-bundle` 真實 bundle 大小與 JSON parse 耗時，需在本機環境提供 token：
+
+```bash
+PERF_API_TOKEN=你的同步token npm run perf:report
+```
+
+效能腳本的安全規則：
+
+- 預設只做 `GET`，不會 `PUT`，不會改 Redis，不會改正式資料。
+- 沒有 token 時只量未授權 API latency、headers、首頁、manifest、assets、Service Worker 候選檔。
+- 有 token 時只讀取 `/api/sync-bundle`，用來量 bundle 大小、Redis/API 回應時間、JSON parse 時間與最大 storage key。
+- 10 天與 50 天資料量測使用本機 synthetic bundle，不會塞進正式資料庫。
+
+重點觀察欄位：
+
+| 指標 | 意義 | 優先判讀 |
+| --- | --- | --- |
+| Home p95 | 首頁 HTML 回應 | 若高，先查 Vercel/網路/cold start |
+| Sync bundle p95 | `/api/sync-bundle` 回應 | 若高，查 Redis、payload、server timing |
+| bundle approxChars | 整包資料大小 | 若持續變大，需拆資料或做摘要 API |
+| JSON parse ms | 前端解析成本 | iPhone PWA 特別敏感 |
+| localStorage import | 匯入本機儲存成本 | 若慢，需減少整包寫入 |
+| dashboard.reload-primary | Dashboard 主要資料處理 | 若慢，需做 Dashboard summary/cache |
+| dashboard.reload-sales-records.snapshots | 銷售快照讀取 | 若慢，需分頁或摘要 |
+| longtask | 主執行緒卡住超過 50ms | iPhone 操作卡頓常見來源 |
+
+iPhone 實測流程：
+
+1. Safari 開啟 `https://dksys.vercel.app/?perf=1`，登入後進 Dashboard。
+2. 刪除舊的主畫面圖示，重新加入主畫面，再用 PWA 開同一網址。
+3. 用 Safari Web Inspector 看 console 的 `[perf]` / `[perf:slow]`。
+4. 比較 Safari 與 PWA 的 `remote.fetch-bundle.request`、`remote.fetch-bundle.json`、`remote.init.import-bundle`、`dashboard.reload-primary`、`dashboard.reload-sales-records.snapshots`、`longtask`。
+5. 若 PWA 比 Safari 慢，但 API 時間差不多，優先查 iOS standalone storage、localStorage 匯入、JS parse、Dashboard render。
+
+目前架構結論：
+
+- 正式資料流不是 SQL/ORM 查詢，而是 Vercel API 從 Redis 取回整包 localStorage snapshot。
+- 因此慢點通常分成：網路/API、Redis get/set、JSON parse/stringify、localStorage 讀寫、Dashboard 前端計算、iOS PWA standalone 特性。
+- 在沒有量測數據前，不得直接更換資料庫、框架或部署平台。
+
 正式站：
 
 ```text

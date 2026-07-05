@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useRef, useState, useDeferredValue, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState, useDeferredValue, lazy, Suspense, type ReactNode } from 'react';
 import DeployUpdateBanner from './components/DeployUpdateBanner';
 import PullToRefresh from './components/PullToRefresh';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
@@ -18,15 +18,15 @@ import Topbar from './components/Topbar';
 import type { DashboardViewAsTarget } from './views/Dashboard';
 const Dashboard = lazy(() => import('./views/Dashboard'));
 import LoginScreen from './views/LoginScreen';
-import Products from './views/Products';
-import Permissions from './views/Permissions';
-import Procurement from './views/Procurement';
-import Orders from './views/Orders';
-import { UserRole } from './views/Orders';
-import StallInventory from './views/StallInventory';
-import SalesRecord from './views/SalesRecord';
-import Accounting from './views/Accounting';
-import DataHub from './views/DataHub';
+const Products = lazy(() => import('./views/Products'));
+const Permissions = lazy(() => import('./views/Permissions'));
+const Procurement = lazy(() => import('./views/Procurement'));
+const Orders = lazy(() => import('./views/Orders'));
+import type { UserRole } from './views/Orders';
+const StallInventory = lazy(() => import('./views/StallInventory'));
+const SalesRecord = lazy(() => import('./views/SalesRecord'));
+const Accounting = lazy(() => import('./views/Accounting'));
+const DataHub = lazy(() => import('./views/DataHub'));
 import { migrateLegacyFranchiseeRetailToAllOwners } from './lib/franchiseeRetailState';
 import { resolveSupplyRetailViewForSession, setSupplyCatalogRetailView } from './lib/supplyCatalog';
 import {
@@ -45,8 +45,13 @@ import {
 } from './services/apiService';
 import { getStorageMode } from './services/storageMode';
 import { ensureRemoteImportDraftPolicy } from './lib/remoteImportDraftPolicy';
+import { reportPerfMetric, timeAsync, timeSync } from './lib/performanceDebug';
 
 ensureRemoteImportDraftPolicy();
+
+function ViewLoadingFallback() {
+  return <div className="text-sm text-zinc-500">載入中...</div>;
+}
 
 export default function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -88,16 +93,17 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      ensureAuthBootstrap();
-      const s = readSession();
+      timeSync('auth.bootstrap', () => ensureAuthBootstrap());
+      const s = timeSync('auth.read-session', () => readSession());
       if (s && validateSession(s)) setSession(s);
       else {
         clearSession();
         setSession(null);
       }
       setAuthReady(true);
+      reportPerfMetric({ name: 'app.auth-ready', durationMs: performance.now() });
       if (getStorageMode() === 'remote') {
-        void initRemoteSyncOnAppLoad();
+        void timeAsync('remote.init-on-app-load', () => initRemoteSyncOnAppLoad());
       }
     })();
   }, []);
@@ -211,41 +217,42 @@ export default function App() {
     setCurrentView('dashboard');
   };
 
+  const wrapView = (node: ReactNode) => (
+    <Suspense fallback={<ViewLoadingFallback />}>{node}</Suspense>
+  );
+
   const renderView = (view: string) => {
     if (!session) return null;
     switch (view) {
       case 'dashboard':
-        return (
-          <Suspense fallback={<div className="text-sm text-zinc-500">載入營運概況…</div>}>
-            <Dashboard
-              userRole={userRole}
-              viewAsFranchisee={viewAsFranchisee}
-              onSelectFranchisee={(target) => setViewAsFranchisee(target)}
-              onExitViewAs={() => setViewAsFranchisee(null)}
-            />
-          </Suspense>
+        return wrapView(
+          <Dashboard
+            userRole={userRole}
+            viewAsFranchisee={viewAsFranchisee}
+            onSelectFranchisee={(target) => setViewAsFranchisee(target)}
+            onExitViewAs={() => setViewAsFranchisee(null)}
+          />,
         );
       case 'orders':
-        return <Orders userRole={userRole} />;
+        return wrapView(<Orders userRole={userRole} />);
       case 'products':
-        return <Products />;
+        return wrapView(<Products />);
       case 'permissions':
-        return <Permissions userRole={userRole} sessionLoginId={session.loginId} />;
+        return wrapView(<Permissions userRole={userRole} sessionLoginId={session.loginId} />);
       case 'procurement':
-        return <Procurement userRole={userRole} />;
+        return wrapView(<Procurement userRole={userRole} />);
       case 'stallInventory':
-        return <StallInventory userRole={userRole} />;
+        return wrapView(<StallInventory userRole={userRole} />);
       case 'salesRecord':
-        return <SalesRecord userRole={userRole} />;
+        return wrapView(<SalesRecord userRole={userRole} />);
       case 'accounting':
-        return <Accounting userRole={userRole} />;
+        return wrapView(<Accounting userRole={userRole} />);
       case 'dataHub':
-        return <DataHub userRole={userRole} />;
+        return wrapView(<DataHub userRole={userRole} />);
       default:
-        return <Dashboard userRole={userRole} />;
+        return wrapView(<Dashboard userRole={userRole} />);
     }
   };
-
   if (!authReady) {
     return (
       <>

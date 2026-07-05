@@ -19,6 +19,7 @@ import {
   applyConflictRecoveryAfterRemoteImport,
   stashLocalBundleForConflictRecovery,
 } from '../lib/conflictRecoveryStorage';
+import { reportPerfMetric, timeAsync, timeSync } from '../lib/performanceDebug';
 import { hasUnsavedWork } from '../lib/unsavedWorkGuard';
 import { getApiBaseUrl, getApiSyncToken, getAsyncStorageDelayMs, getStorageMode } from './storageMode';
 
@@ -152,17 +153,29 @@ export async function fetchRemoteBundle(): Promise<DongshanDataBundleV1> {
   if (!token) {
     throw new Error('遠端同步缺少 VITE_API_SYNC_TOKEN。');
   }
-  const res = await fetch(buildApiUrl('/sync-bundle'), {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await timeAsync('remote.fetch-bundle.request', () =>
+    fetch(buildApiUrl('/sync-bundle'), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  );
   if (!res.ok) {
     throw Object.assign(new Error(`GET ${res.status}`), { syncStatus: statusFromResponse(res) });
   }
-  const body = (await res.json()) as { ok?: boolean; bundle?: DongshanDataBundleV1 };
+  const body = await timeAsync('remote.fetch-bundle.json', () =>
+    res.json() as Promise<{ ok?: boolean; bundle?: DongshanDataBundleV1 }>,
+  );
   if (!body?.ok || !body.bundle) {
     throw new Error('遠端同步回應格式錯誤。');
   }
+  reportPerfMetric({
+    name: 'remote.fetch-bundle.size',
+    details: {
+      keyCount: Object.keys(body.bundle.keys ?? {}).length,
+      approxChars: JSON.stringify(body.bundle).length,
+      serverTiming: res.headers.get('server-timing'),
+    },
+  });
   noteRemoteBundleUpdatedAt(body.bundle);
   return body.bundle;
 }
@@ -173,18 +186,27 @@ export async function pushRemoteBundle(bundleText?: string): Promise<void> {
     throw new Error('遠端同步缺少 VITE_API_SYNC_TOKEN。');
   }
 
-  const bundle = prepareBundleForPush(bundleText);
-  const res = await fetch(buildApiUrl('/sync-bundle'), {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
+  const bundle = timeSync('remote.push.prepare-bundle', () => prepareBundleForPush(bundleText));
+  const bodyText = timeSync('remote.push.stringify-body', () =>
+    JSON.stringify({
       bundle,
       syncedFromUpdatedAt: lastRemoteUpdatedAt,
     }),
+  );
+  reportPerfMetric({
+    name: 'remote.push.size',
+    details: { approxChars: bodyText.length, keyCount: Object.keys(bundle.keys ?? {}).length },
   });
+  const res = await timeAsync('remote.push.request', () =>
+    fetch(buildApiUrl('/sync-bundle'), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: bodyText,
+    }),
+  );
 
   if (res.status === 409) {
     throw new RemoteVersionConflictError();
@@ -202,9 +224,13 @@ async function mergeCloudWithLocalDirty(
   dirtyKeys: readonly DongshanStorageKey[],
 ): Promise<string> {
   const cloud = await fetchRemoteBundle();
-  const local = parseBundleJson(localBundleText) as DongshanDataBundleV1;
-  const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys);
-  const result = importDongshanDataBundle(merged);
+  const local = timeSync('remote.merge.parse-local-bundle', () =>
+    parseBundleJson(localBundleText) as DongshanDataBundleV1,
+  );
+  const merged = timeSync('remote.merge.local-wins-dirty', () =>
+    mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys),
+  );
+  const result = timeSync('remote.merge.import-bundle', () => importDongshanDataBundle(merged));
   if (result.ok === false) {
     throw new Error(result.error);
   }
@@ -304,9 +330,11 @@ export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
       dispatchStatus('ok');
       return;
     }
-    const local = buildDongshanDataBundle();
-    const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, []);
-    const result = importDongshanDataBundle(merged);
+    const local = timeSync('remote.visibility.build-local-bundle', () => buildDongshanDataBundle());
+    const merged = timeSync('remote.visibility.merge-bundle', () =>
+      mergeDongshanBundlesLocalWinsDirty(local, cloud, []),
+    );
+    const result = timeSync('remote.visibility.import-bundle', () => importDongshanDataBundle(merged));
     if (result.ok === false) throw new Error(result.error);
     noteRemoteBundleUpdatedAt(cloud);
     dispatchStatus('ok');
@@ -328,9 +356,11 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
     const bundle = await fetchRemoteBundle();
 
     if (!isRemoteBundleEffectivelyEmpty(bundle)) {
-      const local = buildDongshanDataBundle();
-      const merged = mergeDongshanBundlesLocalWinsDirty(local, bundle, []);
-      const result = importDongshanDataBundle(merged);
+      const local = timeSync('remote.init.build-local-bundle', () => buildDongshanDataBundle());
+      const merged = timeSync('remote.init.merge-bundle', () =>
+        mergeDongshanBundlesLocalWinsDirty(local, bundle, []),
+      );
+      const result = timeSync('remote.init.import-bundle', () => importDongshanDataBundle(merged));
       if (result.ok === false) {
         dispatchStatus('error');
         return;
@@ -358,7 +388,7 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
 
 export function pushRemoteIfLocalBundleChangedSince(snapshot: string): void {
   if (getStorageMode() !== 'remote') return;
-  const now = serializeDongshanDataBundle();
+  const now = timeSync('remote.change-check.serialize-bundle', () => serializeDongshanDataBundle());
   if (now === snapshot) return;
   scheduleDebouncedPush(snapshot, now);
 }
@@ -388,9 +418,9 @@ export async function withRemoteStorageWrite<T>(fn: () => T | Promise<T>): Promi
     return await Promise.resolve(fn());
   }
 
-  const before = serializeDongshanDataBundle();
+  const before = timeSync('remote.write.serialize-before', () => serializeDongshanDataBundle());
   const out = await Promise.resolve(fn());
-  const after = serializeDongshanDataBundle();
+  const after = timeSync('remote.write.serialize-after', () => serializeDongshanDataBundle());
 
   if (after !== before) {
     scheduleDebouncedPush(before, after);
@@ -407,9 +437,9 @@ export async function withRemoteStorageWriteDeferPush<T>(fn: () => T | Promise<T
     return await Promise.resolve(fn());
   }
 
-  const before = serializeDongshanDataBundle();
+  const before = timeSync('remote.write-defer.serialize-before', () => serializeDongshanDataBundle());
   const out = await Promise.resolve(fn());
-  const after = serializeDongshanDataBundle();
+  const after = timeSync('remote.write-defer.serialize-after', () => serializeDongshanDataBundle());
 
   if (after !== before) {
     scheduleDebouncedPush(before, after);

@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "perf:test": "node scripts/perf/run.mjs test",
+    "perf:mobile": "node scripts/perf/run.mjs mobile",
+    "perf:pwa": "node scripts/perf/run.mjs pwa",
+    "perf:report": "node scripts/perf/run.mjs report"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

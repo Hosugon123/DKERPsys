@@ -12,6 +12,7 @@ import {
 import { HQ_SCOPE_ID } from '../lib/dataScope';
 import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { scopedStallDateKey } from '../lib/scopedStallDateKey';
+import { reportPerfMetric, timeAsync } from '../lib/performanceDebug';
 
 export type DashboardOrder = OrderHistoryEntry;
 
@@ -71,45 +72,66 @@ export function useDashboardData(viewAsFranchiseeUserId: string | null) {
   const [salesRecordsReady, setSalesRecordsReady] = useState(false);
 
   const reloadOrders = useCallback(async () => {
-    const [mgmt, history] = await Promise.all([
-      orders.loadFranchiseManagementOrders(),
-      orders.loadOrderHistory(),
-    ]);
+    const [mgmt, history] = await timeAsync('dashboard.reload-orders.read', () =>
+      Promise.all([
+        orders.loadFranchiseManagementOrders(),
+        orders.loadOrderHistory(),
+      ]),
+    );
     const all = [...mgmt.map(mapMgmtToDashboardOrder), ...history].filter((o) =>
       orderMatchesSessionScope(o),
     );
     all.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+    reportPerfMetric({
+      name: 'dashboard.reload-orders.count',
+      details: { managementOrders: mgmt.length, historyOrders: history.length, visibleOrders: all.length },
+    });
     setDashboardOrders(all);
   }, []);
 
   const reloadLedger = useCallback(async () => {
     if (viewAsFranchiseeUserId) {
-      setLedgerEntries(await ledger.listForScopeId(`scope:franchisee:${viewAsFranchiseeUserId}`));
+      setLedgerEntries(
+        await timeAsync('dashboard.reload-ledger.read-scoped', () =>
+          ledger.listForScopeId(`scope:franchisee:${viewAsFranchiseeUserId}`),
+        ),
+      );
       return;
     }
-    setLedgerEntries(await ledger.listEntries());
+    setLedgerEntries(await timeAsync('dashboard.reload-ledger.read-all', () => ledger.listEntries()));
   }, [viewAsFranchiseeUserId]);
 
   const reloadSalesRecords = useCallback(async () => {
     setSalesRecordsReady(false);
     const scopeFilter = viewAsFranchiseeUserId ? `scope:franchisee:${viewAsFranchiseeUserId}` : undefined;
-    const meta = await salesRecords.listMeta(scopeFilter);
-    const entries = await Promise.all(
-      meta.map(async (m) => {
-        const snap = await salesRecords.get(m.ymd, m.scopeId);
-        return snap ? { key: salesRecordCacheKey(m.ymd, m.scopeId), snap } : null;
-      }),
+    const meta = await timeAsync('dashboard.reload-sales-records.meta', () =>
+      salesRecords.listMeta(scopeFilter),
+    );
+    const entries = await timeAsync(
+      'dashboard.reload-sales-records.snapshots',
+      () =>
+        Promise.all(
+          meta.map(async (m) => {
+            const snap = await salesRecords.get(m.ymd, m.scopeId);
+            return snap ? { key: salesRecordCacheKey(m.ymd, m.scopeId), snap } : null;
+          }),
+        ),
+      { metaCount: meta.length },
     );
     const next: Record<string, SalesRecordDaySnapshot> = {};
     for (const row of entries) {
       if (row) next[row.key] = row.snap;
     }
+    reportPerfMetric({
+      name: 'dashboard.reload-sales-records.count',
+      details: { metaCount: meta.length, snapshotCount: Object.keys(next).length, scopeFilter },
+    });
     setSalesRecordMap(next);
     setSalesRecordsReady(true);
   }, [viewAsFranchiseeUserId]);
 
   const reloadPrimary = useCallback(async () => {
-    await Promise.all([reloadOrders(), reloadLedger()]);
+    await timeAsync('dashboard.reload-primary', () => Promise.all([reloadOrders(), reloadLedger()]).then(() => undefined));
   }, [reloadOrders, reloadLedger]);
 
   useEffect(() => {
