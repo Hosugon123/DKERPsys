@@ -10,6 +10,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "audit:data": "vitest run src/lib/dataIntegrityAudit.test.ts src/lib/crossModuleDataIntegrity.test.ts src/lib/updatedFlowsIntegration.test.ts src/lib/storeScopeIsolation.test.ts src/lib/stallScopeIsolation.test.ts src/lib/stallQtySync.test.ts src/lib/procurementBasisSync.test.ts src/lib/procurementWeekdayReference.test.ts src/lib/multiDeviceSync.test.ts",
     "perf:test": "node scripts/perf/run.mjs test",
     "perf:mobile": "node scripts/perf/run.mjs mobile",
     "perf:pwa": "node scripts/perf/run.mjs pwa",
