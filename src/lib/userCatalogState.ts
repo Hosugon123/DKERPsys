@@ -37,8 +37,21 @@ type StoreV2 = {
   customItems: SupplyItem[];
 };
 
+let cachedStoreRaw: string | null | undefined;
+let cachedLegacyRaw: string | null | undefined;
+let cachedStore: StoreV2 | null = null;
+
 function notify() {
   window.dispatchEvent(new Event('supplyCatalogUpdated'));
+}
+
+function cloneStore(s: StoreV2): StoreV2 {
+  return {
+    ...s,
+    overrides: { ...s.overrides },
+    hiddenBaseIds: [...s.hiddenBaseIds],
+    customItems: s.customItems.map((it) => ({ ...it })),
+  };
 }
 
 type LegacyV1 = { version: 1; byId: Record<string, ItemOverride> };
@@ -74,6 +87,12 @@ function migrateV1ToV2(): StoreV2 | null {
 }
 
 function loadStore(): StoreV2 {
+  const raw = localStorage.getItem(KEY);
+  const legacyRaw = localStorage.getItem(KEY_V1);
+  if (cachedStore && raw === cachedStoreRaw && legacyRaw === cachedLegacyRaw) {
+    return cloneStore(cachedStore);
+  }
+
   const a = readRaw();
   if (a?.version === 2) {
     const norm = normalizeLoadedStore(a);
@@ -81,11 +100,24 @@ function loadStore(): StoreV2 {
       saveStore(norm);
       return norm;
     }
-    return norm;
+    cachedStoreRaw = raw;
+    cachedLegacyRaw = legacyRaw;
+    cachedStore = cloneStore(norm);
+    return cloneStore(norm);
   }
   const m = migrateV1ToV2();
-  if (m) return normalizeLoadedStore(m);
-  return { version: 2, overrides: {}, hiddenBaseIds: [], customItems: [] };
+  if (m) {
+    const norm = normalizeLoadedStore(m);
+    cachedStoreRaw = localStorage.getItem(KEY);
+    cachedLegacyRaw = localStorage.getItem(KEY_V1);
+    cachedStore = cloneStore(norm);
+    return cloneStore(norm);
+  }
+  const empty: StoreV2 = { version: 2, overrides: {}, hiddenBaseIds: [], customItems: [] };
+  cachedStoreRaw = raw;
+  cachedLegacyRaw = legacyRaw;
+  cachedStore = cloneStore(empty);
+  return empty;
 }
 
 function touchStoreMeta(s: StoreV2) {
@@ -94,7 +126,11 @@ function touchStoreMeta(s: StoreV2) {
 
 function saveStore(s: StoreV2) {
   touchStoreMeta(s);
-  localStorage.setItem(KEY, JSON.stringify(s));
+  const raw = JSON.stringify(s);
+  localStorage.setItem(KEY, raw);
+  cachedStoreRaw = raw;
+  cachedLegacyRaw = localStorage.getItem(KEY_V1);
+  cachedStore = cloneStore(s);
   notify();
 }
 

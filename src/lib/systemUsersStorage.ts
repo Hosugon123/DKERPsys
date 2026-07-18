@@ -40,6 +40,9 @@ export type SystemUser = {
 
 type PersistV1 = { version: 1; users: SystemUser[] };
 
+let cachedPersistedRaw: string | null | undefined;
+let cachedPersistedUsers: SystemUser[] | null = null;
+
 export type NewSystemUserInput = {
   name: string;
   role: SystemUserRole;
@@ -230,25 +233,47 @@ function normalizeEmployeeAffiliation(
 function loadPersisted(): SystemUser[] | null {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
+    if (raw === cachedPersistedRaw) {
+      return cachedPersistedUsers ? cachedPersistedUsers.map((u) => ({ ...u })) : null;
+    }
+    if (!raw) {
+      cachedPersistedRaw = raw;
+      cachedPersistedUsers = null;
+      return null;
+    }
     const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== 'object') return null;
+    if (parsed === null || typeof parsed !== 'object') {
+      cachedPersistedRaw = raw;
+      cachedPersistedUsers = null;
+      return null;
+    }
     const bag = parsed as PersistV1;
-    if (bag.version !== 1 || !Array.isArray(bag.users)) return null;
+    if (bag.version !== 1 || !Array.isArray(bag.users)) {
+      cachedPersistedRaw = raw;
+      cachedPersistedUsers = null;
+      return null;
+    }
     const out: SystemUser[] = [];
     for (const row of bag.users) {
       const u = coerceUser(row);
       if (u) out.push(u);
     }
+    cachedPersistedRaw = raw;
+    cachedPersistedUsers = out;
     return out;
   } catch {
+    cachedPersistedRaw = undefined;
+    cachedPersistedUsers = null;
     return null;
   }
 }
 
 function savePersisted(users: SystemUser[]): void {
   const body: PersistV1 = { version: 1, users };
-  localStorage.setItem(KEY, JSON.stringify(body));
+  const raw = JSON.stringify(body);
+  localStorage.setItem(KEY, raw);
+  cachedPersistedRaw = raw;
+  cachedPersistedUsers = users.map((u) => ({ ...u }));
   dispatchUpdated();
 }
 

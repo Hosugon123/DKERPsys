@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { clearWorkDraft, loadWorkDraft, saveWorkDraft } from '../lib/workDraftStorage';
 
 /** 掛載時讀取並清除草稿（僅還原一次） */
@@ -21,7 +21,6 @@ export function usePersistWorkDraft<T>(
   active: boolean,
   debounceMs = 400,
 ): void {
-  const draftJson = useMemo(() => JSON.stringify(draft), [draft]);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const activeRef = useRef(active);
@@ -34,7 +33,7 @@ export function usePersistWorkDraft<T>(
     }
     const timer = window.setTimeout(() => saveWorkDraft(id, draftRef.current), debounceMs);
     return () => window.clearTimeout(timer);
-  }, [id, draftJson, active, debounceMs]);
+  }, [id, draft, active, debounceMs]);
 
   /** 切換頁面／重新整理前補寫最後一筆草稿（避免 debounce 尚未觸發就卸載） */
   useEffect(() => {

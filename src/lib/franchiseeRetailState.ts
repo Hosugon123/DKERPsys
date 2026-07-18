@@ -23,8 +23,28 @@ type StoreV2 = {
   byOwnerId: Record<string, OwnerBucket>;
 };
 
+let cachedStoreRaw: string | null | undefined;
+let cachedStore: StoreV2 | null = null;
+
 function notify() {
   window.dispatchEvent(new Event('supplyCatalogUpdated'));
+}
+
+function cloneBucket(bucket: OwnerBucket): OwnerBucket {
+  return {
+    byId: { ...bucket.byId },
+    updatedAt: bucket.updatedAt,
+    updatedAtByItem: { ...(bucket.updatedAtByItem ?? {}) },
+    deletedAtByItem: { ...(bucket.deletedAtByItem ?? {}) },
+  };
+}
+
+function cloneStore(s: StoreV2): StoreV2 {
+  const byOwnerId: Record<string, OwnerBucket> = {};
+  for (const [ownerId, bucket] of Object.entries(s.byOwnerId)) {
+    byOwnerId[ownerId] = cloneBucket(bucket);
+  }
+  return { version: 2, byOwnerId };
 }
 
 function emptyBucket(): OwnerBucket {
@@ -71,15 +91,28 @@ function normalizeStore(raw: unknown): StoreV2 {
 function loadStore(): StoreV2 {
   try {
     const r = localStorage.getItem(KEY);
-    if (!r) return { version: 2, byOwnerId: {} };
-    return normalizeStore(JSON.parse(r) as unknown);
+    if (cachedStore && r === cachedStoreRaw) return cloneStore(cachedStore);
+    if (!r) {
+      cachedStoreRaw = r;
+      cachedStore = { version: 2, byOwnerId: {} };
+      return { version: 2, byOwnerId: {} };
+    }
+    const normalized = normalizeStore(JSON.parse(r) as unknown);
+    cachedStoreRaw = r;
+    cachedStore = cloneStore(normalized);
+    return cloneStore(normalized);
   } catch {
+    cachedStoreRaw = undefined;
+    cachedStore = null;
     return { version: 2, byOwnerId: {} };
   }
 }
 
 function saveStore(s: StoreV2) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  const raw = JSON.stringify(s);
+  localStorage.setItem(KEY, raw);
+  cachedStoreRaw = raw;
+  cachedStore = cloneStore(s);
   notify();
 }
 

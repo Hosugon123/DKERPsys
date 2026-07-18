@@ -94,6 +94,21 @@ type StoreV2 = {
   byScope: Record<string, AccountingLedgerEntry[]>;
 };
 
+let cachedStoreRaw: string | null | undefined;
+let cachedStore: StoreV2 | null = null;
+
+function cloneEntry(entry: AccountingLedgerEntry): AccountingLedgerEntry {
+  return { ...entry };
+}
+
+function cloneStore(s: StoreV2): StoreV2 {
+  const byScope: StoreV2['byScope'] = {};
+  for (const [scopeId, rows] of Object.entries(s.byScope)) {
+    byScope[scopeId] = rows.map(cloneEntry);
+  }
+  return { version: 2, byScope };
+}
+
 function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -289,9 +304,18 @@ function coerceEntry(e: AccountingLedgerEntry & { updatedAt?: string }): Account
 function loadStore(): StoreV2 {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { version: 2, byScope: {} };
+    if (cachedStore && raw === cachedStoreRaw) return cloneStore(cachedStore);
+    if (!raw) {
+      cachedStoreRaw = raw;
+      cachedStore = { version: 2, byScope: {} };
+      return { version: 2, byScope: {} };
+    }
     const p = JSON.parse(raw) as StoreV1 | StoreV2;
-    if (!p || typeof p !== 'object') return { version: 2, byScope: {} };
+    if (!p || typeof p !== 'object') {
+      cachedStoreRaw = raw;
+      cachedStore = { version: 2, byScope: {} };
+      return { version: 2, byScope: {} };
+    }
     if ('version' in p && p.version === 2 && 'byScope' in p && p.byScope && typeof p.byScope === 'object') {
       const byScope: Record<string, AccountingLedgerEntry[]> = {};
       for (const [scopeId, rows] of Object.entries(p.byScope)) {
@@ -299,21 +323,32 @@ function loadStore(): StoreV2 {
           ? (rows as AccountingLedgerEntry[]).map((row) => coerceEntry(row as AccountingLedgerEntry))
           : [];
       }
-      return finalizeLoadedStore({ version: 2, byScope });
+      const finalized = finalizeLoadedStore({ version: 2, byScope });
+      cachedStoreRaw = raw;
+      cachedStore = cloneStore(finalized);
+      return cloneStore(finalized);
     }
     // v1 migration: 舊資料統一歸屬總部，避免依當前登入者造成跨帳號外溢
     const scopeId = HQ_SCOPE_ID;
     const legacyRows = Array.isArray((p as StoreV1).entries)
       ? (p as StoreV1).entries.map((row) => coerceEntry(row as AccountingLedgerEntry))
       : [];
-    return finalizeLoadedStore({ version: 2, byScope: { [scopeId]: legacyRows } });
+    const finalized = finalizeLoadedStore({ version: 2, byScope: { [scopeId]: legacyRows } });
+    cachedStoreRaw = raw;
+    cachedStore = cloneStore(finalized);
+    return cloneStore(finalized);
   } catch {
+    cachedStoreRaw = undefined;
+    cachedStore = null;
     return { version: 2, byScope: {} };
   }
 }
 
 function saveStore(s: StoreV2) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  const raw = JSON.stringify(s);
+  localStorage.setItem(STORAGE_KEY, raw);
+  cachedStoreRaw = raw;
+  cachedStore = cloneStore(s);
   window.dispatchEvent(new Event(ACCOUNTING_LEDGER_UPDATED_EVENT));
 }
 

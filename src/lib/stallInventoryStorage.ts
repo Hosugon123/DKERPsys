@@ -37,6 +37,9 @@ import { getSessionActorDisplayName } from './sessionActorDisplayName';
 
 const KEY = 'dongshan_stall_inventory_v1';
 
+let cachedStoreRaw: string | null | undefined;
+let cachedStore: StoreV1 | null = null;
+
 export type DayLine = {
   out: string;
   remain: string;
@@ -88,14 +91,46 @@ function emptyDay(): DaySnapshot {
   return { lines, actualRevenue: '', revenueGapAmount: '0', updatedAt: new Date().toISOString() };
 }
 
+function cloneDaySnapshot(snap: DaySnapshot): DaySnapshot {
+  return {
+    ...snap,
+    lines: Object.fromEntries(
+      Object.entries(snap.lines ?? {}).map(([id, line]) => [id, { ...line }]),
+    ),
+    fieldUpdatedAt: snap.fieldUpdatedAt ? { ...snap.fieldUpdatedAt } : undefined,
+  };
+}
+
+function cloneStore(s: StoreV1): StoreV1 {
+  const byDate: StoreV1['byDate'] = {};
+  for (const [key, snap] of Object.entries(s.byDate)) {
+    byDate[key] = cloneDaySnapshot(snap);
+  }
+  return { version: 1, byDate };
+}
+
 function loadAll(): StoreV1 {
   try {
     const r = localStorage.getItem(KEY);
-    if (!r) return { version: 1, byDate: {} };
+    if (cachedStore && r === cachedStoreRaw) return cloneStore(cachedStore);
+    if (!r) {
+      cachedStoreRaw = r;
+      cachedStore = { version: 1, byDate: {} };
+      return { version: 1, byDate: {} };
+    }
     const s = JSON.parse(r) as StoreV1;
-    if (!s.byDate || typeof s.byDate !== 'object') return { version: 1, byDate: {} };
-    return migrateLegacyStallDayKeys(s);
+    if (!s.byDate || typeof s.byDate !== 'object') {
+      cachedStoreRaw = r;
+      cachedStore = { version: 1, byDate: {} };
+      return { version: 1, byDate: {} };
+    }
+    const migrated = migrateLegacyStallDayKeys(s);
+    cachedStoreRaw = r;
+    cachedStore = cloneStore(migrated);
+    return cloneStore(migrated);
   } catch {
+    cachedStoreRaw = undefined;
+    cachedStore = null;
     return { version: 1, byDate: {} };
   }
 }
@@ -127,7 +162,10 @@ function writeStallDay(s: StoreV1, ymdStr: string, snap: DaySnapshot, scopeId?: 
 }
 
 function saveAll(s: StoreV1) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  const raw = JSON.stringify(s);
+  localStorage.setItem(KEY, raw);
+  cachedStoreRaw = raw;
+  cachedStore = cloneStore(s);
   window.dispatchEvent(new Event('stallInventoryUpdated'));
 }
 

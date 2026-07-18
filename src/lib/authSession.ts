@@ -12,6 +12,9 @@ export type AuthSession = {
   role: SystemUserRole;
 };
 
+let cachedSessionRaw: string | null | undefined;
+let cachedSession: AuthSession | null = null;
+
 function normalizeLoginId(s: string): string {
   return s.trim().toLowerCase();
 }
@@ -23,17 +26,38 @@ function dispatchChanged(): void {
 export function readSession(): AuthSession | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
+    if (raw === cachedSessionRaw) return cachedSession ? { ...cachedSession } : null;
+    if (!raw) {
+      cachedSessionRaw = raw;
+      cachedSession = null;
+      return null;
+    }
     const o = JSON.parse(raw) as unknown;
-    if (o === null || typeof o !== 'object') return null;
+    if (o === null || typeof o !== 'object') {
+      cachedSessionRaw = raw;
+      cachedSession = null;
+      return null;
+    }
     const bag = o as Record<string, unknown>;
     const userId = typeof bag.userId === 'string' ? bag.userId : '';
     const loginId = typeof bag.loginId === 'string' ? bag.loginId : '';
     const role = bag.role;
-    if (!userId || !loginId) return null;
-    if (role !== 'admin' && role !== 'franchisee' && role !== 'employee') return null;
-    return { userId, loginId, role };
+    if (!userId || !loginId) {
+      cachedSessionRaw = raw;
+      cachedSession = null;
+      return null;
+    }
+    if (role !== 'admin' && role !== 'franchisee' && role !== 'employee') {
+      cachedSessionRaw = raw;
+      cachedSession = null;
+      return null;
+    }
+    cachedSessionRaw = raw;
+    cachedSession = { userId, loginId, role };
+    return { ...cachedSession };
   } catch {
+    cachedSessionRaw = undefined;
+    cachedSession = null;
     return null;
   }
 }
@@ -44,13 +68,18 @@ export function writeSession(session: AuthSession): void {
     loginId: normalizeLoginId(session.loginId),
     role: session.role,
   };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(body));
+  const raw = JSON.stringify(body);
+  localStorage.setItem(SESSION_KEY, raw);
+  cachedSessionRaw = raw;
+  cachedSession = { ...body };
   dispatchChanged();
 }
 
-export function clearSession(): void {
+export function clearSession(options: { notify?: boolean } = {}): void {
   localStorage.removeItem(SESSION_KEY);
-  dispatchChanged();
+  cachedSessionRaw = null;
+  cachedSession = null;
+  if (options.notify ?? true) dispatchChanged();
 }
 
 export function validateSession(s: AuthSession): boolean {

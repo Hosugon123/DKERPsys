@@ -97,7 +97,7 @@ export default function App() {
       const s = timeSync('auth.read-session', () => readSession());
       if (s && validateSession(s)) setSession(s);
       else {
-        clearSession();
+        clearSession({ notify: false });
         setSession(null);
       }
       setAuthReady(true);
@@ -113,7 +113,7 @@ export default function App() {
       const s = readSession();
       if (s && validateSession(s)) setSession(s);
       else {
-        clearSession();
+        clearSession({ notify: false });
         setSession(null);
       }
     };

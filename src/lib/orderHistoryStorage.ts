@@ -100,6 +100,11 @@ const FRANCHISE_MGMT_KEY = 'dongshan_franchise_mgmt_orders_v1';
 /** 已永久刪除之訂單 id（雲端合併時過濾，避免 union 還原） */
 export const DELETED_ORDER_IDS_KEY = 'dongshan_deleted_order_ids_v1';
 
+let cachedHistoryRaw: string | null | undefined;
+let cachedHistoryAll: OrderHistoryEntry[] | null = null;
+let cachedFranchiseMgmtRaw: string | null | undefined;
+let cachedFranchiseMgmtAll: FranchiseManagementOrder[] | null = null;
+
 type DeletedOrderIdsStore = { version: 1; byId: Record<string, string> };
 
 function loadDeletedOrderIdsStore(): DeletedOrderIdsStore {
@@ -249,6 +254,32 @@ function normalizeHistoryEntry(
     selfSuppliedCostAmount:
       e.selfSuppliedCostAmount ??
       Math.max(0, e.totalAmount - (e.payableAmount ?? e.totalAmount)),
+  };
+}
+
+function cloneOrderLine(line: OrderHistoryLine): OrderHistoryLine {
+  return { ...line };
+}
+
+function cloneDeductionAppliedQty(
+  value: Record<string, Record<string, number>> | undefined,
+): Record<string, Record<string, number>> | undefined {
+  if (!value) return undefined;
+  return Object.fromEntries(
+    Object.entries(value).map(([orderId, byItem]) => [orderId, { ...byItem }]),
+  );
+}
+
+function cloneHistoryEntry(e: OrderHistoryEntry): OrderHistoryEntry {
+  return {
+    ...e,
+    lines: e.lines.map(cloneOrderLine),
+    procurementDeductionBasisOrderIds: e.procurementDeductionBasisOrderIds
+      ? [...e.procurementDeductionBasisOrderIds]
+      : undefined,
+    procurementDeductionAppliedQtyByBasisOrderId: cloneDeductionAppliedQty(
+      e.procurementDeductionAppliedQtyByBasisOrderId,
+    ),
   };
 }
 
@@ -446,6 +477,9 @@ export function displayOrderLastUpdatedByLabel(
 }
 
 export function loadOrderHistory(): OrderHistoryEntry[] {
+  const ctx = getDataScopeContext();
+  return readOrderHistoryAllCached().filter((e) => canAccessOrderInManagementList(e, ctx));
+
   try {
     const ctx = getDataScopeContext();
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -462,7 +496,10 @@ export function loadOrderHistory(): OrderHistoryEntry[] {
 }
 
 function saveOrderHistory(entries: OrderHistoryEntry[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  const raw = JSON.stringify(entries);
+  localStorage.setItem(STORAGE_KEY, raw);
+  cachedHistoryRaw = raw;
+  cachedHistoryAll = entries.map(cloneHistoryEntry);
   window.dispatchEvent(new Event('orderHistoryUpdated'));
 }
 
@@ -478,7 +515,71 @@ function normalizeFranchiseManagementOrder(
   };
 }
 
+function cloneFranchiseManagementOrder(m: FranchiseManagementOrder): FranchiseManagementOrder {
+  return {
+    ...m,
+    lines: m.lines.map(cloneOrderLine),
+    procurementDeductionBasisOrderIds: m.procurementDeductionBasisOrderIds
+      ? [...m.procurementDeductionBasisOrderIds]
+      : undefined,
+    procurementDeductionAppliedQtyByBasisOrderId: cloneDeductionAppliedQty(
+      m.procurementDeductionAppliedQtyByBasisOrderId,
+    ),
+  };
+}
+
+function readOrderHistoryAllCached(): OrderHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (cachedHistoryAll && raw === cachedHistoryRaw) return cachedHistoryAll.map(cloneHistoryEntry);
+    if (!raw) {
+      cachedHistoryRaw = raw;
+      cachedHistoryAll = [];
+      return [];
+    }
+    const parsed = JSON.parse(raw) as (OrderHistoryEntry & { status?: FranchiseOrderStatus })[];
+    const list = Array.isArray(parsed)
+      ? parsed.map((e) =>
+          normalizeHistoryEntry(e as OrderHistoryEntry & { status?: FranchiseOrderStatus }),
+        )
+      : [];
+    cachedHistoryRaw = raw;
+    cachedHistoryAll = list.map(cloneHistoryEntry);
+    return list.map(cloneHistoryEntry);
+  } catch {
+    cachedHistoryRaw = undefined;
+    cachedHistoryAll = null;
+    return [];
+  }
+}
+
+function readFranchiseManagementOrdersAllCached(): FranchiseManagementOrder[] {
+  try {
+    const raw = localStorage.getItem(FRANCHISE_MGMT_KEY);
+    if (cachedFranchiseMgmtAll && raw === cachedFranchiseMgmtRaw) {
+      return cachedFranchiseMgmtAll.map(cloneFranchiseManagementOrder);
+    }
+    if (!raw) {
+      cachedFranchiseMgmtRaw = raw;
+      cachedFranchiseMgmtAll = [];
+      return [];
+    }
+    const parsed = JSON.parse(raw) as (FranchiseManagementOrder & { updatedAt?: string })[];
+    const list = Array.isArray(parsed) ? parsed.map(normalizeFranchiseManagementOrder) : [];
+    cachedFranchiseMgmtRaw = raw;
+    cachedFranchiseMgmtAll = list.map(cloneFranchiseManagementOrder);
+    return list.map(cloneFranchiseManagementOrder);
+  } catch {
+    cachedFranchiseMgmtRaw = undefined;
+    cachedFranchiseMgmtAll = null;
+    return [];
+  }
+}
+
 export function loadFranchiseManagementOrders(): FranchiseManagementOrder[] {
+  const ctx = getDataScopeContext();
+  return readFranchiseManagementOrdersAllCached().filter((o) => canAccessOrder(o, ctx));
+
   try {
     const ctx = getDataScopeContext();
     const raw = localStorage.getItem(FRANCHISE_MGMT_KEY);
@@ -492,7 +593,10 @@ export function loadFranchiseManagementOrders(): FranchiseManagementOrder[] {
 }
 
 function saveFranchiseManagementOrders(orders: FranchiseManagementOrder[]) {
-  localStorage.setItem(FRANCHISE_MGMT_KEY, JSON.stringify(orders));
+  const raw = JSON.stringify(orders);
+  localStorage.setItem(FRANCHISE_MGMT_KEY, raw);
+  cachedFranchiseMgmtRaw = raw;
+  cachedFranchiseMgmtAll = orders.map(cloneFranchiseManagementOrder);
   window.dispatchEvent(new Event('franchiseManagementOrdersUpdated'));
 }
 
@@ -579,6 +683,8 @@ export function loadCompletedOrderHistoryListForRole(
 
 /** 讀取本機 `order_history` 全部項目（不過濾 scope，供寫入合併用） */
 function loadOrderHistoryAllEntries(): OrderHistoryEntry[] {
+  return readOrderHistoryAllCached();
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
@@ -593,6 +699,8 @@ function loadOrderHistoryAllEntries(): OrderHistoryEntry[] {
 }
 
 function loadFranchiseManagementOrdersAll(): FranchiseManagementOrder[] {
+  return readFranchiseManagementOrdersAllCached();
+
   try {
     const raw = localStorage.getItem(FRANCHISE_MGMT_KEY);
     if (!raw) return [];

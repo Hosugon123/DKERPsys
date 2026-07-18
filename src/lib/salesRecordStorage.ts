@@ -37,14 +37,59 @@ type StoreV1 = {
   byDate: Record<string, Row>;
 };
 
+let cachedStoreRaw: string | null | undefined;
+let cachedStore: StoreV1 | null = null;
+
+function cloneSnapshot(snap: SalesRecordDaySnapshot): SalesRecordDaySnapshot {
+  return {
+    ...snap,
+    lines: Object.fromEntries(
+      Object.entries(snap.lines ?? {}).map(([id, line]) => [id, { ...line }]),
+    ),
+    frozenRetailUnitPriceByItem: snap.frozenRetailUnitPriceByItem
+      ? { ...snap.frozenRetailUnitPriceByItem }
+      : undefined,
+    frozenWholesaleUnitPriceByItem: snap.frozenWholesaleUnitPriceByItem
+      ? { ...snap.frozenWholesaleUnitPriceByItem }
+      : undefined,
+    fieldUpdatedAt: snap.fieldUpdatedAt ? { ...snap.fieldUpdatedAt } : undefined,
+  };
+}
+
+function cloneStore(s: StoreV1): StoreV1 {
+  const byDate: StoreV1['byDate'] = {};
+  for (const [key, row] of Object.entries(s.byDate)) {
+    byDate[key] = {
+      completedAt: row.completedAt,
+      ...(row.completedByName ? { completedByName: row.completedByName } : {}),
+      snapshot: cloneSnapshot(row.snapshot),
+    };
+  }
+  return { version: 1, byDate };
+}
+
 function loadStore(): StoreV1 {
   try {
     const r = localStorage.getItem(SALES_KEY);
-    if (!r) return { version: 1, byDate: {} };
+    if (cachedStore && r === cachedStoreRaw) return cloneStore(cachedStore);
+    if (!r) {
+      cachedStoreRaw = r;
+      cachedStore = { version: 1, byDate: {} };
+      return { version: 1, byDate: {} };
+    }
     const s = JSON.parse(r) as StoreV1;
-    if (!s.byDate || typeof s.byDate !== 'object') return { version: 1, byDate: {} };
-    return migrateLegacyBareDateKeys(s);
+    if (!s.byDate || typeof s.byDate !== 'object') {
+      cachedStoreRaw = r;
+      cachedStore = { version: 1, byDate: {} };
+      return { version: 1, byDate: {} };
+    }
+    const migrated = migrateLegacyBareDateKeys(s);
+    cachedStoreRaw = r;
+    cachedStore = cloneStore(migrated);
+    return cloneStore(migrated);
   } catch {
+    cachedStoreRaw = undefined;
+    cachedStore = null;
     return { version: 1, byDate: {} };
   }
 }
@@ -60,7 +105,10 @@ function migrateLegacyBareDateKeys(s: StoreV1): StoreV1 {
 }
 
 function saveStore(s: StoreV1) {
-  localStorage.setItem(SALES_KEY, JSON.stringify(s));
+  const raw = JSON.stringify(s);
+  localStorage.setItem(SALES_KEY, raw);
+  cachedStoreRaw = raw;
+  cachedStore = cloneStore(s);
   window.dispatchEvent(new Event('salesRecordUpdated'));
 }
 
