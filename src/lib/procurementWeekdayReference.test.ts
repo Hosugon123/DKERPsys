@@ -4,6 +4,7 @@ import { computeProcurementWeekdaySoldReference } from './procurementWeekdayRefe
 import type { OrderHistoryEntry } from './orderHistoryStorage';
 
 const FRANCHISE_SCOPE = 'scope:franchisee:dk-ref-test';
+const OTHER_FRANCHISE_SCOPE = 'scope:franchisee:dk-other-ref-test';
 const HQ_SCOPE = 'scope:hq';
 const THURSDAY_A = '2026-05-07';
 const THURSDAY_B = '2026-05-14';
@@ -78,6 +79,13 @@ const franchiseScope = {
   scopeId: FRANCHISE_SCOPE,
   actorUserId: 'dk-ref-test',
   storeLabel: '加盟測試店',
+};
+
+const otherFranchiseScope = {
+  actorRole: 'franchisee' as const,
+  scopeId: OTHER_FRANCHISE_SCOPE,
+  actorUserId: 'dk-other-ref-test',
+  storeLabel: '其他加盟店',
 };
 
 const hqScope = {
@@ -364,5 +372,95 @@ describe('procurement weekday sold reference', () => {
     expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(0);
     expect(ref.soldByProductId.get(HIGH_PRICE_PRODUCT)).toBe(0);
     expect(ref.sampleDayCount).toBe(2);
+  });
+
+  it('上週與統計模式只取目前登入店別，不混入其他店同日銷售紀錄', () => {
+    const lastWeekYmd = '2026-06-11';
+    const olderSameWeekdayYmd = '2026-06-04';
+    const orderDate = '2026-06-18';
+    const orders = [
+      stallOrder(
+        {
+          id: 'own-last-week-order',
+          rowYmd: lastWeekYmd,
+          completedAt: `${lastWeekYmd}T18:00:00.000Z`,
+          out: '999',
+          remain: '0',
+        },
+        franchiseScope,
+      ),
+      stallOrder(
+        {
+          id: 'other-last-week-order',
+          rowYmd: lastWeekYmd,
+          completedAt: `${lastWeekYmd}T18:00:00.000Z`,
+          out: '999',
+          remain: '0',
+        },
+        otherFranchiseScope,
+      ),
+      stallOrder(
+        {
+          id: 'hq-last-week-order',
+          rowYmd: lastWeekYmd,
+          completedAt: `${lastWeekYmd}T18:00:00.000Z`,
+          out: '999',
+          remain: '0',
+        },
+        hqScope,
+      ),
+    ];
+    saveSalesRecord(
+      lastWeekYmd,
+      {
+        lines: { [PRODUCT_ID]: { out: '120', remain: '20' } },
+        actualRevenue: '1000',
+        updatedAt: `${lastWeekYmd}T18:00:00.000Z`,
+      },
+      FRANCHISE_SCOPE,
+    );
+    saveSalesRecord(
+      olderSameWeekdayYmd,
+      {
+        lines: { [PRODUCT_ID]: { out: '90', remain: '30' } },
+        actualRevenue: '600',
+        updatedAt: `${olderSameWeekdayYmd}T18:00:00.000Z`,
+      },
+      FRANCHISE_SCOPE,
+    );
+    saveSalesRecord(
+      lastWeekYmd,
+      {
+        lines: { [PRODUCT_ID]: { out: '800', remain: '0' } },
+        actualRevenue: '8000',
+        updatedAt: `${lastWeekYmd}T18:00:00.000Z`,
+      },
+      OTHER_FRANCHISE_SCOPE,
+    );
+    saveSalesRecord(
+      lastWeekYmd,
+      {
+        lines: { [PRODUCT_ID]: { out: '500', remain: '0' } },
+        actualRevenue: '5000',
+        updatedAt: `${lastWeekYmd}T18:00:00.000Z`,
+      },
+      HQ_SCOPE,
+    );
+
+    mockCtx.role = 'franchisee';
+    mockCtx.userId = 'dk-ref-test';
+    mockCtx.scopeId = FRANCHISE_SCOPE;
+    mockCtx.isAdmin = false;
+
+    const lastWeek = computeProcurementWeekdaySoldReference(orderDate, orders, 'headquarter', 'lastWeek', 3);
+    const max = computeProcurementWeekdaySoldReference(orderDate, orders, 'headquarter', 'max', 3);
+    const avg = computeProcurementWeekdaySoldReference(orderDate, orders, 'headquarter', 'avg', 3);
+    const min = computeProcurementWeekdaySoldReference(orderDate, orders, 'headquarter', 'min', 3);
+
+    expect(lastWeek.soldByProductId.get(PRODUCT_ID)).toBe(100);
+    expect(max.soldByProductId.get(PRODUCT_ID)).toBe(100);
+    expect(avg.soldByProductId.get(PRODUCT_ID)).toBe(80);
+    expect(min.soldByProductId.get(PRODUCT_ID)).toBe(60);
+    expect(max.sampleDayCount).toBe(2);
   });
 });
