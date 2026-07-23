@@ -1203,46 +1203,24 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                   </span>
                 </div>
                 {!isConsumableItem(catalogItem) && (
-                  <>
-                    <div className="flex items-center justify-between gap-2">
-                      <span>{referenceSoldRowLabel}售出</span>
-                      <span className="tabular-nums text-sky-300/90 shrink-0">
-                        {weekdaySoldRef.hasCompletedStallDay &&
-                        weekdaySoldRef.soldByProductId.has(catalogItem.id) ? (
-                          <>
-                            {weekdaySoldRef.soldByProductId.get(catalogItem.id)!.toLocaleString()}
-                            <LiangJinQtyHint
-                              liangQty={weekdaySoldRef.soldByProductId.get(catalogItem.id)!}
-                              pieceUnit={priceUnit}
-                              className="text-[0.625rem]"
-                            />{' '}
-                            {priceUnit}
-                          </>
-                        ) : (
-                          '—'
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span>{referenceSoldRowLabel}帶出</span>
-                      <span className="tabular-nums text-emerald-300/90 shrink-0">
-                        {weekdaySoldRef.hasCompletedStallDay &&
-                        weekdaySoldRef.outByProductId.has(catalogItem.id) ? (
-                          <>
-                            {weekdaySoldRef.outByProductId.get(catalogItem.id)!.toLocaleString()}
-                            <LiangJinQtyHint
-                              liangQty={weekdaySoldRef.outByProductId.get(catalogItem.id)!}
-                              pieceUnit={priceUnit}
-                              className="text-[0.625rem]"
-                            />{' '}
-                            {priceUnit}
-                          </>
-                        ) : (
-                          '—'
-                        )}
-                      </span>
-                    </div>
-                  </>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>{referenceSoldRowLabel}</span>
+                    <span className="tabular-nums text-sky-300/90 shrink-0">
+                      {weekdaySoldRef.hasCompletedStallDay &&
+                      (weekdaySoldRef.soldByProductId.has(catalogItem.id) ||
+                        weekdaySoldRef.outByProductId.has(catalogItem.id)) ? (
+                        <>
+                          {(weekdaySoldRef.soldByProductId.get(catalogItem.id) ?? 0).toLocaleString()}
+                          <span className="text-zinc-500">/</span>
+                          <span className="text-emerald-300/90">
+                            {(weekdaySoldRef.outByProductId.get(catalogItem.id) ?? 0).toLocaleString()}
+                          </span>
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </span>
+                  </div>
                 )}
                 <div className="flex items-center justify-between gap-2">
                   <span>下單數量</span>
