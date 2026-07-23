@@ -1358,18 +1358,33 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
             ) : (
               <span className="min-w-0 flex-1 basis-0" aria-hidden />
             )}
-            <select
+            <div
+              className="grid grid-cols-4 overflow-hidden rounded-md border border-zinc-700/80 bg-zinc-950/90"
+              role="radiogroup"
               aria-label="售出參考模式（最高／平均／上週／最低）"
-              value={referenceMode}
-              onChange={(e) => setReferenceMode(e.target.value as ProcurementReferenceMode)}
-              className={PROC_DOCK_SELECT_CLASS}
             >
-              {PROCUREMENT_REFERENCE_MODE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              {PROCUREMENT_REFERENCE_MODE_OPTIONS.map((opt) => {
+                const active = referenceMode === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setReferenceMode(opt.value)}
+                    className={cn(
+                      'h-6 min-w-[2.55rem] px-1 text-[10px] leading-none transition-colors lg:h-7 lg:min-w-[3rem] lg:px-1.5 lg:text-xs',
+                      'border-r border-zinc-800/80 last:border-r-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/70',
+                      active
+                        ? 'bg-amber-500 text-zinc-950 font-semibold'
+                        : 'text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100',
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
             <select
               aria-label="參考星期（同名星期售出參考）"
               value={String(referenceWeekdayIdx)}
