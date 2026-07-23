@@ -24,7 +24,8 @@ function franchiseeOwnerForRetail(): string | undefined {
 }
 
 function accumulateSoldQtyByProductFromSnapshot(
-  dayMap: Map<string, number>,
+  soldMap: Map<string, number>,
+  outMap: Map<string, number>,
   snap: SalesRecordDaySnapshot,
   retailView: SupplyRetailView,
 ) {
@@ -34,8 +35,9 @@ function accumulateSoldQtyByProductFromSnapshot(
     if (isConsumableItem(it)) continue;
     const line = merged.lines[it.id] ?? { out: '', remain: '' };
     const c = computeLine(line.out, line.remain, it, { unitBasis: 'retail' });
+    if (c.out > 0) outMap.set(it.id, c.out);
     if (c.remainUnfilled || c.sold <= 0) continue;
-    dayMap.set(it.id, c.sold);
+    soldMap.set(it.id, c.sold);
   }
 }
 
@@ -96,6 +98,7 @@ export type ProcurementLastWeekSameDayRef = {
   /** 訂單歸屬日 − 7 天（或統計參考日） */
   referenceYmd: string;
   soldByProductId: ReadonlyMap<string, number>;
+  outByProductId: ReadonlyMap<string, number>;
   /** 該日是否有已完成盤點訂單或銷售紀錄 */
   hasCompletedStallDay: boolean;
 };
@@ -152,30 +155,32 @@ function soldMapForYmd(
   ymdDash: string,
   orders: OrderHistoryEntry[],
   retailView: SupplyRetailView,
-): { map: Map<string, number>; hasData: boolean; revenue: number } {
+): { soldMap: Map<string, number>; outMap: Map<string, number>; hasData: boolean; revenue: number } {
   const scopeId = getDataScopeContext().scopeId;
   const soldByProductId = new Map<string, number>();
+  const outByProductId = new Map<string, number>();
 
   const salesRaw = getSalesRecord(ymdDash, scopeId);
   if (salesRaw) {
     accumulateSoldQtyByProductFromSnapshot(
       soldByProductId,
+      outByProductId,
       salesRaw,
       retailView,
     );
-    return { map: soldByProductId, hasData: true, revenue: revenueForSnapshot(salesRaw, retailView) };
+    return { soldMap: soldByProductId, outMap: outByProductId, hasData: true, revenue: revenueForSnapshot(salesRaw, retailView) };
   }
 
   const matched = pickLatestStallOrderForYmd(ymdDash, orders, scopeId);
   if (matched) {
     const snap = resolveStallSnapshotFromOrder(matched);
     if (snap) {
-      accumulateSoldQtyByProductFromSnapshot(soldByProductId, snap, retailView);
-      return { map: soldByProductId, hasData: true, revenue: revenueForSnapshot(snap, retailView) };
+      accumulateSoldQtyByProductFromSnapshot(soldByProductId, outByProductId, snap, retailView);
+      return { soldMap: soldByProductId, outMap: outByProductId, hasData: true, revenue: revenueForSnapshot(snap, retailView) };
     }
   }
 
-  return { map: soldByProductId, hasData: false, revenue: 0 };
+  return { soldMap: soldByProductId, outMap: outByProductId, hasData: false, revenue: 0 };
 }
 
 function listSameWeekdayYmdsBefore(
@@ -210,8 +215,8 @@ export function computeProcurementLastWeekSameDaySold(
 ): ProcurementLastWeekSameDayRef {
   const scopedOrders = ordersForProcurementSoldReference(orders);
   const referenceYmd = addDaysYmd(orderDateYmd, -7);
-  const { map, hasData } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
-  return { referenceYmd, soldByProductId: map, hasCompletedStallDay: hasData };
+  const { soldMap, outMap, hasData } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
+  return { referenceYmd, soldByProductId: soldMap, outByProductId: outMap, hasCompletedStallDay: hasData };
 }
 
 /**
@@ -240,14 +245,16 @@ export function computeProcurementWeekdaySoldReference(
   }
 
   const qualifyingYmds = listSameWeekdayYmdsBefore(orderDateYmd, scopedOrders, targetWd);
-  const perDay = new Map<string, Map<string, number>>();
+  const soldPerDay = new Map<string, Map<string, number>>();
+  const outPerDay = new Map<string, Map<string, number>>();
   const revenueByYmd = new Map<string, number>();
   const activeYmds: string[] = [];
 
   for (const ymdDash of qualifyingYmds) {
-    const { map, hasData, revenue } = soldMapForYmd(ymdDash, scopedOrders, retailView);
+    const { soldMap, outMap, hasData, revenue } = soldMapForYmd(ymdDash, scopedOrders, retailView);
     if (!hasData) continue;
-    perDay.set(ymdDash, map);
+    soldPerDay.set(ymdDash, soldMap);
+    outPerDay.set(ymdDash, outMap);
     revenueByYmd.set(ymdDash, revenue);
     activeYmds.push(ymdDash);
   }
@@ -264,7 +271,8 @@ export function computeProcurementWeekdaySoldReference(
     }, null);
     return {
       referenceYmd: pickedYmd ?? fallbackYmd,
-      soldByProductId: new Map(perDay.get(pickedYmd ?? '') ?? []),
+      soldByProductId: new Map(soldPerDay.get(pickedYmd ?? '') ?? []),
+      outByProductId: new Map(outPerDay.get(pickedYmd ?? '') ?? []),
       hasCompletedStallDay: activeYmds.length > 0,
       mode,
       sampleDayCount: activeYmds.length,
@@ -272,21 +280,32 @@ export function computeProcurementWeekdaySoldReference(
   }
 
   const allIds = new Set<string>();
-  for (const dayMap of perDay.values()) {
+  for (const dayMap of soldPerDay.values()) {
+    for (const id of dayMap.keys()) allIds.add(id);
+  }
+  for (const dayMap of outPerDay.values()) {
     for (const id of dayMap.keys()) allIds.add(id);
   }
 
   const soldByProductId = new Map<string, number>();
+  const outByProductId = new Map<string, number>();
   for (const id of allIds) {
-    const series = activeYmds.map((ymdDash) => perDay.get(ymdDash)?.get(id) ?? 0);
-    if (series.every((v) => v === 0)) continue;
-    const value = series.reduce((s, v) => s + v, 0) / series.length;
-    soldByProductId.set(id, Math.round(value * 1000) / 1000);
+    const soldSeries = activeYmds.map((ymdDash) => soldPerDay.get(ymdDash)?.get(id) ?? 0);
+    const outSeries = activeYmds.map((ymdDash) => outPerDay.get(ymdDash)?.get(id) ?? 0);
+    if (soldSeries.some((v) => v > 0)) {
+      const value = soldSeries.reduce((s, v) => s + v, 0) / soldSeries.length;
+      soldByProductId.set(id, Math.round(value * 1000) / 1000);
+    }
+    if (outSeries.some((v) => v > 0)) {
+      const value = outSeries.reduce((s, v) => s + v, 0) / outSeries.length;
+      outByProductId.set(id, Math.round(value * 1000) / 1000);
+    }
   }
 
   return {
     referenceYmd: fallbackYmd,
     soldByProductId,
+    outByProductId,
     hasCompletedStallDay: activeYmds.length > 0,
     mode,
     sampleDayCount: activeYmds.length,

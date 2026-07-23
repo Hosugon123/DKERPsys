@@ -1207,11 +1207,22 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                     <span>{referenceSoldRowLabel}</span>
                     <span className="tabular-nums text-sky-300/90 shrink-0">
                       {weekdaySoldRef.hasCompletedStallDay &&
-                      weekdaySoldRef.soldByProductId.has(catalogItem.id) ? (
+                      (weekdaySoldRef.soldByProductId.has(catalogItem.id) ||
+                        weekdaySoldRef.outByProductId.has(catalogItem.id)) ? (
                         <>
-                          {weekdaySoldRef.soldByProductId.get(catalogItem.id)!.toLocaleString()}
+                          售 {(
+                            weekdaySoldRef.soldByProductId.get(catalogItem.id) ?? 0
+                          ).toLocaleString()}
                           <LiangJinQtyHint
-                            liangQty={weekdaySoldRef.soldByProductId.get(catalogItem.id)!}
+                            liangQty={weekdaySoldRef.soldByProductId.get(catalogItem.id) ?? 0}
+                            pieceUnit={priceUnit}
+                            className="text-[0.625rem]"
+                          />{' '}
+                          {priceUnit}
+                          <span className="text-zinc-500">／帶 </span>
+                          {(weekdaySoldRef.outByProductId.get(catalogItem.id) ?? 0).toLocaleString()}
+                          <LiangJinQtyHint
+                            liangQty={weekdaySoldRef.outByProductId.get(catalogItem.id) ?? 0}
                             pieceUnit={priceUnit}
                             className="text-[0.625rem]"
                           />{' '}

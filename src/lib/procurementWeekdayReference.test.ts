@@ -191,6 +191,7 @@ describe('procurement weekday sold reference', () => {
 
     const ref = computeProcurementWeekdaySoldReference(ORDER_DATE, orders, 'headquarter', 'avg');
     expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(160);
+    expect(ref.outByProductId.get(PRODUCT_ID)).toBe(200);
     expect(ref.sampleDayCount).toBe(2);
   });
 
@@ -241,7 +242,9 @@ describe('procurement weekday sold reference', () => {
     );
     expect(ref.referenceYmd).toBe(THURSDAY_A);
     expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(100);
+    expect(ref.outByProductId.get(PRODUCT_ID)).toBe(200);
     expect(ref.soldByProductId.get(PRODUCT_B)).toBe(10);
+    expect(ref.outByProductId.get(PRODUCT_B)).toBe(200);
   });
 
   it('最高：直營帳號不納入加盟店盤點（僅該店最高）', () => {
@@ -461,9 +464,13 @@ describe('procurement weekday sold reference', () => {
     const min = computeProcurementWeekdaySoldReference(orderDate, orders, 'headquarter', 'min', 3);
 
     expect(lastWeek.soldByProductId.get(PRODUCT_ID)).toBe(100);
+    expect(lastWeek.outByProductId.get(PRODUCT_ID)).toBe(120);
     expect(max.soldByProductId.get(PRODUCT_ID)).toBe(100);
+    expect(max.outByProductId.get(PRODUCT_ID)).toBe(120);
     expect(avg.soldByProductId.get(PRODUCT_ID)).toBe(80);
+    expect(avg.outByProductId.get(PRODUCT_ID)).toBe(105);
     expect(min.soldByProductId.get(PRODUCT_ID)).toBe(60);
+    expect(min.outByProductId.get(PRODUCT_ID)).toBe(90);
     expect(max.sampleDayCount).toBe(2);
   });
 });
