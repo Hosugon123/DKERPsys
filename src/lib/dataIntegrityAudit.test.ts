@@ -241,11 +241,13 @@ describe('data integrity audit', () => {
     const min = computeProcurementWeekdaySoldReference(orderDate, orders, 'headquarter', 'min', 3);
 
     expect(max.sampleDayCount).toBe(2);
-    expect(max.soldByProductId.get(PRODUCT)).toBe(197);
+    expect(max.referenceYmd).toBe(thursdayB);
+    expect(max.soldByProductId.get(PRODUCT)).toBe(140);
     expect(max.soldByProductId.get(PRODUCT_B)).toBe(60);
     expect(avg.soldByProductId.get(PRODUCT)).toBe(168.5);
     expect(avg.soldByProductId.get(PRODUCT_B)).toBe(37.5);
-    expect(min.soldByProductId.get(PRODUCT)).toBe(140);
+    expect(min.referenceYmd).toBe(thursdayA);
+    expect(min.soldByProductId.get(PRODUCT)).toBe(197);
     expect(min.soldByProductId.get(PRODUCT_B)).toBe(15);
   });
 

@@ -239,8 +239,9 @@ describe('procurement weekday sold reference', () => {
       'headquarter',
       'max',
     );
-    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(190);
-    expect(ref.soldByProductId.get(PRODUCT_B)).toBe(150);
+    expect(ref.referenceYmd).toBe(THURSDAY_A);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(100);
+    expect(ref.soldByProductId.get(PRODUCT_B)).toBe(10);
   });
 
   it('最高：直營帳號不納入加盟店盤點（僅該店最高）', () => {
@@ -276,7 +277,7 @@ describe('procurement weekday sold reference', () => {
     expect(ref.sampleDayCount).toBe(1);
   });
 
-  it('最高：改用銷售統計同算法，各品項各自取最高售出量', () => {
+  it('最高：選出營業額最高那一天，再取該日各品項售出量', () => {
     const HIGH_PRICE_PRODUCT = 's20';
     const lowRevenueHighQty = stallOrder(
       {
@@ -292,7 +293,7 @@ describe('procurement weekday sold reference', () => {
       lines: {
         [PRODUCT_ID]: { out: '200', remain: '0' },
       },
-      actualRevenue: '',
+      actualRevenue: '1000',
       updatedAt: `${THURSDAY_A}T18:00:00.000Z`,
     };
     const highRevenueLowerQty = stallOrder(
@@ -309,7 +310,7 @@ describe('procurement weekday sold reference', () => {
       lines: {
         [HIGH_PRICE_PRODUCT]: { out: '120', remain: '0' },
       },
-      actualRevenue: '',
+      actualRevenue: '9000',
       updatedAt: `${THURSDAY_B}T18:00:00.000Z`,
     };
 
@@ -320,12 +321,13 @@ describe('procurement weekday sold reference', () => {
       'max',
     );
 
-    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(200);
+    expect(ref.referenceYmd).toBe(THURSDAY_B);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBeUndefined();
     expect(ref.soldByProductId.get(HIGH_PRICE_PRODUCT)).toBe(120);
     expect(ref.sampleDayCount).toBe(2);
   });
 
-  it('最低：改用銷售統計同算法，各品項各自取最低售出量', () => {
+  it('最低：選出營業額最低那一天，再取該日各品項售出量', () => {
     const HIGH_PRICE_PRODUCT = 's20';
     const lowRevenueHighQty = stallOrder(
       {
@@ -341,7 +343,7 @@ describe('procurement weekday sold reference', () => {
       lines: {
         [PRODUCT_ID]: { out: '200', remain: '0' },
       },
-      actualRevenue: '',
+      actualRevenue: '1000',
       updatedAt: `${THURSDAY_A}T18:00:00.000Z`,
     };
     const highRevenueLowerQty = stallOrder(
@@ -358,7 +360,7 @@ describe('procurement weekday sold reference', () => {
       lines: {
         [HIGH_PRICE_PRODUCT]: { out: '120', remain: '0' },
       },
-      actualRevenue: '',
+      actualRevenue: '9000',
       updatedAt: `${THURSDAY_B}T18:00:00.000Z`,
     };
 
@@ -369,8 +371,9 @@ describe('procurement weekday sold reference', () => {
       'min',
     );
 
-    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(0);
-    expect(ref.soldByProductId.get(HIGH_PRICE_PRODUCT)).toBe(0);
+    expect(ref.referenceYmd).toBe(THURSDAY_A);
+    expect(ref.soldByProductId.get(PRODUCT_ID)).toBe(200);
+    expect(ref.soldByProductId.get(HIGH_PRICE_PRODUCT)).toBeUndefined();
     expect(ref.sampleDayCount).toBe(2);
   });
 
