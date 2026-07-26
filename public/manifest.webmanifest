@@ -1,7 +1,7 @@
 {
-  "name": "達客東山鴨頭",
+  "name": "達客東山鴨頭管理系統",
   "short_name": "達客東山鴨頭",
-  "description": "達客東山鴨頭門市管理",
+  "description": "達客東山鴨頭 ERP 管理系統",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f5f2ed",
