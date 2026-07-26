@@ -2226,7 +2226,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                           'py-2 sm:py-2.5 px-1.5 sm:px-2 tabular-nums whitespace-nowrap',
                                           hideOrderBatchPriceFromEmployee
                                             ? 'text-right text-emerald-400/95'
-                                            : 'text-center text-amber-200/85',
+                                            : 'text-center text-[#9a4f00] font-medium',
                                         )}
                                       >
                                         {hideOrderBatchPriceFromEmployee ? (
@@ -2240,7 +2240,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                           <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-emerald-400/95 whitespace-nowrap">
                                             $ {d.retailEstSub.toLocaleString('zh-TW')}
                                           </td>
-                                          <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-amber-400/95 whitespace-nowrap">
+                                          <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 text-right tabular-nums text-[#9a4f00] font-medium whitespace-nowrap">
                                             $ {d.orderSub.toLocaleString('zh-TW')}
                                           </td>
                                         </>
