@@ -3,7 +3,7 @@
  *
  * 規範：
  * - UI 層應優先呼叫本檔公開之 async 方法，不直接 localStorage.setItem。
- * - remote：啟動時由 {@link initRemoteSyncOnAppLoad} 先 GET 覆蓋本地；每次寫入後自動推送整包。
+ * - remote：啟動時由 {@link initRemoteSyncOnAppLoad} 先 GET 合併本地；寫入後推送整包。
  */
 import { getStorageMode, type StorageMode } from './storageMode';
 import { awaitRemotePushIdle, withRemoteStorageRead, withRemoteStorageWrite, withRemoteStorageWriteDeferPush } from './remoteSyncHub';
@@ -30,6 +30,7 @@ import * as systemUsers from '../lib/systemUsersStorage';
 import { getStoreCode3, setStoreCode3 } from '../lib/storeCodeStorage';
 
 export {
+  awaitRemotePushIdle,
   initRemoteSyncOnAppLoad,
   pushRemoteIfLocalBundleChangedSince,
   refreshRemoteBundleVersionIfStale,
@@ -46,6 +47,10 @@ export {
   REMOTE_SYNC_STATUS_EVENT,
   REMOTE_SYNC_VERSION_CONFLICT_EVENT,
 } from './remoteSyncHub';
+
+// User-facing writes should update local state first and sync the full bundle in
+// the background, so button feedback is not blocked by a slow network PUT.
+const withUiRemoteStorageWrite = withRemoteStorageWriteDeferPush;
 
 // ——— 流水帳 ———
 
@@ -65,13 +70,13 @@ export const ledger = {
     return withRemoteStorageRead(() => accountingLedger.listAccountingLedgerEntriesForScopeId(scopeId));
   },
   async append(input: accountingLedger.NewAccountingLedgerInput): Promise<accountingLedger.AccountingLedgerEntry> {
-    return withRemoteStorageWrite(() => accountingLedger.appendAccountingLedgerEntry(input));
+    return withUiRemoteStorageWrite(() => accountingLedger.appendAccountingLedgerEntry(input));
   },
   async update(id: string, patch: accountingLedger.AccountingLedgerUpdate): Promise<boolean> {
-    return withRemoteStorageWrite(() => accountingLedger.updateAccountingLedgerEntry(id, patch));
+    return withUiRemoteStorageWrite(() => accountingLedger.updateAccountingLedgerEntry(id, patch));
   },
   async remove(id: string): Promise<boolean> {
-    return withRemoteStorageWrite(() => accountingLedger.removeAccountingLedgerEntry(id));
+    return withUiRemoteStorageWrite(() => accountingLedger.removeAccountingLedgerEntry(id));
   },
   async sumForMonth(ym: string, flow: accountingLedger.AccountingFlowType): Promise<number> {
     return withRemoteStorageRead(() => accountingLedger.sumAccountingLedgerForMonth(ym, flow));
@@ -98,27 +103,27 @@ export const orders = {
     return withRemoteStorageRead(() => orderHistory.loadCompletedOrderHistoryListForRole(role));
   },
   async deleteOrderByIdFromAnyStore(orderId: string): Promise<boolean> {
-    const ok = await withRemoteStorageWrite(() =>
+    const ok = await withUiRemoteStorageWrite(() =>
       orderHistory.deleteOrderByIdFromAnyStore(orderId),
     );
-    if (ok && getStorageMode() === 'remote') await awaitRemotePushIdle();
+    if (ok && getStorageMode() === 'remote') void awaitRemotePushIdle();
     return ok;
   },
   async updateFranchiseManagementOrderStatus(
     id: string,
     status: orderHistory.FranchiseOrderStatus,
   ): Promise<void> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       orderHistory.updateFranchiseManagementOrderStatus(id, status);
     });
   },
   async updateOrderHistoryStatus(id: string, status: orderHistory.FranchiseOrderStatus): Promise<void> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       orderHistory.updateOrderHistoryStatus(id, status);
     });
   },
   async updateOrderStatusInEitherStore(id: string, status: orderHistory.FranchiseOrderStatus): Promise<void> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       orderHistory.updateOrderStatusInEitherStore(id, status);
     });
   },
@@ -126,13 +131,13 @@ export const orders = {
     id: string,
     nextLines: orderHistory.OrderHistoryLine[],
   ): Promise<orderHistory.UpdateLinesResult> {
-    return withRemoteStorageWrite(() => orderHistory.updatePendingOrderLinesById(id, nextLines));
+    return withUiRemoteStorageWrite(() => orderHistory.updatePendingOrderLinesById(id, nextLines));
   },
   async updateEditableOrderLinesById(
     id: string,
     nextLines: orderHistory.OrderHistoryLine[],
   ): Promise<orderHistory.UpdateEditableOrderLinesResult> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       const res = orderHistory.updateEditableOrderLinesById(id, nextLines);
       if (res.ok) stallInventory.syncStallOutAfterOrderLinesChanged(id);
       return res;
@@ -142,7 +147,7 @@ export const orders = {
     id: string,
     nextLines: orderHistory.OrderHistoryLine[],
   ): Promise<orderHistory.AdminPatchOrderUnitPricesResult> {
-    return withRemoteStorageWrite(() => orderHistory.adminPatchOrderLineUnitPricesById(id, nextLines));
+    return withUiRemoteStorageWrite(() => orderHistory.adminPatchOrderLineUnitPricesById(id, nextLines));
   },
   async appendProcurementOrderEntry(params: {
     lines: orderHistory.OrderHistoryLine[];
@@ -154,7 +159,7 @@ export const orders = {
     procurementDeductionBasisOrderId?: string;
     procurementDeductionBasisOrderIds?: string[];
   }): Promise<string> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       const basisOrderIds = orderHistory.normalizeProcurementDeductionBasisOrderIds({
         procurementDeductionBasisOrderId: params.procurementDeductionBasisOrderId,
         procurementDeductionBasisOrderIds: params.procurementDeductionBasisOrderIds,
@@ -193,7 +198,7 @@ export const orders = {
   }): Promise<
     orderHistory.ApplyProcurementDeductionBasisResult | { ok: false; reason: 'basis_not_found' }
   > {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       const orderId = params.orderId.trim();
       const basisOrderIds = orderHistory.normalizeProcurementDeductionBasisOrderIds({
         procurementDeductionBasisOrderId: params.basisOrderId,
@@ -259,7 +264,7 @@ export const orders = {
     orderId: string;
     basisOrderId: string;
   }): Promise<orderHistory.RemoveProcurementDeductionBasisResult | { ok: false; reason: 'basis_not_found' }> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       const orderId = params.orderId.trim();
       const basisOrderId = params.basisOrderId.trim();
       const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
@@ -285,7 +290,7 @@ export const orders = {
       snapshot: import('../lib/salesRecordStorage').SalesRecordDaySnapshot;
     },
   ): Promise<boolean> {
-    return withRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields));
+    return withUiRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields));
   },
   async commitStallInventoryComplete(params: {
     orderId: string;
@@ -307,19 +312,19 @@ export const orders = {
     orderId: string,
     snapshot: import('../lib/salesRecordStorage').SalesRecordDaySnapshot,
   ): Promise<orderHistory.UpdateStallSnapshotResult> {
-    const res = await withRemoteStorageWrite(() => {
+    const res = await withUiRemoteStorageWrite(() => {
       const inner = orderHistory.updateStallCountSnapshotByOrderId(orderId, snapshot);
       if (inner.ok) stallInventory.syncBasisDayFromOrderSnapshot(orderId);
       return inner;
     });
-    if (res.ok && getStorageMode() === 'remote') await awaitRemotePushIdle();
+    if (res.ok && getStorageMode() === 'remote') void awaitRemotePushIdle();
     return res;
   },
   async updateOrderDateYmdByOrderId(
     orderId: string,
     orderDateYmd: string,
   ): Promise<orderHistory.UpdateOrderDateYmdResult> {
-    return withRemoteStorageWrite(() => orderHistory.updateOrderDateYmdByOrderId(orderId, orderDateYmd));
+    return withUiRemoteStorageWrite(() => orderHistory.updateOrderDateYmdByOrderId(orderId, orderDateYmd));
   },
   async listOrdersWithStallCountCompleted(): Promise<orderHistory.OrderHistoryEntry[]> {
     return withRemoteStorageRead(() => orderHistory.listOrdersWithStallCountCompleted());
@@ -333,13 +338,13 @@ export const salesRecords = {
     return withRemoteStorageRead(() => salesRecord.getSalesRecord(ymd, scopeId));
   },
   async patchRevenueGapReason(ymd: string, reason: string, scopeId?: string): Promise<void> {
-    return withRemoteStorageWrite(() => salesRecord.patchSalesRecordRevenueGapReason(ymd, reason, scopeId));
+    return withUiRemoteStorageWrite(() => salesRecord.patchSalesRecordRevenueGapReason(ymd, reason, scopeId));
   },
   async listMeta(scopeId?: string) {
     return withRemoteStorageRead(() => salesRecord.listSalesRecordMeta(scopeId));
   },
   async save(ymd: string, snapshot: salesRecord.SalesRecordDaySnapshot, scopeId?: string): Promise<void> {
-    return withRemoteStorageWrite(() => salesRecord.saveSalesRecord(ymd, snapshot, scopeId));
+    return withUiRemoteStorageWrite(() => salesRecord.saveSalesRecord(ymd, snapshot, scopeId));
   },
 };
 
@@ -354,7 +359,7 @@ export const stallInventoryApi = {
     scopeId?: string,
     options?: { deferRemotePush?: boolean },
   ): Promise<void> {
-    const write = options?.deferRemotePush ? withRemoteStorageWriteDeferPush : withRemoteStorageWrite;
+    const write = options?.deferRemotePush ? withRemoteStorageWriteDeferPush : withUiRemoteStorageWrite;
     return write(() => stallInventory.saveDay(ymdStr, snap, scopeId));
   },
   async loadDay(ymdStr: string, scopeId?: string): Promise<stallInventory.DaySnapshot> {
@@ -384,40 +389,40 @@ export const products = {
       return withRemoteStorageRead(() => userCatalog.loadUserCatalogState());
     },
     async setSupplyItemOverride(id: string, patch: userCatalog.ItemOverride): Promise<void> {
-      return withRemoteStorageWrite(() => {
+      return withUiRemoteStorageWrite(() => {
         userCatalog.setSupplyItemOverride(id, patch);
       });
     },
     async clearSupplyItemOverride(id: string): Promise<void> {
-      return withRemoteStorageWrite(() => {
+      return withUiRemoteStorageWrite(() => {
         userCatalog.clearSupplyItemOverride(id);
       });
     },
     async hideBaseItem(id: string): Promise<void> {
-      return withRemoteStorageWrite(() => {
+      return withUiRemoteStorageWrite(() => {
         userCatalog.hideBaseItem(id);
       });
     },
     async unhideBaseItem(id: string): Promise<void> {
-      return withRemoteStorageWrite(() => {
+      return withUiRemoteStorageWrite(() => {
         userCatalog.unhideBaseItem(id);
       });
     },
     async addCustomItem(init?: Parameters<typeof userCatalog.addCustomItem>[0]): Promise<string> {
-      return withRemoteStorageWrite(() => userCatalog.addCustomItem(init));
+      return withUiRemoteStorageWrite(() => userCatalog.addCustomItem(init));
     },
     async updateCustomItem(id: string, patch: Parameters<typeof userCatalog.updateCustomItem>[1]): Promise<void> {
-      return withRemoteStorageWrite(() => {
+      return withUiRemoteStorageWrite(() => {
         userCatalog.updateCustomItem(id, patch);
       });
     },
     async removeCustomItem(id: string): Promise<void> {
-      return withRemoteStorageWrite(() => {
+      return withUiRemoteStorageWrite(() => {
         userCatalog.removeCustomItem(id);
       });
     },
     async clearAllUserCatalog(): Promise<void> {
-      return withRemoteStorageWrite(() => {
+      return withUiRemoteStorageWrite(() => {
         userCatalog.clearAllUserCatalog();
       });
     },
@@ -430,31 +435,31 @@ export const products = {
       return withRemoteStorageRead(() => costStructure.listCostCategories());
     },
     async addCostColumn(label: string, kind?: costStructure.CostFieldKind): Promise<costStructure.CostColumn> {
-      return withRemoteStorageWrite(() => costStructure.addCostColumn(label, kind));
+      return withUiRemoteStorageWrite(() => costStructure.addCostColumn(label, kind));
     },
     async updateCostColumn(
       id: string,
       patch: Partial<Pick<costStructure.CostColumn, 'label' | 'kind'>>,
     ): Promise<boolean> {
-      return withRemoteStorageWrite(() => costStructure.updateCostColumn(id, patch));
+      return withUiRemoteStorageWrite(() => costStructure.updateCostColumn(id, patch));
     },
     async moveCostColumn(id: string, delta: -1 | 1): Promise<boolean> {
-      return withRemoteStorageWrite(() => costStructure.moveCostColumn(id, delta));
+      return withUiRemoteStorageWrite(() => costStructure.moveCostColumn(id, delta));
     },
     async removeCostColumn(id: string): Promise<boolean> {
-      return withRemoteStorageWrite(() => costStructure.removeCostColumn(id));
+      return withUiRemoteStorageWrite(() => costStructure.removeCostColumn(id));
     },
     async addCostItem(input: costStructure.AddCostItemInput): Promise<costStructure.CostItem> {
-      return withRemoteStorageWrite(() => costStructure.addCostItem(input));
+      return withUiRemoteStorageWrite(() => costStructure.addCostItem(input));
     },
     async updateCostItem(id: string, patch: costStructure.UpdateCostItemPatch): Promise<boolean> {
-      return withRemoteStorageWrite(() => costStructure.updateCostItem(id, patch));
+      return withUiRemoteStorageWrite(() => costStructure.updateCostItem(id, patch));
     },
     async setCostItemValue(itemId: string, columnId: string, raw: string): Promise<boolean> {
-      return withRemoteStorageWrite(() => costStructure.setCostItemValue(itemId, columnId, raw));
+      return withUiRemoteStorageWrite(() => costStructure.setCostItemValue(itemId, columnId, raw));
     },
     async removeCostItem(id: string): Promise<boolean> {
-      return withRemoteStorageWrite(() => costStructure.removeCostItem(id));
+      return withUiRemoteStorageWrite(() => costStructure.removeCostItem(id));
     },
   },
 };
@@ -477,13 +482,13 @@ export const accounts = {
     return withRemoteStorageRead(() => systemUsers.listSystemUsers());
   },
   async createUser(input: CreateUserPayload): Promise<systemUsers.SystemUser> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       const { initialPassword, ...rest } = input;
       if (rest.loginId?.trim() && !initialPassword?.trim()) {
-        throw new Error('已填寫登入帳號時，請一併設定初始密碼。');
+        throw new Error('建立登入帳號時必須提供初始密碼。');
       }
       if (initialPassword?.trim() && !rest.loginId?.trim()) {
-        throw new Error('設定初始密碼前請先填寫登入帳號。');
+        throw new Error('設定初始密碼時必須提供登入帳號。');
       }
       const u = systemUsers.createSystemUser(rest);
       try {
@@ -498,7 +503,7 @@ export const accounts = {
     });
   },
   async updateUser(id: string, patch: UpdateAccountPayload): Promise<boolean> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       const { newPassword, ...userPatch } = patch;
       const cur = systemUsers.listSystemUsers().find((u) => u.id === id);
       const oldLogin = cur?.loginId;
@@ -511,14 +516,14 @@ export const accounts = {
       }
       if (newPassword?.trim()) {
         const lid = refreshed?.loginId;
-        if (!lid) throw new Error('此帳號尚未設定登入帳號，請先補上登入帳號再重設密碼。');
+        if (!lid) throw new Error('更新密碼前必須先設定登入帳號。');
         credentialStorage.setCredential(lid, newPassword);
       }
       return true;
     });
   },
   async removeUser(id: string): Promise<boolean> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       const cur = systemUsers.listSystemUsers().find((u) => u.id === id);
       const ok = systemUsers.removeSystemUser(id);
       if (ok && cur?.loginId) credentialStorage.removeCredential(cur.loginId);
@@ -526,13 +531,13 @@ export const accounts = {
     });
   },
   async setUserPassword(loginId: string, newPassword: string): Promise<void> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       credentialStorage.setCredential(loginId, newPassword);
     });
   },
   /** 已登入者變更自己的密碼（須通過目前密碼）；remote 模式會一併推送 bundle，避免下次載入被舊雲端覆蓋） */
   async changeOwnPassword(loginId: string, currentPassword: string, newPassword: string): Promise<void> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       credentialStorage.changeCredential(loginId, currentPassword, newPassword);
     });
   },
@@ -542,10 +547,10 @@ export type { SystemUser, SystemUserRole, SystemUserStatus, NewSystemUserInput, 
 
 export const passwordReset = {
   async requestCode(email: string) {
-    return withRemoteStorageWrite(() => requestPasswordResetByEmail(email));
+    return withUiRemoteStorageWrite(() => requestPasswordResetByEmail(email));
   },
   async confirm(email: string, code: string, newPassword: string) {
-    return withRemoteStorageWrite(() => confirmPasswordResetWithOtp(email, code, newPassword));
+    return withUiRemoteStorageWrite(() => confirmPasswordResetWithOtp(email, code, newPassword));
   },
 };
 
@@ -554,7 +559,7 @@ export const storeSettings = {
     return withRemoteStorageRead(() => getStoreCode3());
   },
   async setStoreCode3(code: string): Promise<void> {
-    return withRemoteStorageWrite(() => {
+    return withUiRemoteStorageWrite(() => {
       setStoreCode3(code);
     });
   },
@@ -575,3 +580,4 @@ export const dataBundle = {
 };
 
 export { getStorageMode, getApiBaseUrl, getAsyncStorageDelayMs, type StorageMode } from './storageMode';
+

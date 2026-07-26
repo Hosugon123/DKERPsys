@@ -40,6 +40,7 @@ import {
 } from './lib/authSession';
 import { getDefaultLandingViewForRole } from './lib/sidebarNavConfig';
 import {
+  awaitRemotePushIdle,
   initRemoteSyncOnAppLoad,
   refreshRemoteBundleVersionIfStale,
 } from './services/apiService';
@@ -85,10 +86,21 @@ export default function App() {
   useEffect(() => {
     if (getStorageMode() !== 'remote') return;
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void refreshRemoteBundleVersionIfStale();
+      if (document.visibilityState === 'visible') {
+        void refreshRemoteBundleVersionIfStale();
+      } else if (document.visibilityState === 'hidden') {
+        void awaitRemotePushIdle();
+      }
+    };
+    const onPageHide = () => {
+      void awaitRemotePushIdle();
     };
     document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pagehide', onPageHide);
+    };
   }, []);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./storageMode', () => ({
   getStorageMode: () => 'remote',
@@ -20,6 +20,7 @@ function emptyCloudBundle() {
 
 describe('remote sync write flushing', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.resetModules();
     localStorage.clear();
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -37,6 +38,10 @@ describe('remote sync write flushing', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('withRemoteStorageWrite waits for the debounced PUT before resolving', async () => {
     const { withRemoteStorageWrite } = await import('./remoteSyncHub');
 
@@ -52,6 +57,25 @@ describe('remote sync write flushing', () => {
       bundle?: { keys?: Record<string, string | null> };
     };
     expect(body.bundle?.keys?.dongshan_store_code_v1).toBe('"007"');
+  });
+
+  it('withRemoteStorageWriteDeferPush resolves before the debounced PUT completes', async () => {
+    vi.useFakeTimers();
+    const { withRemoteStorageWriteDeferPush, awaitRemotePushIdle } = await import('./remoteSyncHub');
+
+    await withRemoteStorageWriteDeferPush(() => {
+      localStorage.setItem('dongshan_store_code_v1', JSON.stringify('010'));
+    });
+
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const flushPromise = awaitRemotePushIdle();
+    await vi.runAllTimersAsync();
+    await flushPromise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
   });
 
   it('syncRemoteAfterDirectLocalMutation pushes already-written local changes', async () => {
