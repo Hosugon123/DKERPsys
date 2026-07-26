@@ -1363,20 +1363,23 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const pickingDockSummary = useMemo(() => {
     if (!pickingOrderId) return null;
     const pickKept = pickingLines.filter((l) => l.qty > 0);
-    const pickCount = pickKept.reduce((s, l) => s + l.qty, 0);
-    const pickTotal =
+    const procurementTotal =
       Math.round(
-        pickKept.reduce(
-          (s, l) => s + pickingLineUnitForDisplay(l, userRole, supplyRetailView) * l.qty,
-          0,
-        ) * 100,
+        pickKept.reduce((s, l) => s + (Number(l.unitPrice) || 0) * l.qty, 0) * 100,
+      ) / 100;
+    const retailEstimateTotal =
+      Math.round(
+        pickKept.reduce((s, l) => {
+          const item = getSupplyItem(l.productId, supplyRetailView);
+          const unit = item ? estimatedRetailPerPackage(item) : Number(l.unitPrice) || 0;
+          return s + unit * l.qty;
+        }, 0) * 100,
       ) / 100;
     return {
-      pickCount,
-      pickTotal,
-      totalLabel: hideOrderBatchPriceFromEmployee ? '零售預估合計' : '實出合計',
+      procurementTotal,
+      retailEstimateTotal,
     };
-  }, [pickingOrderId, pickingLines, userRole, supplyRetailView, hideOrderBatchPriceFromEmployee]);
+  }, [pickingOrderId, pickingLines, supplyRetailView]);
 
   const priceAdjustDockSummary = useMemo(() => {
     if (!priceAdjustOrderId) return null;
@@ -2373,7 +2376,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       {pickingOrderId && pickingDockSummary && (
         <OrderEditActionBar
           error={pickingError}
-          summary={`${pickingDockSummary.pickCount} 份 · ${pickingDockSummary.totalLabel} $ ${pickingDockSummary.pickTotal.toLocaleString()}`}
+          summary={`叫貨金額 $ ${pickingDockSummary.procurementTotal.toLocaleString()} · 零售預估 $ ${pickingDockSummary.retailEstimateTotal.toLocaleString()}`}
           saveLabel="儲存貨量"
           onSave={() => savePickingEdit(pickingOrderId)}
           onCancel={() => exitPickingEdit({ revertToOriginal: true })}
