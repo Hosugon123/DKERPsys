@@ -78,6 +78,32 @@ describe('remote sync write flushing', () => {
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
   });
 
+  it('keeps a failed deferred push queued so it can retry', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { withRemoteStorageWriteDeferPush, awaitRemotePushIdle } = await import('./remoteSyncHub');
+
+    await withRemoteStorageWriteDeferPush(() => {
+      localStorage.setItem('dongshan_store_code_v1', JSON.stringify('011'));
+    });
+
+    const firstFlush = awaitRemotePushIdle();
+    await vi.runOnlyPendingTimersAsync();
+    await firstFlush;
+
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('PUT');
+  });
+
   it('syncRemoteAfterDirectLocalMutation pushes already-written local changes', async () => {
     const { syncRemoteAfterDirectLocalMutation } = await import('./remoteSyncHub');
 

@@ -46,6 +46,7 @@ export class RemoteVersionConflictError extends Error {
 
 /** 連續寫入合併推送的等待時間（毫秒） */
 const PUSH_DEBOUNCE_MS = 900;
+const PUSH_RETRY_MS = 5_000;
 /** 409 後自動合併重試次數 */
 const MAX_CONFLICT_MERGE_RETRIES = 2;
 
@@ -296,21 +297,43 @@ async function flushDebouncedPush(bundleText: string, dirtyKeys: DongshanStorage
   try {
     await pushBundleTextWithAutoMerge(bundleText, dirtyKeys);
   } catch (e) {
+    requeueFailedPush(bundleText, dirtyKeys, e);
     applySyncFailureFromUnknown(e);
+  }
+}
+
+function syncStatusFromUnknown(e: unknown): RemoteSyncStatus | null {
+  if (e && typeof e === 'object' && 'syncStatus' in e) {
+    const s = (e as { syncStatus?: RemoteSyncStatus }).syncStatus;
+    if (s === 'auth_error' || s === 'error') return s;
+  }
+  if (isNetworkishError(e)) return 'offline';
+  return null;
+}
+
+function requeueFailedPush(
+  bundleText: string,
+  dirtyKeys: readonly DongshanStorageKey[],
+  e: unknown,
+): void {
+  if (syncStatusFromUnknown(e) === 'auth_error') return;
+  if (pendingAfterText == null) pendingAfterText = bundleText;
+  for (const k of dirtyKeys) pendingDirtyKeys.add(k);
+  if (debounceTimer == null) {
+    debounceTimer = setTimeout(() => {
+      enqueuePendingPushNow();
+    }, PUSH_RETRY_MS);
   }
 }
 
 function applySyncFailureFromUnknown(e: unknown): void {
   if (isVersionConflictError(e)) return;
-  if (e && typeof e === 'object' && 'syncStatus' in e) {
-    const s = (e as { syncStatus?: RemoteSyncStatus }).syncStatus;
-    if (s === 'auth_error' || s === 'error') {
-      dispatchStatus(s);
-      return;
-    }
+  const s = syncStatusFromUnknown(e);
+  if (s) {
+    dispatchStatus(s);
+    return;
   }
-  if (isNetworkishError(e)) dispatchStatus('offline');
-  else dispatchStatus('error');
+  dispatchStatus('error');
 }
 
 /** 分頁重新可見時更新雲端版本戳記，降低下一筆 PUT 誤判 409 的機率。 */
