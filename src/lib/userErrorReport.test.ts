@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildUserErrorReport, formatUserErrorReport } from './userErrorReport';
+import { buildUserErrorReport, formatUserErrorReport, shouldSuppressGlobalError } from './userErrorReport';
 
 describe('userErrorReport', () => {
   it('builds a user-facing report with context', () => {
@@ -43,5 +43,12 @@ describe('userErrorReport', () => {
     expect(text).toContain('操作：完成攤上盤點');
     expect(text).toContain('欄位：米血');
     expect(text).toContain('技術資訊：');
+  });
+
+  it('suppresses browser noise but keeps real errors reportable', () => {
+    expect(shouldSuppressGlobalError({ error: new DOMException('The user aborted a request.', 'AbortError') })).toBe(true);
+    expect(shouldSuppressGlobalError({ message: 'ResizeObserver loop completed with undelivered notifications.' })).toBe(true);
+    expect(shouldSuppressGlobalError({ message: 'Script error.' })).toBe(true);
+    expect(shouldSuppressGlobalError({ error: new Error('Cannot save stall inventory') })).toBe(false);
   });
 });

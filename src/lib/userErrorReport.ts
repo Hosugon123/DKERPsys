@@ -29,6 +29,38 @@ type ReportInput = {
   technicalDetail?: string;
 };
 
+function getErrorParts(error: unknown, fallbackMessage?: string): { name: string; message: string } {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message };
+  }
+  if (typeof error === 'string') return { name: '', message: error };
+  if (error && typeof error === 'object') {
+    const obj = error as { name?: unknown; message?: unknown };
+    return {
+      name: typeof obj.name === 'string' ? obj.name : '',
+      message: typeof obj.message === 'string' ? obj.message : fallbackMessage ?? '',
+    };
+  }
+  return { name: '', message: fallbackMessage ?? '' };
+}
+
+export function shouldSuppressGlobalError(input: { error?: unknown; message?: string }): boolean {
+  const { name, message } = getErrorParts(input.error, input.message);
+  const normalizedName = name.trim().toLowerCase();
+  const normalizedMessage = message.trim().toLowerCase();
+
+  if (!input.error && !normalizedMessage) return true;
+  if (normalizedName === 'aborterror') return true;
+  if (normalizedMessage === 'script error.') return true;
+  if (normalizedMessage.includes('resizeobserver loop')) return true;
+  if (normalizedMessage.includes('the user aborted a request')) return true;
+  if (normalizedMessage.includes('operation was aborted')) return true;
+  if (normalizedMessage.includes('request was cancelled')) return true;
+  if (normalizedMessage.includes('request was canceled')) return true;
+
+  return false;
+}
+
 function stringifyError(error: unknown): string {
   if (error instanceof Error) {
     return [error.name, error.message, error.stack].filter(Boolean).join('\n');

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, Copy, X } from 'lucide-react';
 import {
   formatUserErrorReport,
   reportUserError,
+  shouldSuppressGlobalError,
   USER_ERROR_REPORTED_EVENT,
   type UserErrorReport,
 } from '../lib/userErrorReport';
@@ -51,6 +52,7 @@ export default function GlobalErrorReporter({
 }: GlobalErrorReporterProps) {
   const [report, setReport] = useState<UserErrorReport | null>(null);
   const [copied, setCopied] = useState(false);
+  const lastInvalidReportRef = useRef<{ key: string; at: number } | null>(null);
   const page = friendlyPageName(currentView);
 
   useEffect(() => {
@@ -74,17 +76,26 @@ export default function GlobalErrorReporter({
       if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) {
         return;
       }
+      const field = describeTarget(target);
+      const message = target.validationMessage || '有欄位未填或格式不正確，請依照提示修正後再送出。';
+      const dedupeKey = `${page}|${field ?? ''}|${message}`;
+      const now = Date.now();
+      const last = lastInvalidReportRef.current;
+      if (last?.key === dedupeKey && now - last.at < 2000) return;
+      lastInvalidReportRef.current = { key: dedupeKey, at: now };
+
       reportUserError({
         severity: 'warning',
         title: '欄位資料需要補齊',
-        message: target.validationMessage || '有欄位未填或格式不正確，請依照提示修正後再送出。',
+        message,
         page,
         action: '表單送出',
-        field: describeTarget(target),
+        field,
         source: loginId ? `登入帳號 ${loginId}` : undefined,
       });
     };
     const onError = (event: ErrorEvent) => {
+      if (shouldSuppressGlobalError({ error: event.error, message: event.message })) return;
       reportUserError({
         severity: 'error',
         title: '系統發生未預期錯誤',
@@ -97,6 +108,7 @@ export default function GlobalErrorReporter({
       });
     };
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (shouldSuppressGlobalError({ error: event.reason })) return;
       reportUserError({
         severity: 'error',
         title: '系統操作未完成',
