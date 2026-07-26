@@ -55,8 +55,11 @@ describe('remote sync write flushing', () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? '{}')) as {
       bundle?: { keys?: Record<string, string | null> };
+      partialKeys?: string[];
     };
     expect(body.bundle?.keys?.dongshan_store_code_v1).toBe('"007"');
+    expect(body.partialKeys).toEqual(['dongshan_store_code_v1']);
+    expect(Object.keys(body.bundle?.keys ?? {})).toEqual(['dongshan_store_code_v1']);
   });
 
   it('withRemoteStorageWriteDeferPush resolves before the debounced PUT completes', async () => {
@@ -116,8 +119,11 @@ describe('remote sync write flushing', () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? '{}')) as {
       bundle?: { keys?: Record<string, string | null> };
+      partialKeys?: string[];
     };
     expect(body.bundle?.keys?.dongshan_store_code_v1).toBe('"008"');
+    expect(body.partialKeys).toBeUndefined();
+    expect(Object.keys(body.bundle?.keys ?? {}).length).toBeGreaterThan(1);
   });
 
   it('fetches and merges the cloud bundle only after a version conflict', async () => {

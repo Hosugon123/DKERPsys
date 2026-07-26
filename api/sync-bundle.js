@@ -203,6 +203,42 @@ function isCloudBundleEmpty(bundle) {
   return true;
 }
 
+function isValidBundle(bundle) {
+  return Boolean(bundle && typeof bundle === 'object' && !Array.isArray(bundle));
+}
+
+function normalizePartialKeys(raw) {
+  if (!Array.isArray(raw)) return null;
+  return [...new Set(raw.filter((key) => typeof key === 'string' && key.trim()))];
+}
+
+function buildStoredBundle({ bundle, cloudBundle, partialKeys, updatedAt }) {
+  if (!partialKeys) {
+    return {
+      ...bundle,
+      updatedAt,
+    };
+  }
+  const cloud = isValidBundle(cloudBundle) ? cloudBundle : emptyBundle();
+  const cloudKeys = isValidBundle(cloud.keys) ? cloud.keys : {};
+  const incomingKeys = isValidBundle(bundle.keys) ? bundle.keys : {};
+  const patchKeys = {};
+  for (const key of partialKeys) {
+    if (Object.prototype.hasOwnProperty.call(incomingKeys, key)) {
+      patchKeys[key] = incomingKeys[key];
+    }
+  }
+  return {
+    ...cloud,
+    ...bundle,
+    keys: {
+      ...cloudKeys,
+      ...patchKeys,
+    },
+    updatedAt,
+  };
+}
+
 export default async function handler(req, res) {
   const perf = makePerfTrace(req);
   perf.attach(res);
@@ -245,10 +281,11 @@ export default async function handler(req, res) {
       }
 
       const bundle = body.bundle;
-      if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+      if (!isValidBundle(bundle)) {
         statusCode = 400;
         return badRequest(res, 'invalid bundle');
       }
+      const partialKeys = normalizePartialKeys(body.partialKeys);
 
       const incomingUpdatedAt = readUpdatedAt(bundle);
       const syncedFromUpdatedAt =
@@ -270,13 +307,19 @@ export default async function handler(req, res) {
         }
       }
 
-      const storedBundle = {
-        ...bundle,
+      const storedBundle = buildStoredBundle({
+        bundle,
+        cloudBundle,
+        partialKeys,
         updatedAt: incomingUpdatedAt > 0 ? incomingUpdatedAt : Date.now(),
-      };
+      });
 
       const storedText = stringifyJsonMeasured(perf, 'json_stringify_store', storedBundle);
-      perf.mark('redis_set_bytes', 0, { chars: storedText.length });
+      perf.mark('redis_set_bytes', 0, {
+        chars: storedText.length,
+        partial: Array.isArray(partialKeys),
+        partialKeyCount: partialKeys?.length ?? 0,
+      });
       await perf.time('redis_set', () => redis.set(KV_KEY, storedText));
       statusCode = 200;
       return res.status(200).json({ ok: true });

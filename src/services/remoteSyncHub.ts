@@ -120,6 +120,22 @@ function prepareBundleForPush(bundleText?: string): DongshanDataBundleV1 {
   return buildDongshanDataBundleForPush();
 }
 
+function selectBundleKeysForPush(
+  bundle: DongshanDataBundleV1,
+  dirtyKeys?: readonly DongshanStorageKey[],
+): { bundle: DongshanDataBundleV1; partialKeys?: DongshanStorageKey[] } {
+  const keys = [...new Set(dirtyKeys ?? [])];
+  if (keys.length === 0 || keys.length >= DONGSHAN_EXPORT_STORAGE_KEYS.length) {
+    return { bundle };
+  }
+  const patchKeys: DongshanDataBundleV1['keys'] = {};
+  for (const k of keys) patchKeys[k] = bundle.keys?.[k] ?? null;
+  return {
+    bundle: { ...bundle, keys: patchKeys },
+    partialKeys: keys,
+  };
+}
+
 export function isRemoteBundleEffectivelyEmpty(bundle: DongshanDataBundleV1 | null | undefined): boolean {
   if (bundle == null) return true;
   const keys = bundle.keys;
@@ -181,22 +197,33 @@ export async function fetchRemoteBundle(): Promise<DongshanDataBundleV1> {
   return body.bundle;
 }
 
-export async function pushRemoteBundle(bundleText?: string): Promise<void> {
+export async function pushRemoteBundle(
+  bundleText?: string,
+  dirtyKeys?: readonly DongshanStorageKey[],
+): Promise<void> {
   const token = getApiSyncToken();
   if (!token) {
     throw new Error('遠端同步缺少 VITE_API_SYNC_TOKEN。');
   }
 
-  const bundle = timeSync('remote.push.prepare-bundle', () => prepareBundleForPush(bundleText));
+  const fullBundle = timeSync('remote.push.prepare-bundle', () => prepareBundleForPush(bundleText));
+  const { bundle, partialKeys } = timeSync('remote.push.select-keys', () =>
+    selectBundleKeysForPush(fullBundle, dirtyKeys),
+  );
   const bodyText = timeSync('remote.push.stringify-body', () =>
     JSON.stringify({
       bundle,
       syncedFromUpdatedAt: lastRemoteUpdatedAt,
+      partialKeys,
     }),
   );
   reportPerfMetric({
     name: 'remote.push.size',
-    details: { approxChars: bodyText.length, keyCount: Object.keys(bundle.keys ?? {}).length },
+    details: {
+      approxChars: bodyText.length,
+      keyCount: Object.keys(bundle.keys ?? {}).length,
+      partial: Array.isArray(partialKeys),
+    },
   });
   const res = await timeAsync('remote.push.request', () =>
     fetch(buildApiUrl('/sync-bundle'), {
@@ -217,7 +244,7 @@ export async function pushRemoteBundle(bundleText?: string): Promise<void> {
     throw Object.assign(new Error(`PUT ${res.status}`), { syncStatus: statusFromResponse(res) });
   }
 
-  noteRemoteBundleUpdatedAt(bundle);
+  noteRemoteBundleUpdatedAt(fullBundle);
 }
 
 async function mergeCloudWithLocalDirty(
@@ -249,7 +276,7 @@ async function pushBundleTextWithAutoMerge(
 
   for (let attempt = 0; attempt <= MAX_CONFLICT_MERGE_RETRIES; attempt++) {
     try {
-      await pushRemoteBundle(text);
+      await pushRemoteBundle(text, dirty);
       dispatchStatus('ok');
       return;
     } catch (e) {
