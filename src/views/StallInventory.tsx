@@ -391,7 +391,14 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           setTimeout(() => setRecomputeMsg(null), 8000);
           return;
         }
-        if (gapDraft) await ledgerApi.append(gapDraft);
+        let ledgerSyncFailed = false;
+        if (gapDraft) {
+          try {
+            await ledgerApi.append(gapDraft);
+          } catch {
+            ledgerSyncFailed = true;
+          }
+        }
         setSyncGapToLedger(false);
         setStallListTick((n) => n + 1);
         stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
@@ -399,6 +406,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         setSaveFlash(true);
         setTimeout(() => setSaveFlash(false), 2500);
         setStallCountConfirmOpen(false);
+        if (ledgerSyncFailed) {
+          setRecomputeMsg('盤點已完成，但落差同步至流水帳失敗；請稍後手動補登流水帳。');
+          setTimeout(() => setRecomputeMsg(null), 8000);
+        }
       } catch {
         setRecomputeMsg('盤點送出失敗（網路或同步錯誤）。請稍後再試；輸入資料已保留在本機。');
         setTimeout(() => setRecomputeMsg(null), 8000);
@@ -992,7 +1003,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           aria-modal="true"
           aria-labelledby="stall-count-confirm-title"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setStallCountConfirmOpen(false);
+            if (e.target === e.currentTarget && !stallCountSubmitting) setStallCountConfirmOpen(false);
           }}
         >
           <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl p-5 sm:p-6 animate-in fade-in duration-200">
