@@ -60,6 +60,8 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingAfterText: string | null = null;
 const pendingDirtyKeys = new Set<DongshanStorageKey>();
 
+type StorageSnapshot = Partial<Record<DongshanStorageKey, string | null>>;
+
 export function getRemoteSyncStatus(): RemoteSyncStatus {
   return lastStatus;
 }
@@ -158,6 +160,29 @@ export function localExportStorageHasData(): boolean {
     }
   }
   return false;
+}
+
+function captureExportStorageSnapshot(): StorageSnapshot {
+  const snapshot: StorageSnapshot = {};
+  for (const k of DONGSHAN_EXPORT_STORAGE_KEYS) {
+    try {
+      snapshot[k] = localStorage.getItem(k);
+    } catch {
+      snapshot[k] = null;
+    }
+  }
+  return snapshot;
+}
+
+function storageKeysChangedBetweenSnapshots(
+  before: StorageSnapshot,
+  after: StorageSnapshot,
+): DongshanStorageKey[] {
+  const changed: DongshanStorageKey[] = [];
+  for (const k of DONGSHAN_EXPORT_STORAGE_KEYS) {
+    if ((before[k] ?? null) !== (after[k] ?? null)) changed.push(k);
+  }
+  return changed;
 }
 
 async function storageTick(): Promise<void> {
@@ -297,6 +322,14 @@ function scheduleDebouncedPush(beforeText: string, afterText: string): void {
   for (const k of storageKeysChangedBetweenBundleTexts(beforeText, afterText)) {
     pendingDirtyKeys.add(k);
   }
+  scheduleDebouncedPushWithDirty(afterText);
+}
+
+function scheduleDebouncedPushWithDirty(
+  afterText: string,
+  dirtyKeys?: readonly DongshanStorageKey[],
+): void {
+  for (const k of dirtyKeys ?? []) pendingDirtyKeys.add(k);
   pendingAfterText = afterText;
 
   if (debounceTimer != null) {
@@ -487,12 +520,16 @@ export async function withRemoteStorageWriteDeferPush<T>(fn: () => T | Promise<T
     return await Promise.resolve(fn());
   }
 
-  const before = timeSync('remote.write-defer.serialize-before', () => serializeDongshanDataBundle());
+  const before = timeSync('remote.write-defer.capture-before', () => captureExportStorageSnapshot());
   const out = await Promise.resolve(fn());
-  const after = timeSync('remote.write-defer.serialize-after', () => serializeDongshanDataBundle());
+  const after = timeSync('remote.write-defer.capture-after', () => captureExportStorageSnapshot());
+  const dirty = timeSync('remote.write-defer.diff-keys', () =>
+    storageKeysChangedBetweenSnapshots(before, after),
+  );
 
-  if (after !== before) {
-    scheduleDebouncedPush(before, after);
+  if (dirty.length > 0) {
+    const afterText = timeSync('remote.write-defer.serialize-after', () => serializeDongshanDataBundle());
+    scheduleDebouncedPushWithDirty(afterText, dirty);
   }
 
   return out;
