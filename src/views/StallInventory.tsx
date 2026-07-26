@@ -793,17 +793,6 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                 placeholder="例：請客、食材耗損、收銀短溢、零錢誤差…"
               />
             </label>
-            <label className="sm:col-span-2 flex items-start gap-2.5 rounded-lg border border-zinc-700/70 bg-zinc-950/50 px-3 py-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-zinc-600 accent-amber-500"
-                checked={syncGapToLedger}
-                onChange={(e) => setSyncGapToLedger(e.target.checked)}
-              />
-              <span className="text-xs text-zinc-400 leading-relaxed">
-                盤點完成時，將「認列金額」同步至流水帳（短收／損耗為支出，多收為店外收入）
-              </span>
-            </label>
           </div>
         </section>
       </div>
