@@ -352,6 +352,47 @@ export function listSalesRecordMeta(scopeId?: string): {
   return out.sort((a, b) => b.ymd.localeCompare(a.ymd));
 }
 
+export function listSalesRecordSnapshots(scopeId?: string): {
+  ymd: string;
+  completedAt: string;
+  completedByName?: string;
+  scopeId: string;
+  snapshot: SalesRecordDaySnapshot;
+}[] {
+  const s = loadStore();
+  const scopeFilter = scopeId?.trim();
+  const out: {
+    ymd: string;
+    completedAt: string;
+    completedByName?: string;
+    scopeId: string;
+    snapshot: SalesRecordDaySnapshot;
+  }[] = [];
+  for (const [key, row] of Object.entries(s.byDate)) {
+    let sid = HQ_SCOPE_ID;
+    let ymd = key;
+    const parsed = parseScopedStallDateKey(key);
+    if (parsed) {
+      sid = parsed.scopeId;
+      ymd = parsed.ymd;
+    } else if (isLegacyBareStallDateKey(key)) {
+      sid = HQ_SCOPE_ID;
+      ymd = key;
+    } else {
+      continue;
+    }
+    if (scopeFilter && sid !== scopeFilter) continue;
+    out.push({
+      ymd,
+      completedAt: row.completedAt,
+      completedByName: row.completedByName,
+      scopeId: sid,
+      snapshot: mergeSnapshotWithCatalog(row.snapshot),
+    });
+  }
+  return out.sort((a, b) => b.ymd.localeCompare(a.ymd));
+}
+
 /**
  * 與攤上扣庫相同邏輯，同步更新銷售紀錄內之「剩餘」（若該日有紀錄）。
  */

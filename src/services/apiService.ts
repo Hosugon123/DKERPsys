@@ -343,6 +343,9 @@ export const salesRecords = {
   async listMeta(scopeId?: string) {
     return withRemoteStorageRead(() => salesRecord.listSalesRecordMeta(scopeId));
   },
+  async listSnapshots(scopeId?: string) {
+    return withRemoteStorageRead(() => salesRecord.listSalesRecordSnapshots(scopeId));
+  },
   async save(ymd: string, snapshot: salesRecord.SalesRecordDaySnapshot, scopeId?: string): Promise<void> {
     return withUiRemoteStorageWrite(() => salesRecord.saveSalesRecord(ymd, snapshot, scopeId));
   },

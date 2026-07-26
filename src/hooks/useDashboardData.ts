@@ -104,27 +104,18 @@ export function useDashboardData(viewAsFranchiseeUserId: string | null) {
   const reloadSalesRecords = useCallback(async () => {
     setSalesRecordsReady(false);
     const scopeFilter = viewAsFranchiseeUserId ? `scope:franchisee:${viewAsFranchiseeUserId}` : undefined;
-    const meta = await timeAsync('dashboard.reload-sales-records.meta', () =>
-      salesRecords.listMeta(scopeFilter),
-    );
     const entries = await timeAsync(
       'dashboard.reload-sales-records.snapshots',
-      () =>
-        Promise.all(
-          meta.map(async (m) => {
-            const snap = await salesRecords.get(m.ymd, m.scopeId);
-            return snap ? { key: salesRecordCacheKey(m.ymd, m.scopeId), snap } : null;
-          }),
-        ),
-      { metaCount: meta.length },
+      () => salesRecords.listSnapshots(scopeFilter),
+      { scopeFilter },
     );
     const next: Record<string, SalesRecordDaySnapshot> = {};
     for (const row of entries) {
-      if (row) next[row.key] = row.snap;
+      next[salesRecordCacheKey(row.ymd, row.scopeId)] = row.snapshot;
     }
     reportPerfMetric({
       name: 'dashboard.reload-sales-records.count',
-      details: { metaCount: meta.length, snapshotCount: Object.keys(next).length, scopeFilter },
+      details: { snapshotCount: Object.keys(next).length, scopeFilter },
     });
     setSalesRecordMap(next);
     setSalesRecordsReady(true);
