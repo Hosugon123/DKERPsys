@@ -26,6 +26,7 @@ import {
   confirmPasswordResetWithOtp,
   requestPasswordResetByEmail,
 } from '../lib/passwordResetOtp';
+import { reportUserError } from '../lib/userErrorReport';
 import * as systemUsers from '../lib/systemUsersStorage';
 import { getStoreCode3, setStoreCode3 } from '../lib/storeCodeStorage';
 
@@ -49,8 +50,26 @@ export {
 } from './remoteSyncHub';
 
 // User-facing writes should update local state first and sync the full bundle in
-// the background, so button feedback is not blocked by a slow network PUT.
-const withUiRemoteStorageWrite = withRemoteStorageWriteDeferPush;
+// the background. If the local write fails, surface a copyable report immediately.
+async function withUiRemoteStorageWrite<T>(
+  fn: () => T | Promise<T>,
+  action = '資料儲存',
+): Promise<T> {
+  try {
+    return await withRemoteStorageWriteDeferPush(fn);
+  } catch (error) {
+    reportUserError({
+      title: '資料儲存失敗',
+      message: error instanceof Error && error.message.trim()
+        ? error.message
+        : '資料儲存時發生錯誤，請截圖或複製錯誤資訊後回報管理員。',
+      source: 'apiService',
+      action,
+      error,
+    });
+    throw error;
+  }
+}
 
 // ——— 流水帳 ———
 
@@ -70,13 +89,13 @@ export const ledger = {
     return withRemoteStorageRead(() => accountingLedger.listAccountingLedgerEntriesForScopeId(scopeId));
   },
   async append(input: accountingLedger.NewAccountingLedgerInput): Promise<accountingLedger.AccountingLedgerEntry> {
-    return withUiRemoteStorageWrite(() => accountingLedger.appendAccountingLedgerEntry(input));
+    return withUiRemoteStorageWrite(() => accountingLedger.appendAccountingLedgerEntry(input), '新增流水帳');
   },
   async update(id: string, patch: accountingLedger.AccountingLedgerUpdate): Promise<boolean> {
-    return withUiRemoteStorageWrite(() => accountingLedger.updateAccountingLedgerEntry(id, patch));
+    return withUiRemoteStorageWrite(() => accountingLedger.updateAccountingLedgerEntry(id, patch), '更新流水帳');
   },
   async remove(id: string): Promise<boolean> {
-    return withUiRemoteStorageWrite(() => accountingLedger.removeAccountingLedgerEntry(id));
+    return withUiRemoteStorageWrite(() => accountingLedger.removeAccountingLedgerEntry(id), '刪除流水帳');
   },
   async sumForMonth(ym: string, flow: accountingLedger.AccountingFlowType): Promise<number> {
     return withRemoteStorageRead(() => accountingLedger.sumAccountingLedgerForMonth(ym, flow));
@@ -105,6 +124,7 @@ export const orders = {
   async deleteOrderByIdFromAnyStore(orderId: string): Promise<boolean> {
     const ok = await withUiRemoteStorageWrite(() =>
       orderHistory.deleteOrderByIdFromAnyStore(orderId),
+      '刪除訂單',
     );
     if (ok && getStorageMode() === 'remote') void awaitRemotePushIdle();
     return ok;
@@ -115,23 +135,23 @@ export const orders = {
   ): Promise<void> {
     return withUiRemoteStorageWrite(() => {
       orderHistory.updateFranchiseManagementOrderStatus(id, status);
-    });
+    }, '更新加盟訂單狀態');
   },
   async updateOrderHistoryStatus(id: string, status: orderHistory.FranchiseOrderStatus): Promise<void> {
     return withUiRemoteStorageWrite(() => {
       orderHistory.updateOrderHistoryStatus(id, status);
-    });
+    }, '更新訂單狀態');
   },
   async updateOrderStatusInEitherStore(id: string, status: orderHistory.FranchiseOrderStatus): Promise<void> {
     return withUiRemoteStorageWrite(() => {
       orderHistory.updateOrderStatusInEitherStore(id, status);
-    });
+    }, '更新訂單狀態');
   },
   async updatePendingOrderLinesById(
     id: string,
     nextLines: orderHistory.OrderHistoryLine[],
   ): Promise<orderHistory.UpdateLinesResult> {
-    return withUiRemoteStorageWrite(() => orderHistory.updatePendingOrderLinesById(id, nextLines));
+    return withUiRemoteStorageWrite(() => orderHistory.updatePendingOrderLinesById(id, nextLines), '調整待出貨訂單貨量');
   },
   async updateEditableOrderLinesById(
     id: string,
@@ -141,13 +161,13 @@ export const orders = {
       const res = orderHistory.updateEditableOrderLinesById(id, nextLines);
       if (res.ok) stallInventory.syncStallOutAfterOrderLinesChanged(id);
       return res;
-    });
+    }, '調整訂單貨量');
   },
   async adminPatchOrderLineUnitPricesById(
     id: string,
     nextLines: orderHistory.OrderHistoryLine[],
   ): Promise<orderHistory.AdminPatchOrderUnitPricesResult> {
-    return withUiRemoteStorageWrite(() => orderHistory.adminPatchOrderLineUnitPricesById(id, nextLines));
+    return withUiRemoteStorageWrite(() => orderHistory.adminPatchOrderLineUnitPricesById(id, nextLines), '更正訂單批價');
   },
   async appendProcurementOrderEntry(params: {
     lines: orderHistory.OrderHistoryLine[];
@@ -189,7 +209,7 @@ export const orders = {
         procurementDeductionAppliedQtyByBasisOrderId:
           Object.keys(appliedQtyByBasisOrderId).length > 0 ? appliedQtyByBasisOrderId : undefined,
       });
-    });
+    }, '更新盤點快照');
   },
   async applyProcurementDeductionBasisAfterSubmit(params: {
     orderId: string;
@@ -258,7 +278,7 @@ export const orders = {
         stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
       }
       return { ok: true };
-    });
+    }, '套用扣除餘貨訂單');
   },
   async removeProcurementDeductionBasisFromOrder(params: {
     orderId: string;
@@ -280,7 +300,7 @@ export const orders = {
         );
       }
       return res;
-    });
+    }, '移除扣除餘貨訂單');
   },
   async setOrderStallCountStamp(
     orderId: string,
@@ -290,7 +310,7 @@ export const orders = {
       snapshot: import('../lib/salesRecordStorage').SalesRecordDaySnapshot;
     },
   ): Promise<boolean> {
-    return withUiRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields));
+    return withUiRemoteStorageWrite(() => orderHistory.setOrderStallCountStamp(orderId, fields), '寫入盤點完成紀錄');
   },
   async commitStallInventoryComplete(params: {
     orderId: string;
@@ -300,8 +320,9 @@ export const orders = {
     stallDaySnap: stallInventory.DaySnapshot;
     scopeId?: string;
   }): Promise<stallInventory.CommitStallInventoryCompleteResult> {
-    const res = await withRemoteStorageWriteDeferPush(() =>
+    const res = await withUiRemoteStorageWrite(() =>
       stallInventory.commitStallInventoryComplete(params),
+      '完成攤上盤點',
     );
     if (res.ok && getStorageMode() === 'remote') {
       void awaitRemotePushIdle();
@@ -316,7 +337,7 @@ export const orders = {
       const inner = orderHistory.updateStallCountSnapshotByOrderId(orderId, snapshot);
       if (inner.ok) stallInventory.syncBasisDayFromOrderSnapshot(orderId);
       return inner;
-    });
+    }, '送出叫貨訂單');
     if (res.ok && getStorageMode() === 'remote') void awaitRemotePushIdle();
     return res;
   },
@@ -324,7 +345,7 @@ export const orders = {
     orderId: string,
     orderDateYmd: string,
   ): Promise<orderHistory.UpdateOrderDateYmdResult> {
-    return withUiRemoteStorageWrite(() => orderHistory.updateOrderDateYmdByOrderId(orderId, orderDateYmd));
+    return withUiRemoteStorageWrite(() => orderHistory.updateOrderDateYmdByOrderId(orderId, orderDateYmd), '更新訂單日期');
   },
   async listOrdersWithStallCountCompleted(): Promise<orderHistory.OrderHistoryEntry[]> {
     return withRemoteStorageRead(() => orderHistory.listOrdersWithStallCountCompleted());
@@ -338,7 +359,7 @@ export const salesRecords = {
     return withRemoteStorageRead(() => salesRecord.getSalesRecord(ymd, scopeId));
   },
   async patchRevenueGapReason(ymd: string, reason: string, scopeId?: string): Promise<void> {
-    return withUiRemoteStorageWrite(() => salesRecord.patchSalesRecordRevenueGapReason(ymd, reason, scopeId));
+    return withUiRemoteStorageWrite(() => salesRecord.patchSalesRecordRevenueGapReason(ymd, reason, scopeId), '更新銷售落差原因');
   },
   async listMeta(scopeId?: string) {
     return withRemoteStorageRead(() => salesRecord.listSalesRecordMeta(scopeId));
@@ -347,7 +368,7 @@ export const salesRecords = {
     return withRemoteStorageRead(() => salesRecord.listSalesRecordSnapshots(scopeId));
   },
   async save(ymd: string, snapshot: salesRecord.SalesRecordDaySnapshot, scopeId?: string): Promise<void> {
-    return withUiRemoteStorageWrite(() => salesRecord.saveSalesRecord(ymd, snapshot, scopeId));
+    return withUiRemoteStorageWrite(() => salesRecord.saveSalesRecord(ymd, snapshot, scopeId), '儲存銷售紀錄');
   },
 };
 
@@ -362,8 +383,8 @@ export const stallInventoryApi = {
     scopeId?: string,
     options?: { deferRemotePush?: boolean },
   ): Promise<void> {
-    const write = options?.deferRemotePush ? withRemoteStorageWriteDeferPush : withUiRemoteStorageWrite;
-    return write(() => stallInventory.saveDay(ymdStr, snap, scopeId));
+    void options;
+    return withUiRemoteStorageWrite(() => stallInventory.saveDay(ymdStr, snap, scopeId), '儲存攤上盤點');
   },
   async loadDay(ymdStr: string, scopeId?: string): Promise<stallInventory.DaySnapshot> {
     return withRemoteStorageRead(() => stallInventory.loadDay(ymdStr, scopeId));

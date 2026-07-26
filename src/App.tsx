@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState, useDeferredValue, lazy, Suspense, type ReactNode } from 'react';
 import DeployUpdateBanner from './components/DeployUpdateBanner';
+import GlobalErrorReporter from './components/GlobalErrorReporter';
 import PullToRefresh from './components/PullToRefresh';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
 import { useMobileSidebarSwipe } from './hooks/useMobileSidebarSwipe';
@@ -267,18 +268,18 @@ export default function App() {
   };
   if (!authReady) {
     return (
-      <>
+      <GlobalErrorReporter currentView="loading">
         <div className="flex min-h-[100dvh] items-center justify-center bg-ds-root text-ds-muted">
           載入中…
         </div>
         <DeployUpdateBanner />
-      </>
+      </GlobalErrorReporter>
     );
   }
 
   if (!session) {
     return (
-      <>
+      <GlobalErrorReporter currentView="login">
         <LoginScreen
           onSuccess={() => {
             const s = readSession();
@@ -286,12 +287,13 @@ export default function App() {
           }}
         />
         <DeployUpdateBanner />
-      </>
+      </GlobalErrorReporter>
     );
   }
 
   return (
-    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 bg-ds-root font-sans text-ds-primary overflow-hidden selection:bg-amber-600/30">
+    <GlobalErrorReporter currentView={currentView} loginId={session.loginId}>
+      <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 bg-ds-root font-sans text-ds-primary overflow-hidden selection:bg-amber-600/30">
       <Sidebar
         currentView={currentView}
         setCurrentView={setCurrentView}
@@ -321,6 +323,7 @@ export default function App() {
         </PullToRefresh>
       </div>
       <DeployUpdateBanner />
-    </div>
+      </div>
+    </GlobalErrorReporter>
   );
 }
