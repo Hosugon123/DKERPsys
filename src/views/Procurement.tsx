@@ -18,7 +18,7 @@ import { AUTH_SESSION_CHANGED_EVENT } from '../lib/authSession';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
-import { orders as ordersApi, ledger as ledgerApi } from '../services/apiService';
+import { orders as ordersApi, ledger as ledgerApi, procurementFavorites as procurementFavoritesApi } from '../services/apiService';
 import { buildProcurementLedgerDraftInput } from '../lib/procurementLedgerDraft';
 import {
   displayOrderCreatedByLabel,
@@ -28,9 +28,6 @@ import {
   type OrderHistoryEntry,
 } from '../lib/orderHistoryStorage';
 import {
-  listProcurementFavorites,
-  addProcurementFavorite,
-  removeProcurementFavorite,
   cartFromFavorite,
   type FavoriteOrder,
 } from '../lib/procurementFavoritesStorage';
@@ -124,6 +121,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   const [favorites, setFavorites] = useState<FavoriteOrder[]>([]);
   const [newFavoriteName, setNewFavoriteName] = useState('');
   const [favoriteError, setFavoriteError] = useState('');
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
   /** 手動購物車「扣除盤點剩餘」流程之錯誤提示（不依賴常用訂單） */
   const [manualBasisDeduceError, setManualBasisDeduceError] = useState('');
   /** 第一次點刪除後記錄 id，需再點同列刪除才執行；幾秒後自動取消。 */
@@ -180,7 +178,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   );
 
   const syncFavorites = useCallback(() => {
-    setFavorites(listProcurementFavorites());
+    void procurementFavoritesApi.list().then(setFavorites);
   }, []);
 
   useEffect(() => {
@@ -608,24 +606,44 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       setDeleteArmedId(f.id);
       return;
     }
-    removeProcurementFavorite(f.id);
-    setDeleteArmedId(null);
+    void (async () => {
+      setFavoriteBusy(true);
+      try {
+        await procurementFavoritesApi.remove(f.id);
+        setDeleteArmedId(null);
+        syncFavorites();
+      } catch {
+        setFavoriteError('常用訂單刪除失敗，請稍後再試或回報管理員。');
+      } finally {
+        setFavoriteBusy(false);
+      }
+    })();
   };
 
   const saveAsFavorite = () => {
-    if (totalCount === 0) return;
+    if (totalCount === 0 || favoriteBusy) return;
     setFavoriteError('');
-    const r = addProcurementFavorite(
-      newFavoriteName || `常用 ${new Date().toLocaleDateString('zh-TW', { month: 'short', day: 'numeric' })}`,
-      cart
-    );
-    if (r.ok) {
-      setNewFavoriteName('');
-    } else if (r.reason === 'limit') {
-      setFavoriteError('常用訂單已達上限，請刪除一筆再儲存。');
-    } else {
-      setFavoriteError('目前購物車沒有有效品項。');
-    }
+    void (async () => {
+      setFavoriteBusy(true);
+      try {
+        const r = await procurementFavoritesApi.add(
+          newFavoriteName || `常用 ${new Date().toLocaleDateString('zh-TW', { month: 'short', day: 'numeric' })}`,
+          cart
+        );
+        if (r.ok) {
+          setNewFavoriteName('');
+          syncFavorites();
+        } else if (r.reason === 'limit') {
+          setFavoriteError('常用訂單已達上限，請刪除一筆再儲存。');
+        } else {
+          setFavoriteError('目前購物車沒有有效品項。');
+        }
+      } catch {
+        setFavoriteError('常用訂單儲存失敗，請稍後再試或回報管理員。');
+      } finally {
+        setFavoriteBusy(false);
+      }
+    })();
   };
 
   if (isSuperAdmin && view === 'catalog') {
@@ -963,10 +981,10 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={saveAsFavorite}
-                disabled={totalCount === 0}
+                disabled={totalCount === 0 || favoriteBusy}
                 className="shrink-0 h-11 px-4 rounded-xl border-2 border-amber-600/50 bg-amber-600/20 text-amber-200 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed active:bg-amber-600/30"
               >
-                儲存目前訂單
+                {favoriteBusy ? '儲存中…' : '儲存目前訂單'}
               </button>
             </div>
             {favoriteError && (
@@ -1068,11 +1086,13 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                         <button
                           type="button"
                           onClick={() => onDeleteFavoriteClick(f)}
+                          disabled={favoriteBusy}
                           className={cn(
                             'min-h-9 min-w-9 p-0 rounded-lg border flex items-center justify-center',
                             deleteArmedId === f.id
                               ? 'border-rose-500/70 bg-rose-600/20 text-rose-300 hover:bg-rose-600/30'
-                              : 'border-zinc-700 text-zinc-500 hover:text-rose-400 hover:border-rose-800'
+                              : 'border-zinc-700 text-zinc-500 hover:text-rose-400 hover:border-rose-800',
+                            favoriteBusy && 'opacity-50 cursor-not-allowed'
                           )}
                           title={deleteArmedId === f.id ? '再按以確認刪除' : '刪除（需再按一次確認）'}
                           aria-label={

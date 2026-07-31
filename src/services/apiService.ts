@@ -6,7 +6,13 @@
  * - remote：啟動時由 {@link initRemoteSyncOnAppLoad} 先 GET 合併本地；寫入後推送整包。
  */
 import { getStorageMode, type StorageMode } from './storageMode';
-import { awaitRemotePushIdle, withRemoteStorageRead, withRemoteStorageWrite, withRemoteStorageWriteDeferPush } from './remoteSyncHub';
+import {
+  awaitRemotePushIdle,
+  pushRemoteBundle,
+  withRemoteStorageRead,
+  withRemoteStorageWrite,
+  withRemoteStorageWriteDeferPush,
+} from './remoteSyncHub';
 import { resolveOrderStallStorageScopeId } from '../lib/scopedStallDateKey';
 import * as accountingLedger from '../lib/accountingLedgerStorage';
 import * as orderHistory from '../lib/orderHistoryStorage';
@@ -14,11 +20,13 @@ import * as stallInventory from '../lib/stallInventoryStorage';
 import * as salesRecord from '../lib/salesRecordStorage';
 import * as userCatalog from '../lib/userCatalogState';
 import * as costStructure from '../lib/costStructureStorage';
+import * as procurementFavoritesStorage from '../lib/procurementFavoritesStorage';
 import {
   buildDongshanDataBundle,
   importDongshanDataBundle,
   serializeDongshanDataBundle,
   type DongshanDataBundleV1,
+  type DongshanStorageKey,
   type ImportBundleResult,
 } from '../lib/appDataBundle';
 import * as credentialStorage from '../lib/credentialStorage';
@@ -57,6 +65,37 @@ async function withUiRemoteStorageWrite<T>(
 ): Promise<T> {
   try {
     return await withRemoteStorageWriteDeferPush(fn);
+  } catch (error) {
+    reportUserError({
+      title: '資料儲存失敗',
+      message: error instanceof Error && error.message.trim()
+        ? error.message
+        : '資料儲存時發生錯誤，請截圖或複製錯誤資訊後回報管理員。',
+      source: 'apiService',
+      action,
+      error,
+    });
+    throw error;
+  }
+}
+
+async function withUiRemoteStorageWriteNow<T>(
+  fn: () => T | Promise<T>,
+  action = '資料儲存',
+  dirtyKeys?: readonly DongshanStorageKey[],
+): Promise<T> {
+  try {
+    if (getStorageMode() !== 'remote') {
+      return await withRemoteStorageWrite(fn);
+    }
+
+    const before = serializeDongshanDataBundle();
+    const out = await Promise.resolve(fn());
+    const after = serializeDongshanDataBundle();
+    if (after !== before) {
+      await pushRemoteBundle(after, dirtyKeys);
+    }
+    return out;
   } catch (error) {
     reportUserError({
       title: '資料儲存失敗',
@@ -392,6 +431,31 @@ export const stallInventoryApi = {
 };
 
 export type { DaySnapshot } from '../lib/stallInventoryStorage';
+
+export const procurementFavorites = {
+  async list(): Promise<procurementFavoritesStorage.FavoriteOrder[]> {
+    return withRemoteStorageRead(() => procurementFavoritesStorage.listProcurementFavorites());
+  },
+  async add(
+    name: string,
+    cart: Record<string, number>,
+  ): Promise<ReturnType<typeof procurementFavoritesStorage.addProcurementFavorite>> {
+    return withUiRemoteStorageWriteNow(
+      () => procurementFavoritesStorage.addProcurementFavorite(name, cart),
+      '儲存常用訂單',
+      ['dongshan_procurement_favorites_v1'],
+    );
+  },
+  async remove(id: string): Promise<void> {
+    return withUiRemoteStorageWriteNow(
+      () => procurementFavoritesStorage.removeProcurementFavorite(id),
+      '刪除常用訂單',
+      ['dongshan_procurement_favorites_v1'],
+    );
+  },
+};
+
+export type { FavoriteOrder } from '../lib/procurementFavoritesStorage';
 
 export type {
   OrderHistoryEntry,
