@@ -8,7 +8,7 @@ import {
   memo,
   type MouseEvent,
 } from 'react';
-import { Package, X, Minus, Plus, ListOrdered, Store } from 'lucide-react';
+import { Package, X, Minus, Plus, ListOrdered, Store, ChevronDown } from 'lucide-react';
 import {
   DashboardMonthCustomRangePicker,
   resolveDashboardPeriodYmd,
@@ -19,6 +19,7 @@ import {
   formatSlashYmdWithWeekdayFromYmd,
   formatSlashDateTimeWithWeekdayFromIso,
   orderMatchesActiveWeekdaysFromYmd,
+  toLocalYmdDashed,
   ymdDashToSlash,
 } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
@@ -127,6 +128,21 @@ type OrderFinancialSummary = {
   remainAmount: number | null;
   countedRevenueAmount: number | null;
   actualIncomeAmount: number | null;
+};
+
+type TodayStoreOrderSummaryLine = {
+  productId: string;
+  name: string;
+  unit: string;
+  qty: number;
+  amount: number;
+};
+
+type TodayStoreOrderSummary = {
+  storeLabel: string;
+  orderCount: number;
+  procurementAmount: number;
+  lines: TodayStoreOrderSummaryLine[];
 };
 
 function toOrderRowFromMgmt(
@@ -386,6 +402,167 @@ function buildStallFinancialFields(
     countedRevenueAmount: stall.soldAtRetail ?? stall.shouldRevenue ?? null,
     actualIncomeAmount: stall.actualRevenue,
   };
+}
+
+function orderStoreLabelForSummary(order: RawOrder): string {
+  if (isOrderHistoryEntry(order)) return resolveOrderStoreLabel(order);
+  return resolveOrderStoreLabel({
+    storeLabel: order.storeLabel,
+    actorRole: 'admin',
+    actorUserId: order.actorUserId,
+    scopeId: order.scopeId,
+  });
+}
+
+export function buildTodayStoreOrderSummaries(rawOrders: RawOrder[], todayYmd: string): TodayStoreOrderSummary[] {
+  const byStore = new Map<
+    string,
+    {
+      storeLabel: string;
+      orderCount: number;
+      procurementAmount: number;
+      lineMap: Map<string, TodayStoreOrderSummaryLine>;
+    }
+  >();
+
+  for (const order of rawOrders) {
+    if (effectiveOrderDateYmd(order) !== todayYmd) continue;
+    if (order.status === '已取消') continue;
+    const storeLabel = orderStoreLabelForSummary(order);
+    const bucket =
+      byStore.get(storeLabel) ??
+      {
+        storeLabel,
+        orderCount: 0,
+        procurementAmount: 0,
+        lineMap: new Map<string, TodayStoreOrderSummaryLine>(),
+      };
+    bucket.orderCount += 1;
+    bucket.procurementAmount = Math.round((bucket.procurementAmount + (Number(order.totalAmount) || 0)) * 100) / 100;
+
+    for (const line of order.lines) {
+      const qty = roundProcurementQty(Number(line.qty) || 0);
+      if (qty <= 0) continue;
+      const key = line.productId || `${line.name}\u001f${line.unit}`;
+      const prev = bucket.lineMap.get(key);
+      const amount = Math.round((Number(line.unitPrice) || 0) * qty * 100) / 100;
+      if (prev) {
+        prev.qty = roundProcurementQty(prev.qty + qty);
+        prev.amount = Math.round((prev.amount + amount) * 100) / 100;
+      } else {
+        bucket.lineMap.set(key, {
+          productId: line.productId,
+          name: line.name,
+          unit: line.unit,
+          qty,
+          amount,
+        });
+      }
+    }
+
+    byStore.set(storeLabel, bucket);
+  }
+
+  return Array.from(byStore.values())
+    .map((bucket) => ({
+      storeLabel: bucket.storeLabel,
+      orderCount: bucket.orderCount,
+      procurementAmount: bucket.procurementAmount,
+      lines: Array.from(bucket.lineMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')),
+    }))
+    .sort((a, b) => {
+      if (a.storeLabel === HQ_STORE_LABEL && b.storeLabel !== HQ_STORE_LABEL) return -1;
+      if (a.storeLabel !== HQ_STORE_LABEL && b.storeLabel === HQ_STORE_LABEL) return 1;
+      return a.storeLabel.localeCompare(b.storeLabel, 'zh-Hant');
+    });
+}
+
+function TodayStoreOrderSummaryPanel({
+  summaries,
+  todayYmd,
+}: {
+  summaries: TodayStoreOrderSummary[];
+  todayYmd: string;
+}) {
+  const totalOrderCount = summaries.reduce((sum, row) => sum + row.orderCount, 0);
+  const totalProcurementAmount = Math.round(
+    summaries.reduce((sum, row) => sum + row.procurementAmount, 0) * 100,
+  ) / 100;
+
+  return (
+    <details className="group rounded-2xl border border-zinc-800/90 bg-zinc-900/35">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden sm:p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Package className="shrink-0 text-amber-500" size={18} />
+            <h3 className="text-lg font-semibold text-[#f5f2ed]">今日各店總和訂單</h3>
+            <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5 text-xs text-zinc-400">
+              {formatSlashYmdWithWeekdayFromYmd(todayYmd)}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">
+            共 {summaries.length} 家店、{totalOrderCount} 筆訂單，叫貨金額 $ {totalProcurementAmount.toLocaleString('zh-TW')}
+          </p>
+        </div>
+        <ChevronDown
+          className="shrink-0 text-zinc-500 transition-transform group-open:rotate-180"
+          size={20}
+          aria-hidden
+        />
+      </summary>
+
+      <div className="border-t border-zinc-800/80 p-3 sm:p-4">
+        {summaries.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/30 px-4 py-8 text-center text-sm text-zinc-500">
+            今天尚無可彙總的未取消訂單。
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {summaries.map((store) => (
+              <section
+                key={store.storeLabel}
+                className="overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/35"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/80 px-3 py-3">
+                  <div className="min-w-0">
+                    <h4 className="truncate text-base font-semibold text-[#f5f2ed]">{store.storeLabel}</h4>
+                    <p className="mt-0.5 text-xs text-zinc-500">{store.orderCount} 筆訂單</p>
+                  </div>
+                  <div className="text-right text-sm tabular-nums text-amber-400">
+                    $ {store.procurementAmount.toLocaleString('zh-TW')}
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-zinc-900 text-xs text-zinc-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">品項</th>
+                        <th className="px-3 py-2 text-right font-medium">總數量</th>
+                        <th className="px-3 py-2 text-right font-medium">叫貨金額</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/70">
+                      {store.lines.map((line) => (
+                        <tr key={line.productId || `${line.name}-${line.unit}`}>
+                          <td className="px-3 py-2 text-zinc-200">{line.name}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-amber-200">
+                            {fmtLineQty(line.qty)} {line.unit}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                            $ {line.amount.toLocaleString('zh-TW')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
 }
 
 /** 調整貨量時列小計用：員工顯示預估零售單價，其餘身分用訂單批價。 */
@@ -772,6 +949,11 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   );
 
   const rawById = useMemo(() => new Map(rawList.map((r) => [r.id, r])), [rawList]);
+  const todayOrderYmd = useMemo(() => toLocalYmdDashed(new Date().toISOString()), []);
+  const todayStoreOrderSummaries = useMemo(
+    () => buildTodayStoreOrderSummaries(rawList, todayOrderYmd),
+    [rawList, todayOrderYmd],
+  );
 
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
   const catalogItemsForOrderDetail = useSupplyCatalogItems(userRole);
@@ -1519,6 +1701,8 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
           )}
         </div>
       </section>
+
+      <TodayStoreOrderSummaryPanel summaries={todayStoreOrderSummaries} todayYmd={todayOrderYmd} />
 
       <div className="space-y-4">
         {filteredOrders.length === 0 && (
