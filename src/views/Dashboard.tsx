@@ -61,7 +61,9 @@ import {
   type SupplyRetailView,
 } from '../lib/supplyCatalog';
 import {
+  getStallDisplayActualRevenue,
   getStallDisplayActualRevenueIfEntered,
+  getStallDisplayRetailEstAndRemain,
   getStallDisplaySoldAtRetail,
 } from '../lib/orderStallDisplayRevenue';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
@@ -113,6 +115,7 @@ type ProductRevenueRow = { id: number; name: string; revenue: number; qty: numbe
 type DirectStallGapRangeMode = DashboardPeriodMode;
 /** 銷售數據區間：none＝不篩日期（全部已建檔營業日） */
 type StallSalesBoardRangeMode = { kind: 'none' } | DashboardPeriodMode;
+type BossStallSalesScope = 'direct' | 'all';
 type ExpenseShareRow = { id: number; name: string; amount: number; pct: number };
 const RANK_DEFAULT_LIMIT = 10;
 const STALL_SALES_BOARD_PAGE_SIZE = 10;
@@ -412,6 +415,88 @@ function accumulateSoldQtyByProductFromSnapshot(
     if (c.remainUnfilled) continue;
     dayMap.set(id, (dayMap.get(id) ?? 0) + c.sold);
   }
+}
+
+function franchiseOwnerUserIdFromOrder(o: Pick<OrderHistoryEntry, 'scopeId' | 'actorUserId' | 'actorRole'>): string | undefined {
+  const scope = resolveOrderDataScopeId(o);
+  const fromScope = scope.match(/^scope:franchisee:(.+)$/)?.[1]?.trim();
+  if (fromScope) return fromScope;
+  if (o.actorRole === 'franchisee') return o.actorUserId?.trim() || undefined;
+  return undefined;
+}
+
+function retailViewForStallOrder(o: OrderHistoryEntry): {
+  retailView: SupplyRetailView;
+  franchiseeOwnerUserId?: string;
+} {
+  if (orderIsFranchiseBusinessScoped(o)) {
+    return {
+      retailView: FRANCHISE_STALL_VIEW,
+      franchiseeOwnerUserId: franchiseOwnerUserIdFromOrder(o),
+    };
+  }
+  return { retailView: HQ_STALL_VIEW };
+}
+
+export function buildAllStoreStallEconomicsByYmd(orders: OrderHistoryEntry[]): Map<string, DirectStallDayEconomics> {
+  const acc = new Map<
+    string,
+    {
+      estTotal: number;
+      remainValue: number;
+      expectedRetail: number;
+      actualSum: number;
+      actualParts: number;
+      notes: Set<string>;
+    }
+  >();
+
+  for (const o of orders) {
+    if (!orderCountsTowardStallEconomics(o)) continue;
+    const ymd = stallSalesBoardRowYmd(o);
+    if (!ymd) continue;
+    const { retailView } = retailViewForStallOrder(o);
+    const est = getStallDisplayRetailEstAndRemain(o, retailView);
+    const expected = getStallDisplaySoldAtRetail(o, retailView);
+    if (!est || expected === null) continue;
+    const actual = getStallDisplayActualRevenue(o);
+    const bucket =
+      acc.get(ymd) ??
+      {
+        estTotal: 0,
+        remainValue: 0,
+        expectedRetail: 0,
+        actualSum: 0,
+        actualParts: 0,
+        notes: new Set<string>(),
+      };
+    bucket.estTotal += est.estTotal;
+    bucket.remainValue += est.remGoodsValue;
+    bucket.expectedRetail += expected;
+    if (actual !== null && Number.isFinite(actual)) {
+      bucket.actualSum += actual;
+      bucket.actualParts += 1;
+    }
+    const snap = o.stallCountSnapshot ? mergeSalesRecordWithCatalog(o.stallCountSnapshot) : null;
+    const note = snap?.revenueGapReason?.trim();
+    if (note) bucket.notes.add(`${resolveOrderStoreLabel(o)}：${note}`);
+    acc.set(ymd, bucket);
+  }
+
+  const map = new Map<string, DirectStallDayEconomics>();
+  for (const [ymd, bucket] of acc) {
+    const actual = bucket.actualParts > 0 ? bucket.actualSum : null;
+    map.set(ymd, {
+      ymd,
+      estTotal: bucket.estTotal,
+      remainValue: bucket.remainValue,
+      expectedRetail: bucket.expectedRetail,
+      actual,
+      gap: actual !== null ? actual - bucket.expectedRetail : null,
+      note: Array.from(bucket.notes).join(' · '),
+    });
+  }
+  return map;
 }
 
 function formatWeekdaySoldQty(n: number): string {
@@ -967,6 +1052,7 @@ export default function Dashboard({
   const [stallSalesBoardRange, setStallSalesBoardRange] = useState<StallSalesBoardRangeMode>({
     kind: 'none',
   });
+  const [bossStallSalesScope, setBossStallSalesScope] = useState<BossStallSalesScope>('direct');
   const [stallSalesBoardPage, setStallSalesBoardPage] = useState(1);
   /** 對照「本週／上週／上上週…」之同名星期：0＝週一 … 6＝週日 */
   /** null＝不篩星期，表格為區間內逐日；0–6＝週一…週日同名星期對照 */
@@ -1026,7 +1112,7 @@ export default function Dashboard({
   useEffect(() => {
     setStallBoardFocusYmd(null);
     setStallSalesBoardPage(1);
-  }, [weekdayChainFocusIdx, stallSalesBoardRange]);
+  }, [weekdayChainFocusIdx, stallSalesBoardRange, bossStallSalesScope]);
 
   useEffect(() => {
     if (!stallSalesBoardOpen) {
@@ -1129,9 +1215,20 @@ export default function Dashboard({
     );
   }, [effectiveOrders, franchiseStallSalesBoardOwnerUserId, orderTick, stallSalesBoardOpen]);
 
+  const bossAllStoreSalesBoard = realIsAdmin && !viewAsFranchisee && bossStallSalesScope === 'all';
+
+  const allStoreEconomicsByYmd = useMemo(() => {
+    if (!stallSalesBoardOpen || !bossAllStoreSalesBoard) return new Map<string, DirectStallDayEconomics>();
+    return timeSync('dashboard.all-store-sales.build-economics', () =>
+      buildAllStoreStallEconomicsByYmd(effectiveOrders),
+    );
+  }, [bossAllStoreSalesBoard, effectiveOrders, orderTick, stallSalesBoardOpen]);
+
   const stallSalesEconomicsByYmd = franchiseStallSalesBoardOwnerUserId
     ? franchiseStoreEconomicsByYmd
-    : hqDirectStallEconomicsByYmd;
+    : bossAllStoreSalesBoard
+      ? allStoreEconomicsByYmd
+      : hqDirectStallEconomicsByYmd;
 
   type StallWeekdayChainRow = {
     periodLabel: string;
@@ -1292,7 +1389,7 @@ export default function Dashboard({
     const todayStr = toYmd(new Date());
     const { startYmd, endYmd } = stallSalesBoardResolvedYmd;
     const filterByRange = stallSalesBoardRange.kind !== 'none';
-    const retailView: SupplyRetailView = franchiseStallSalesBoardOwnerUserId
+    const defaultRetailView: SupplyRetailView = franchiseStallSalesBoardOwnerUserId
       ? FRANCHISE_STALL_VIEW
       : HQ_STALL_VIEW;
     const franchiseId = franchiseStallSalesBoardOwnerUserId;
@@ -1310,7 +1407,7 @@ export default function Dashboard({
     if (qualifyingYmds.length === 0) {
       return {
         dayCount: 0,
-        rows: [] as { id: string; name: string; avg: number; max: number; min: number }[],
+        rows: [] as { id: string; name: string; sum: number; avg: number; max: number; min: number }[],
       };
     }
 
@@ -1319,7 +1416,10 @@ export default function Dashboard({
 
     for (const o of effectiveOrders) {
       if (!orderCountsTowardStallEconomics(o)) continue;
-      if (franchiseId) {
+      const allStores = bossAllStoreSalesBoard;
+      if (allStores) {
+        // BOSS「所有店鋪加總」納入每個 scope，並依訂單所屬店鋪套用直營/加盟零售單價。
+      } else if (franchiseId) {
         if (!orderMatchesFranchiseeBusinessDash(o, franchiseId)) continue;
       } else if (!orderIsHeadquartersDirectScoped(o)) {
         continue;
@@ -1328,23 +1428,28 @@ export default function Dashboard({
       if (!ymd || !qualifying.has(ymd)) continue;
       const snap = stallSnapshotMergedFromOrder(o, getSalesRecordCached);
       if (!snap) continue;
+      const { retailView, franchiseeOwnerUserId } = allStores
+        ? retailViewForStallOrder(o)
+        : { retailView: defaultRetailView, franchiseeOwnerUserId: franchiseId ?? undefined };
       let dayMap = perDay.get(ymd);
       if (!dayMap) {
         dayMap = new Map();
         perDay.set(ymd, dayMap);
       }
-      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView, franchiseId ?? undefined);
+      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView, franchiseeOwnerUserId);
     }
 
-    for (const ymd of qualifyingYmds) {
-      if (perDay.has(ymd)) continue;
-      const salesScope = franchiseId ? `scope:franchisee:${franchiseId}` : HQ_SCOPE_ID;
-      const raw = getSalesRecordCached(ymd, salesScope);
-      if (!raw) continue;
-      const snap = mergeSalesRecordWithCatalog(raw);
-      const dayMap = new Map<string, number>();
-      accumulateSoldQtyByProductFromSnapshot(dayMap, snap, retailView, franchiseId ?? undefined);
-      if (dayMap.size > 0) perDay.set(ymd, dayMap);
+    if (!bossAllStoreSalesBoard) {
+      for (const ymd of qualifyingYmds) {
+        if (perDay.has(ymd)) continue;
+        const salesScope = franchiseId ? `scope:franchisee:${franchiseId}` : HQ_SCOPE_ID;
+        const raw = getSalesRecordCached(ymd, salesScope);
+        if (!raw) continue;
+        const snap = mergeSalesRecordWithCatalog(raw);
+        const dayMap = new Map<string, number>();
+        accumulateSoldQtyByProductFromSnapshot(dayMap, snap, defaultRetailView, franchiseId ?? undefined);
+        if (dayMap.size > 0) perDay.set(ymd, dayMap);
+      }
     }
 
     const allIds = new Set<string>();
@@ -1353,19 +1458,19 @@ export default function Dashboard({
     }
 
     const n = qualifyingYmds.length;
-    const rows: { id: string; name: string; avg: number; max: number; min: number }[] = [];
+    const rows: { id: string; name: string; sum: number; avg: number; max: number; min: number }[] = [];
     for (const id of allIds) {
-      const item = getSupplyItem(id, retailView, franchiseId ?? undefined);
+      const item = getSupplyItem(id, defaultRetailView, franchiseId ?? undefined) ?? getSupplyItem(id, FRANCHISE_STALL_VIEW);
       const name = item?.name ?? id;
       const series = qualifyingYmds.map((ymd) => perDay.get(ymd)?.get(id) ?? 0);
       const sum = series.reduce((s, v) => s + v, 0);
       const avg = sum / n;
       const max = Math.max(...series);
       const min = Math.min(...series);
-      rows.push({ id, name, avg, max, min });
+      rows.push({ id, name, sum, avg, max, min });
     }
     const catalogOrderIndex = new Map<string, number>();
-    getAllSupplyItems(retailView, franchiseId ?? undefined)
+    getAllSupplyItems(defaultRetailView, franchiseId ?? undefined)
       .filter((item) => !isConsumableItem(item))
       .forEach((item, index) => catalogOrderIndex.set(item.id, index));
     rows.sort((a, b) => {
@@ -1382,6 +1487,7 @@ export default function Dashboard({
     stallSalesBoardResolvedYmd,
     effectiveOrders,
     franchiseStallSalesBoardOwnerUserId,
+    bossAllStoreSalesBoard,
     orderTick,
     getSalesRecordCached,
   ]);
@@ -2082,7 +2188,7 @@ export default function Dashboard({
           >
             <div className="min-w-0 flex-1">
               <h3 className="text-base sm:text-lg font-medium text-zinc-100">
-                {showFranchiseStallSalesBoard ? '本店銷售數據' : '直營店銷售數據'}
+                {showFranchiseStallSalesBoard ? '本店銷售數據' : realIsAdmin && !viewAsFranchisee ? '銷售數據' : '直營店銷售數據'}
               </h3>
             </div>
             <ChevronDown
@@ -2092,8 +2198,35 @@ export default function Dashboard({
           </summary>
           {stallSalesBoardOpen ? (
           <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-4 border-t border-zinc-800/80 space-y-4">
-            <StallRevenueBaselinePanel scopeId={stallRevenueBaselineScopeId} />
+            {!bossAllStoreSalesBoard ? <StallRevenueBaselinePanel scopeId={stallRevenueBaselineScopeId} /> : null}
             <div className="rounded-xl border border-zinc-600/80 bg-zinc-900/70 p-3 sm:p-4 space-y-3 ring-1 ring-amber-600/10">
+              {realIsAdmin && !viewAsFranchisee ? (
+                <div className="space-y-2">
+                  <span className="text-sm font-medium text-zinc-100">查閱範圍</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ['direct', '直營店'],
+                      ['all', '所有店鋪加總'],
+                    ].map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-pressed={bossStallSalesScope === id}
+                        onClick={() => setBossStallSalesScope(id as BossStallSalesScope)}
+                        className={cn(
+                          'min-h-9 rounded-lg border px-3 text-sm font-medium transition-colors',
+                          bossStallSalesScope === id
+                            ? 'border-amber-500/45 bg-amber-600/20 text-amber-200'
+                            : 'border-zinc-700 bg-zinc-950 text-zinc-400 hover:border-amber-600/35',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <span className="text-sm font-medium text-zinc-100">資料區間</span>
@@ -2273,14 +2406,20 @@ export default function Dashboard({
                               {eco?.gap == null ? '—' : moneySignedInt(eco.gap)}
                             </td>
                             <td className="px-3 py-2 align-middle">
-                              <DirectStallGapReasonCell
-                                ymd={row.ymd}
-                                syncKey={orderTick}
-                                preferredNote={eco?.note}
-                                scopedNotesOnly={showFranchiseStallSalesBoard}
-                                getSalesRecordLookup={getSalesRecordCached}
-                                onPatchRevenueGapReason={patchRevenueGapReason}
-                              />
+                              {bossAllStoreSalesBoard ? (
+                                <span className="block max-w-[18rem] truncate text-xs text-zinc-500" title={eco?.note || ''}>
+                                  {eco?.note || '全店加總不編輯單店備註'}
+                                </span>
+                              ) : (
+                                <DirectStallGapReasonCell
+                                  ymd={row.ymd}
+                                  syncKey={orderTick}
+                                  preferredNote={eco?.note}
+                                  scopedNotesOnly={showFranchiseStallSalesBoard}
+                                  getSalesRecordLookup={getSalesRecordCached}
+                                  onPatchRevenueGapReason={patchRevenueGapReason}
+                                />
+                              )}
                             </td>
                           </tr>
                         );
@@ -2353,6 +2492,7 @@ export default function Dashboard({
                             <thead className="sticky top-0 bg-sky-950/95 text-zinc-500 border-b border-zinc-800/80 text-sm sm:text-base">
                               <tr>
                                 <th className="py-2 pr-2 pl-1 font-medium">品項</th>
+                                <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">合計</th>
                                 <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">平均</th>
                                 <th className="py-2 px-1.5 font-medium text-right whitespace-nowrap">最高</th>
                                 <th className="py-2 pl-1.5 pr-1 font-medium text-right whitespace-nowrap">最低</th>
@@ -2362,6 +2502,9 @@ export default function Dashboard({
                               {sameWeekdayProductSoldStats.rows.map((r) => (
                                 <tr key={r.id}>
                                   <td className="py-2 pr-2 pl-1 text-zinc-200 leading-snug">{r.name}</td>
+                                  <td className="py-2 px-1.5 text-right tabular-nums text-amber-200/95">
+                                    {formatWeekdaySoldQty(r.sum)}
+                                  </td>
                                   <td className="py-2 px-1.5 text-right tabular-nums text-sky-100/95">
                                     {formatWeekdaySoldQty(r.avg)}
                                   </td>
