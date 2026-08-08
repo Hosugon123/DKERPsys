@@ -19,7 +19,6 @@ import {
   formatSlashYmdWithWeekdayFromYmd,
   formatSlashDateTimeWithWeekdayFromIso,
   orderMatchesActiveWeekdaysFromYmd,
-  toLocalYmdDashed,
   ymdDashToSlash,
 } from '../lib/dateDisplay';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
@@ -130,7 +129,7 @@ type OrderFinancialSummary = {
   actualIncomeAmount: number | null;
 };
 
-type TodayStoreOrderSummaryLine = {
+type OpenStoreOrderSummaryLine = {
   productId: string;
   name: string;
   unit: string;
@@ -138,11 +137,11 @@ type TodayStoreOrderSummaryLine = {
   amount: number;
 };
 
-type TodayStoreOrderSummary = {
+type OpenStoreOrderSummary = {
   storeLabel: string;
   orderCount: number;
   procurementAmount: number;
-  lines: TodayStoreOrderSummaryLine[];
+  lines: OpenStoreOrderSummaryLine[];
 };
 
 function toOrderRowFromMgmt(
@@ -414,20 +413,20 @@ function orderStoreLabelForSummary(order: RawOrder): string {
   });
 }
 
-export function buildTodayStoreOrderSummaries(rawOrders: RawOrder[], todayYmd: string): TodayStoreOrderSummary[] {
+export function buildOpenStoreOrderSummaries(rawOrders: RawOrder[]): OpenStoreOrderSummary[] {
   const byStore = new Map<
     string,
     {
       storeLabel: string;
       orderCount: number;
       procurementAmount: number;
-      lineMap: Map<string, TodayStoreOrderSummaryLine>;
+      lineMap: Map<string, OpenStoreOrderSummaryLine>;
     }
   >();
 
   for (const order of rawOrders) {
-    if (effectiveOrderDateYmd(order) !== todayYmd) continue;
-    if (order.status === '已取消') continue;
+    if (order.status !== '待出貨') continue;
+    if (orderHasStallCountCompleted(order)) continue;
     const storeLabel = orderStoreLabelForSummary(order);
     const bucket =
       byStore.get(storeLabel) ??
@@ -435,7 +434,7 @@ export function buildTodayStoreOrderSummaries(rawOrders: RawOrder[], todayYmd: s
         storeLabel,
         orderCount: 0,
         procurementAmount: 0,
-        lineMap: new Map<string, TodayStoreOrderSummaryLine>(),
+        lineMap: new Map<string, OpenStoreOrderSummaryLine>(),
       };
     bucket.orderCount += 1;
     bucket.procurementAmount = Math.round((bucket.procurementAmount + (Number(order.totalAmount) || 0)) * 100) / 100;
@@ -477,12 +476,10 @@ export function buildTodayStoreOrderSummaries(rawOrders: RawOrder[], todayYmd: s
     });
 }
 
-function TodayStoreOrderSummaryPanel({
+function OpenStoreOrderSummaryPanel({
   summaries,
-  todayYmd,
 }: {
-  summaries: TodayStoreOrderSummary[];
-  todayYmd: string;
+  summaries: OpenStoreOrderSummary[];
 }) {
   const totalOrderCount = summaries.reduce((sum, row) => sum + row.orderCount, 0);
   const totalProcurementAmount = Math.round(
@@ -495,9 +492,9 @@ function TodayStoreOrderSummaryPanel({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Package className="shrink-0 text-amber-500" size={18} />
-            <h3 className="text-lg font-semibold text-[#f5f2ed]">今日各店總和訂單</h3>
+            <h3 className="text-lg font-semibold text-[#f5f2ed]">未完成訂單總和</h3>
             <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5 text-xs text-zinc-400">
-              {formatSlashYmdWithWeekdayFromYmd(todayYmd)}
+              出貨前對點
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
@@ -514,7 +511,7 @@ function TodayStoreOrderSummaryPanel({
       <div className="border-t border-zinc-800/80 p-3 sm:p-4">
         {summaries.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/30 px-4 py-8 text-center text-sm text-zinc-500">
-            今天尚無可彙總的未取消訂單。
+            目前尚無可彙總的未完成訂單。
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
@@ -949,10 +946,9 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   );
 
   const rawById = useMemo(() => new Map(rawList.map((r) => [r.id, r])), [rawList]);
-  const todayOrderYmd = useMemo(() => toLocalYmdDashed(new Date().toISOString()), []);
-  const todayStoreOrderSummaries = useMemo(
-    () => buildTodayStoreOrderSummaries(rawList, todayOrderYmd),
-    [rawList, todayOrderYmd],
+  const openStoreOrderSummaries = useMemo(
+    () => buildOpenStoreOrderSummaries(rawList),
+    [rawList],
   );
 
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
@@ -1702,7 +1698,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         </div>
       </section>
 
-      <TodayStoreOrderSummaryPanel summaries={todayStoreOrderSummaries} todayYmd={todayOrderYmd} />
+      <OpenStoreOrderSummaryPanel summaries={openStoreOrderSummaries} />
 
       <div className="space-y-4">
         {filteredOrders.length === 0 && (

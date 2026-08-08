@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTodayStoreOrderSummaries } from './Orders';
+import { buildOpenStoreOrderSummaries } from './Orders';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 
 function order(input: {
@@ -7,6 +7,7 @@ function order(input: {
   ymd: string;
   storeLabel: string;
   status?: OrderHistoryEntry['status'];
+  stallCountCompletedAt?: string;
   lines: OrderHistoryEntry['lines'];
 }): OrderHistoryEntry {
   return {
@@ -22,50 +23,56 @@ function order(input: {
     actorRole: 'franchisee',
     storeLabel: input.storeLabel,
     status: input.status ?? '待出貨',
+    stallCountCompletedAt: input.stallCountCompletedAt,
   };
 }
 
-describe('today store order summaries', () => {
-  it('groups only today non-canceled orders by store and product', () => {
-    const summaries = buildTodayStoreOrderSummaries(
-      [
-        order({
-          id: 'today-a',
-          ymd: '2026-08-08',
-          storeLabel: '高雄三民',
-          lines: [
-            { productId: 'black', name: '黑輪', unitPrice: 4, qty: 10, unit: '片' },
-            { productId: 'rice', name: '米血', unitPrice: 6, qty: 5, unit: '片' },
-          ],
-        }),
-        order({
-          id: 'today-b',
-          ymd: '2026-08-08',
-          storeLabel: '高雄三民',
-          lines: [{ productId: 'black', name: '黑輪', unitPrice: 4, qty: 3, unit: '片' }],
-        }),
-        order({
-          id: 'today-canceled',
-          ymd: '2026-08-08',
-          storeLabel: '高雄三民',
-          status: '已取消',
-          lines: [{ productId: 'black', name: '黑輪', unitPrice: 4, qty: 99, unit: '片' }],
-        }),
-        order({
-          id: 'other-day',
-          ymd: '2026-08-07',
-          storeLabel: '高雄三民',
-          lines: [{ productId: 'black', name: '黑輪', unitPrice: 4, qty: 88, unit: '片' }],
-        }),
-        order({
-          id: 'today-other-store',
-          ymd: '2026-08-08',
-          storeLabel: '屏東高樹',
-          lines: [{ productId: 'rice', name: '米血', unitPrice: 6, qty: 2, unit: '片' }],
-        }),
-      ],
-      '2026-08-08',
-    );
+describe('open store order summaries', () => {
+  it('groups only unshipped and uncounted orders by store and product', () => {
+    const summaries = buildOpenStoreOrderSummaries([
+      order({
+        id: 'open-today-a',
+        ymd: '2026-08-08',
+        storeLabel: '高雄三民',
+        lines: [
+          { productId: 'black', name: '黑輪', unitPrice: 4, qty: 10, unit: '片' },
+          { productId: 'rice', name: '米血', unitPrice: 6, qty: 5, unit: '片' },
+        ],
+      }),
+      order({
+        id: 'open-today-b',
+        ymd: '2026-08-08',
+        storeLabel: '高雄三民',
+        lines: [{ productId: 'black', name: '黑輪', unitPrice: 4, qty: 3, unit: '片' }],
+      }),
+      order({
+        id: 'canceled',
+        ymd: '2026-08-08',
+        storeLabel: '高雄三民',
+        status: '已取消',
+        lines: [{ productId: 'black', name: '黑輪', unitPrice: 4, qty: 99, unit: '片' }],
+      }),
+      order({
+        id: 'shipped',
+        ymd: '2026-08-08',
+        storeLabel: '高雄三民',
+        status: '已完成',
+        lines: [{ productId: 'black', name: '黑輪', unitPrice: 4, qty: 88, unit: '片' }],
+      }),
+      order({
+        id: 'counted',
+        ymd: '2026-08-08',
+        storeLabel: '高雄三民',
+        stallCountCompletedAt: '2026-08-08T19:00:00.000Z',
+        lines: [{ productId: 'black', name: '黑輪', unitPrice: 4, qty: 77, unit: '片' }],
+      }),
+      order({
+        id: 'open-other-day',
+        ymd: '2026-08-07',
+        storeLabel: '屏東高樹',
+        lines: [{ productId: 'rice', name: '米血', unitPrice: 6, qty: 2, unit: '片' }],
+      }),
+    ]);
 
     expect(summaries).toHaveLength(2);
     const sanmin = summaries.find((s) => s.storeLabel === '高雄三民');
