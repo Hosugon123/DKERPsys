@@ -37,6 +37,7 @@ import {
 import { reportUserError } from '../lib/userErrorReport';
 import * as systemUsers from '../lib/systemUsersStorage';
 import { getStoreCode3, setStoreCode3 } from '../lib/storeCodeStorage';
+import * as dataArchive from '../lib/dataArchiveStorage';
 
 export {
   awaitRemotePushIdle,
@@ -172,17 +173,17 @@ export const orders = {
     id: string,
     status: orderHistory.FranchiseOrderStatus,
   ): Promise<void> {
-    return withUiRemoteStorageWrite(() => {
+    return withUiRemoteStorageWriteNow(() => {
       orderHistory.updateFranchiseManagementOrderStatus(id, status);
     }, '更新加盟訂單狀態');
   },
   async updateOrderHistoryStatus(id: string, status: orderHistory.FranchiseOrderStatus): Promise<void> {
-    return withUiRemoteStorageWrite(() => {
+    return withUiRemoteStorageWriteNow(() => {
       orderHistory.updateOrderHistoryStatus(id, status);
     }, '更新訂單狀態');
   },
   async updateOrderStatusInEitherStore(id: string, status: orderHistory.FranchiseOrderStatus): Promise<void> {
-    return withUiRemoteStorageWrite(() => {
+    return withUiRemoteStorageWriteNow(() => {
       orderHistory.updateOrderStatusInEitherStore(id, status);
     }, '更新訂單狀態');
   },
@@ -664,6 +665,24 @@ export const dataBundle = {
   },
   async importBundle(raw: unknown): Promise<ImportBundleResult> {
     return withRemoteStorageWrite(() => importDongshanDataBundle(raw));
+  },
+};
+
+export const archives = {
+  async list(): Promise<dataArchive.DataArchiveEntry[]> {
+    return withRemoteStorageRead(() => dataArchive.listDataArchives());
+  },
+  async archiveOlderThan(cutoffYmd: string): Promise<dataArchive.ArchiveDataResult> {
+    return withUiRemoteStorageWriteNow(
+      () => dataArchive.archiveDataOlderThan(cutoffYmd),
+      '封存舊資料',
+    );
+  },
+  async restore(id: string): Promise<boolean> {
+    return withUiRemoteStorageWriteNow(
+      () => dataArchive.restoreDataArchive(id),
+      '還原封存資料',
+    );
   },
 };
 

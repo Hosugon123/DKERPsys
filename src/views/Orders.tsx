@@ -681,6 +681,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const [pickingPersistStatus, setPickingPersistStatus] = useState<
     'idle' | 'dirty' | 'saving' | 'saved' | 'error'
   >('idle');
+  const [statusSyncingOrderId, setStatusSyncingOrderId] = useState<string | null>(null);
   const pickingAutosaveGenRef = useRef(0);
   /** 開始調整貨量時訂單的 updatedAt；雲端拉回較新資料時勿用舊 UI 覆寫 */
   const pickingStorageUpdatedAtRef = useRef(0);
@@ -775,16 +776,31 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
   const catalogItemsForOrderDetail = useSupplyCatalogItems(userRole);
 
+  const effectiveDateRange = useMemo(() => {
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(orderListPeriod);
+    return { from: startYmd, to: endYmd };
+  }, [orderListPeriod]);
+
+  const dateScopedRawList = useMemo(
+    () => rawList.filter((order) => orderMatchesListDateRange(order, effectiveDateRange.from, effectiveDateRange.to)),
+    [rawList, effectiveDateRange],
+  );
+
+  const dateScopedRawById = useMemo(
+    () => new Map(dateScopedRawList.map((r) => [r.id, r])),
+    [dateScopedRawList],
+  );
+
   /** 列表篩選用輕量列：盤點 KPI 僅對目前分頁延遲計算，避免切換分頁卡頓。 */
   const ordersData = useMemo(
     () =>
-      rawList.map((r) => {
+      dateScopedRawList.map((r) => {
         const financials = buildCheapOrderFinancials(r);
         return isFranchiseManagementOrder(r)
           ? toOrderRowFromMgmt(r, financials)
           : toOrderRowFromHistory(r, financials);
       }),
-    [rawList],
+    [dateScopedRawList],
   );
 
   /**
@@ -830,14 +846,9 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   /** 是否顯示店家篩選 UI：加盟主僅看自己一家，無意義；其他角色至少出現過 1 家以上才顯示 */
   const showStoreFilter = userRole !== 'franchisee' && storeOptions.length >= 2;
 
-  const effectiveDateRange = useMemo(() => {
-    const { startYmd, endYmd } = resolveDashboardPeriodYmd(orderListPeriod);
-    return { from: startYmd, to: endYmd };
-  }, [orderListPeriod]);
-
   const filteredOrders = useMemo(() => {
     const byWeekday = ordersData.filter((order) => {
-      const o = rawById.get(order.id);
+      const o = dateScopedRawById.get(order.id);
       if (!o) return false;
       return orderMatchesActiveWeekdaysFromYmd(effectiveOrderDateYmd(o), activeWeekdays);
     });
@@ -856,18 +867,14 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       return order.status === '待出貨' || order.status === '已完成';
     });
     const byStallCount = byStatus.filter((order) => {
-      const o = rawById.get(order.id);
+      const o = dateScopedRawById.get(order.id);
       if (!o) return false;
       if (statusFilter === '已盤點') return orderHasStallCountCompleted(o);
       if (statusFilter === '已取消') return true;
       return !orderHasStallCountCompleted(o);
     });
-    return byStallCount.filter((order) => {
-      const o = rawById.get(order.id);
-      if (!o) return false;
-      return orderMatchesListDateRange(o, effectiveDateRange.from, effectiveDateRange.to);
-    });
-  }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, effectiveDateRange, ordersData, rawById]);
+    return byStallCount;
+  }, [activeWeekdays, statusFilter, storeTypeFilter, storeLabelFilter, ordersData, dateScopedRawById]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PAGE_SIZE));
 
@@ -994,9 +1001,20 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   };
 
   const setStatus = (id: string, status: '待出貨' | '已完成' | '已取消') => {
-    void (async () => {
-      await ordersApi.updateOrderStatusInEitherStore(id, status);
-      syncOrders();
+    return (async () => {
+      setStatusSyncingOrderId(id);
+      setPickingError(null);
+      try {
+        await ordersApi.updateOrderStatusInEitherStore(id, status);
+        syncOrders();
+      } catch (error) {
+        setPickingError(error instanceof Error && error.message.trim()
+          ? error.message
+          : '訂單狀態同步失敗，請確認網路後重試。');
+        throw error;
+      } finally {
+        setStatusSyncingOrderId(null);
+      }
     })();
   };
 
@@ -1014,7 +1032,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         const res = await persistPickingLines(orderId, pickingLines);
         if (!res.ok) return;
       }
-      setStatus(orderId, '已完成');
+      await setStatus(orderId, '已完成');
       setShipModal(null);
     })();
   };
@@ -1026,14 +1044,18 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       setRevertModal(null);
       return;
     }
-    setStatus(revertModal.id, '待出貨');
-    setRevertModal(null);
+    void (async () => {
+      await setStatus(revertModal.id, '待出貨');
+      setRevertModal(null);
+    })();
   };
 
   const applyCancelOrder = () => {
     if (!cancelModal) return;
-    setStatus(cancelModal.id, '已取消');
-    setCancelModal(null);
+    void (async () => {
+      await setStatus(cancelModal.id, '已取消');
+      setCancelModal(null);
+    })();
   };
 
   const applyPostDeductBasis = () => {
@@ -2531,9 +2553,10 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={applyShipped}
-                className="px-4 py-2.5 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500"
+                disabled={statusSyncingOrderId === shipModal.id}
+                className="px-4 py-2.5 rounded-lg bg-amber-600 text-zinc-950 text-sm font-semibold hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                確認出貨
+                {statusSyncingOrderId === shipModal.id ? '同步中...' : '確認出貨'}
               </button>
             </div>
           </div>
@@ -2572,9 +2595,10 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={applyRevertPending}
-                className="px-4 py-2.5 rounded-lg bg-amber-600 text-zinc-950 text-sm font-medium hover:bg-amber-500"
+                disabled={statusSyncingOrderId === revertModal.id}
+                className="px-4 py-2.5 rounded-lg bg-amber-600 text-zinc-950 text-sm font-medium hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                確認改回待出貨
+                {statusSyncingOrderId === revertModal.id ? '同步中...' : '確認改回待出貨'}
               </button>
             </div>
           </div>
@@ -2616,9 +2640,10 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={applyCancelOrder}
-                className="px-4 py-2.5 rounded-lg bg-rose-600/90 text-white text-sm font-medium hover:bg-rose-500"
+                disabled={statusSyncingOrderId === cancelModal.id}
+                className="px-4 py-2.5 rounded-lg bg-rose-600/90 text-white text-sm font-medium hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                確認取消
+                {statusSyncingOrderId === cancelModal.id ? '同步中...' : '確認取消'}
               </button>
             </div>
           </div>

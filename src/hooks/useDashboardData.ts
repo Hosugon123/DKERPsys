@@ -5,6 +5,7 @@ import {
   type AccountingLedgerEntry,
 } from '../lib/accountingLedgerStorage';
 import {
+  effectiveOrderDateYmd,
   orderMatchesSessionScope,
   type OrderHistoryEntry,
   type FranchiseManagementOrder,
@@ -15,6 +16,29 @@ import { scopedStallDateKey } from '../lib/scopedStallDateKey';
 import { reportPerfMetric, timeAsync } from '../lib/performanceDebug';
 
 export type DashboardOrder = OrderHistoryEntry;
+export type DashboardOrderDateRange = { startYmd: string; endYmd: string };
+
+function orderStallYmdForRange(o: Pick<DashboardOrder, 'stallCountBasisYmd' | 'stallCountCompletedAt'>): string {
+  const basis = o.stallCountBasisYmd?.trim();
+  if (basis && /^\d{4}-\d{2}-\d{2}$/.test(basis)) return basis;
+  const completed = o.stallCountCompletedAt?.trim();
+  if (completed) return completed.slice(0, 10);
+  return '';
+}
+
+function ymdInRange(ymd: string, range: DashboardOrderDateRange): boolean {
+  return ymd >= range.startYmd && ymd <= range.endYmd;
+}
+
+function orderMatchesDashboardDateRanges(
+  order: DashboardOrder,
+  ranges: readonly DashboardOrderDateRange[] | undefined,
+): boolean {
+  if (!ranges || ranges.length === 0) return true;
+  const bookYmd = effectiveOrderDateYmd(order);
+  const stallYmd = orderStallYmdForRange(order);
+  return ranges.some((range) => ymdInRange(bookYmd, range) || Boolean(stallYmd && ymdInRange(stallYmd, range)));
+}
 
 function salesRecordCacheKey(ymd: string, scopeId: string): string {
   return scopedStallDateKey(scopeId, ymd);
@@ -62,7 +86,10 @@ function mapMgmtToDashboardOrder(m: FranchiseManagementOrder): DashboardOrder {
 }
 
 /** 營運概況：經 apiService 載入訂單、流水帳、銷售紀錄，支援 remote 同步。 */
-export function useDashboardData(viewAsFranchiseeUserId: string | null) {
+export function useDashboardData(
+  viewAsFranchiseeUserId: string | null,
+  orderDateRanges?: readonly DashboardOrderDateRange[],
+) {
   const [orderTick, setOrderTick] = useState(0);
   const [financeTick, setFinanceTick] = useState(0);
   const [salesRecordTick, setSalesRecordTick] = useState(0);
@@ -79,7 +106,7 @@ export function useDashboardData(viewAsFranchiseeUserId: string | null) {
       ]),
     );
     const all = [...mgmt.map(mapMgmtToDashboardOrder), ...history].filter((o) =>
-      orderMatchesSessionScope(o),
+      orderMatchesSessionScope(o) && orderMatchesDashboardDateRanges(o, orderDateRanges),
     );
     all.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     reportPerfMetric({
@@ -87,7 +114,7 @@ export function useDashboardData(viewAsFranchiseeUserId: string | null) {
       details: { managementOrders: mgmt.length, historyOrders: history.length, visibleOrders: all.length },
     });
     setDashboardOrders(all);
-  }, []);
+  }, [orderDateRanges]);
 
   const reloadLedger = useCallback(async () => {
     if (viewAsFranchiseeUserId) {

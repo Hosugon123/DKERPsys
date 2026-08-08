@@ -298,12 +298,16 @@ export function computeStallGapSummary(
  * 支出：總部營運總覽「總支出」＝總部 scope 流水帳所有支出（含直營店營業支出／薪資）；
  * headquartersLedgerExpenseTotal 仍僅一般總部類別（不含直營／加盟專屬類別）。
  */
-export function computeAdminDashboardFinanceForYmdRange(startYmd: string, endYmd: string): AdminDashboardFinance {
+export function computeAdminDashboardFinanceForYmdRange(
+  startYmd: string,
+  endYmd: string,
+  preloadedOrders?: OrderHistoryEntry[],
+): AdminDashboardFinance {
   const a = startYmd <= endYmd ? startYmd : endYmd;
   const b = startYmd <= endYmd ? endYmd : startYmd;
   const ymMeta = a.slice(0, 7);
 
-  const merged = mergeOrdersForAdminFinance();
+  const merged = preloadedOrders ?? mergeOrdersForAdminFinance();
   const stallGapOrders = merged.filter((o) => orderIsHeadquartersDirectScoped(o));
   const stallGap = computeStallGapSummary(stallGapOrders, { type: 'ymd', startYmd: a, endYmd: b });
 

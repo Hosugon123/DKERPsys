@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState, type ChangeEvent } from 'react';
-import { Download, Upload, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Archive, Download, RotateCcw, Upload, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
 import type { UserRole } from './Orders';
 import { DONGSHAN_APP_ID, DONGSHAN_EXPORT_STORAGE_KEYS, parseBundleJson } from '../lib/appDataBundle';
-import { dataBundle } from '../services/apiService';
+import { archives, dataBundle } from '../services/apiService';
+import type { DataArchiveEntry } from '../lib/dataArchiveStorage';
 import { getApiBaseUrl, getApiSyncToken, getStorageMode } from '../services/storageMode';
 import { cn } from '../lib/utils';
 
@@ -23,12 +24,97 @@ function exportFilename(): string {
   return `dongshan-data-${stamp}.json`;
 }
 
+function archiveCutoffThreeMonthsAgo(): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 3);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function archiveMovedCount(archive: DataArchiveEntry): number {
+  return (
+    archive.counts.orderHistory +
+    archive.counts.franchiseManagementOrders +
+    archive.counts.stallInventoryDays +
+    archive.counts.salesRecordDays +
+    archive.counts.accountingLedgerEntries
+  );
+}
+
 export default function DataHub({ userRole }: { userRole: UserRole }) {
   const isAdmin = userRole === 'admin';
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [syncCheckRunning, setSyncCheckRunning] = useState(false);
   const [syncCheckReport, setSyncCheckReport] = useState<string[]>([]);
+  const [archiveRows, setArchiveRows] = useState<DataArchiveEntry[]>([]);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+
+  const reloadArchives = useCallback(() => {
+    void (async () => {
+      setArchiveRows(await archives.list());
+    })();
+  }, []);
+
+  useEffect(() => {
+    reloadArchives();
+  }, [reloadArchives]);
+
+  const onArchiveOldData = useCallback(() => {
+    setMessage(null);
+    setArchiveBusy(true);
+    void (async () => {
+      try {
+        const cutoff = archiveCutoffThreeMonthsAgo();
+        const result = await archives.archiveOlderThan(cutoff);
+        if (result.ok === false) {
+          setMessage({
+            kind: 'err',
+            text: result.reason === 'empty'
+              ? `沒有 ${cutoff} 以前可封存的資料。`
+              : '封存日期格式錯誤。',
+          });
+          return;
+        }
+        setMessage({
+          kind: 'ok',
+          text: `已封存 ${cutoff} 以前資料，共搬移 ${result.movedCount} 筆/日資料。`,
+        });
+        reloadArchives();
+      } catch (error) {
+        setMessage({
+          kind: 'err',
+          text: error instanceof Error && error.message.trim() ? error.message : '封存失敗，請稍後重試。',
+        });
+      } finally {
+        setArchiveBusy(false);
+      }
+    })();
+  }, [reloadArchives]);
+
+  const onRestoreArchive = useCallback((id: string) => {
+    setMessage(null);
+    setArchiveBusy(true);
+    void (async () => {
+      try {
+        const ok = await archives.restore(id);
+        setMessage({
+          kind: ok ? 'ok' : 'err',
+          text: ok ? '已還原封存資料，相關頁面會重新載入。' : '找不到指定的封存資料。',
+        });
+        reloadArchives();
+      } catch (error) {
+        setMessage({
+          kind: 'err',
+          text: error instanceof Error && error.message.trim() ? error.message : '還原失敗，請稍後重試。',
+        });
+      } finally {
+        setArchiveBusy(false);
+      }
+    })();
+  }, [reloadArchives]);
 
   const onExport = useCallback(() => {
     setMessage(null);
@@ -227,6 +313,72 @@ export default function DataHub({ userRole }: { userRole: UserRole }) {
           </button>
         </section>
       </div>
+
+      <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/35 p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+              <Archive size={18} className="text-sky-300" />
+              舊資料封存
+            </h3>
+            <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+              將三個月以前的總店、各加盟店訂單、盤點、銷售紀錄與流水帳移到封存包。日常畫面不會載入封存包，需要查閱時再還原。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onArchiveOldData}
+            disabled={archiveBusy}
+            className={cn(
+              'shrink-0 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors',
+              archiveBusy
+                ? 'bg-zinc-800 text-zinc-500 cursor-wait'
+                : 'bg-sky-700/85 hover:bg-sky-600 text-white',
+            )}
+          >
+            {archiveBusy ? '處理中...' : '封存三個月以前資料'}
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 overflow-hidden">
+          {archiveRows.length === 0 ? (
+            <p className="px-4 py-5 text-sm text-zinc-500 text-center">目前沒有封存資料。</p>
+          ) : (
+            <div className="divide-y divide-zinc-800/80">
+              {archiveRows.map((row) => (
+                <div key={row.id} className="p-4 flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-zinc-100">
+                      {row.cutoffYmd} 以前資料
+                      <span className="ml-2 text-xs text-zinc-500 tabular-nums">
+                        {archiveMovedCount(row)} 筆/日
+                      </span>
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500 break-all">
+                      {row.id} · {row.createdAt.slice(0, 19).replace('T', ' ')}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-400 tabular-nums">
+                      訂單 {row.counts.orderHistory + row.counts.franchiseManagementOrders}、
+                      盤點 {row.counts.stallInventoryDays}、
+                      銷售 {row.counts.salesRecordDays}、
+                      流水帳 {row.counts.accountingLedgerEntries}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRestoreArchive(row.id)}
+                    disabled={archiveBusy}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-700/60 bg-amber-950/40 px-4 py-2.5 text-sm font-semibold text-amber-200 hover:bg-amber-950/60 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <RotateCcw size={16} />
+                    還原查閱
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-amber-900/40 bg-amber-950/15 p-5 space-y-3">
         <div>

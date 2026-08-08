@@ -74,7 +74,7 @@ import {
   resolveOrderDataScopeId,
   type OrderHistoryEntry,
 } from '../lib/orderHistoryStorage';
-import { useDashboardData } from '../hooks/useDashboardData';
+import { useDashboardData, type DashboardOrderDateRange } from '../hooks/useDashboardData';
 import {
   buildDirectStallEconomicsByYmd,
   buildFranchiseStallEconomicsByYmd,
@@ -893,6 +893,29 @@ function pct(numerator: number, denominator: number): number {
   return (numerator / denominator) * 100;
 }
 
+function dashboardOrderDateRangeFromPeriod(mode: DashboardPeriodMode): DashboardOrderDateRange {
+  const { startYmd, endYmd } = resolveDashboardPeriodYmd(mode);
+  return { startYmd, endYmd };
+}
+
+function mergeDashboardOrderDateRanges(
+  ranges: readonly DashboardOrderDateRange[],
+): DashboardOrderDateRange[] {
+  const sorted = ranges
+    .filter((r) => r.startYmd && r.endYmd && r.startYmd <= r.endYmd)
+    .sort((a, b) => a.startYmd.localeCompare(b.startYmd));
+  const merged: DashboardOrderDateRange[] = [];
+  for (const range of sorted) {
+    const prev = merged[merged.length - 1];
+    if (!prev || range.startYmd > prev.endYmd) {
+      merged.push({ ...range });
+      continue;
+    }
+    if (range.endYmd > prev.endYmd) prev.endYmd = range.endYmd;
+  }
+  return merged;
+}
+
 export type DashboardViewAsTarget = { userId: string; label: string };
 
 export default function Dashboard({
@@ -913,14 +936,6 @@ export default function Dashboard({
   const realIsAdmin = userRole === 'admin';
   /** 「實際渲染時」的 admin 身份：總部本人＋未進入 view-as 才為 true */
   const isAdmin = realIsAdmin && !viewAsFranchisee;
-  const {
-    dashboardOrders,
-    ledgerEntries: ledgerForView,
-    getSalesRecordCached,
-    patchRevenueGapReason,
-    orderTick,
-    financeTick,
-  } = useDashboardData(viewAsFranchisee?.userId ?? null);
   const [summaryPeriod, setSummaryPeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
   /** 總部合併 KPI 卡（總部營運總覽／直營店營運摘要）專用區間；與其他區塊的 summaryPeriod 可分開設定 */
   const [adminFinancePeriod, setAdminFinancePeriod] = useState<DashboardPeriodMode>({ kind: 'month' });
@@ -958,6 +973,41 @@ export default function Dashboard({
   const [weekdayChainFocusIdx, setWeekdayChainFocusIdx] = useState<number | null>(null);
   /** 銷售數據表列點選之聚焦日（null 時取區間內最近一筆同名星期） */
   const [stallBoardFocusYmd, setStallBoardFocusYmd] = useState<string | null>(null);
+  const dashboardOrderDateRanges = useMemo(() => {
+    if (stallSalesBoardOpen && stallSalesBoardRange.kind === 'none') return undefined;
+    const ranges: DashboardOrderDateRange[] = [
+      dashboardOrderDateRangeFromPeriod(summaryPeriod),
+      dashboardOrderDateRangeFromPeriod(adminFinancePeriod),
+      isAdmin
+        ? dashboardOrderDateRangeFromPeriod(directStallGapRange)
+        : dashboardOrderDateRangeFromPeriod(nonAdminStallGapRange),
+    ];
+    if (expenseStructureOpen) ranges.push(dashboardOrderDateRangeFromPeriod(expenseStructurePeriod));
+    if (productChartsOpen) ranges.push(dashboardOrderDateRangeFromPeriod(productChartsPeriod));
+    if (stallSalesBoardOpen) ranges.push(dashboardOrderDateRangeFromPeriod(stallSalesBoardRange));
+    return mergeDashboardOrderDateRanges(ranges);
+  }, [
+    adminFinancePeriod,
+    directStallGapRange,
+    expenseStructureOpen,
+    expenseStructurePeriod,
+    isAdmin,
+    nonAdminStallGapRange,
+    productChartsOpen,
+    productChartsPeriod,
+    stallSalesBoardOpen,
+    stallSalesBoardRange,
+    summaryPeriod,
+  ]);
+
+  const {
+    dashboardOrders,
+    ledgerEntries: ledgerForView,
+    getSalesRecordCached,
+    patchRevenueGapReason,
+    orderTick,
+    financeTick,
+  } = useDashboardData(viewAsFranchisee?.userId ?? null, dashboardOrderDateRanges);
   useEffect(() => {
     if (!isAdmin && franchisePickerOpen) {
       setFranchisePickerOpen(false);
@@ -987,14 +1037,14 @@ export default function Dashboard({
   const adminFinance = useMemo(() => {
     if (!isAdmin) return null;
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(adminFinancePeriod);
-    return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
-  }, [isAdmin, financeTick, orderTick, adminFinancePeriod]);
+    return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd, dashboardOrders);
+  }, [isAdmin, financeTick, orderTick, adminFinancePeriod, dashboardOrders]);
 
   const expenseStructureFinance = useMemo(() => {
     if (!isAdmin || !expenseStructureOpen) return null;
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(expenseStructurePeriod);
-    return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd);
-  }, [isAdmin, expenseStructureOpen, financeTick, orderTick, expenseStructurePeriod]);
+    return computeAdminDashboardFinanceForYmdRange(startYmd, endYmd, dashboardOrders);
+  }, [isAdmin, expenseStructureOpen, financeTick, orderTick, expenseStructurePeriod, dashboardOrders]);
 
   /** 總部營運總覽 KPI：直營店實際營收、加盟批貨、消耗品代收、總支出、淨利 */
   const adminHqOverviewMetrics = useMemo(() => {

@@ -37,6 +37,7 @@ export const DONGSHAN_EXPORT_STORAGE_KEYS = [
   'dongshan_login_credentials_v1',
   'dongshan_pw_reset_pending_v1',
   'dongshan_pwa_icon_v1',
+  'dongshan_data_archives_v1',
 ] as const;
 
 export type DongshanStorageKey = (typeof DONGSHAN_EXPORT_STORAGE_KEYS)[number];

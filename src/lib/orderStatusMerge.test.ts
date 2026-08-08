@@ -58,6 +58,23 @@ describe('order status merge priority', () => {
     expect(merged.lines[0]?.qty).toBe(7);
   });
 
+  it('keeps shipped status when a quantity-only sync reached another device first', () => {
+    const phoneAfterShipping = {
+      ...order('已完成', 7, '2026-06-03T10:02:00.000Z', '2026-06-03T10:02:00.000Z'),
+      lines: [{ ...line(7), updatedAt: '2026-06-03T10:01:00.000Z' }],
+    };
+    const otherDeviceAfterQuantitySync = {
+      ...order('待出貨', 7, '2026-06-03T10:01:00.000Z', '2026-06-03T08:00:00.000Z'),
+      lines: [{ ...line(7), updatedAt: '2026-06-03T10:01:00.000Z' }],
+    };
+
+    const merged = mergeOrderLikeRecord(phoneAfterShipping, otherDeviceAfterQuantitySync);
+
+    expect(merged.status).toBe('已完成');
+    expect(merged.lines[0]?.qty).toBe(7);
+    expect(merged.totalAmount).toBe(700);
+  });
+
   it('allows a newer status operation to be the final state', () => {
     const shippedEarlier = order('已完成', 10, '2026-06-03T10:00:00.000Z', '2026-06-03T10:00:00.000Z');
     const revertedLater = order('待出貨', 10, '2026-06-03T12:00:00.000Z', '2026-06-03T12:00:00.000Z');
