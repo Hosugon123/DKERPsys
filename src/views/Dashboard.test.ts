@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAllStoreStallEconomicsByYmd } from './Dashboard';
+import { buildAllStoreStallEconomicsByYmd, weekdayMatchesSelection } from './Dashboard';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 
 function order(input: {
@@ -83,5 +83,14 @@ describe('all-store stall sales economics', () => {
     expect(row?.estTotal).toBe(1500);
     expect(row?.remainValue).toBe(150);
     expect(row?.gap).toBe(0);
+  });
+});
+
+describe('weekday sales filters', () => {
+  it('supports selecting multiple weekdays at once', () => {
+    expect(weekdayMatchesSelection('2026-07-26', [6, 0])).toBe(true);
+    expect(weekdayMatchesSelection('2026-07-27', [6, 0])).toBe(true);
+    expect(weekdayMatchesSelection('2026-07-28', [6, 0])).toBe(false);
+    expect(weekdayMatchesSelection('2026-07-28', [])).toBe(true);
   });
 });

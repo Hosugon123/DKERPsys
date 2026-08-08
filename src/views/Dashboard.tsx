@@ -346,6 +346,17 @@ function mondayFirstWeekdayIndexFromYmd(ymd: string): number {
 }
 
 const WEEKDAY_TOGGLE_LABELS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'] as const;
+const ALL_WEEKDAY_INDEXES = WEEKDAY_TOGGLE_LABELS.map((_, idx) => idx);
+
+export function weekdayMatchesSelection(ymd: string, selectedIdxs: readonly number[]): boolean {
+  if (selectedIdxs.length === 0) return true;
+  return selectedIdxs.includes(mondayFirstWeekdayIndexFromYmd(ymd));
+}
+
+function weekdaySelectionLabel(selectedIdxs: readonly number[]): string {
+  if (selectedIdxs.length === 0) return '全部星期';
+  return selectedIdxs.map((idx) => WEEKDAY_TOGGLE_LABELS[idx]).filter(Boolean).join('＋');
+}
 
 /** 營業額打底：週二（index 1）公休，不顯示、不設目標 */
 const REVENUE_BASELINE_OFF_WEEKDAY_IDX = 1;
@@ -710,34 +721,59 @@ function StallRevenueBaselinePanel({ scopeId }: { scopeId: string }) {
   );
 }
 
-const WEEKDAY_SELECT_CLASS =
-  'w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-amber-600/45 focus:outline-none focus:ring-1 focus:ring-amber-600/25';
-
 function WeekdayChainPicker({
-  focusIdx,
+  selectedIdxs,
   onChange,
 }: {
-  focusIdx: number | null;
-  onChange: (idx: number | null) => void;
-  isNarrow?: boolean;
+  selectedIdxs: number[];
+  onChange: (idxs: number[]) => void;
 }) {
+  const selected = new Set(selectedIdxs);
+  const toggle = (idx: number) => {
+    const next = selected.has(idx)
+      ? selectedIdxs.filter((v) => v !== idx)
+      : [...selectedIdxs, idx].sort((a, b) => a - b);
+    onChange(next);
+  };
+
   return (
-    <select
+    <div
       aria-label="對照星期"
-      value={focusIdx === null ? '' : String(focusIdx)}
-      onChange={(e) => {
-        const v = e.target.value;
-        onChange(v === '' ? null : Number(v));
-      }}
-      className={cn(WEEKDAY_SELECT_CLASS, 'h-9 min-h-0 max-w-full')}
+      className="flex min-w-0 flex-wrap gap-1.5"
     >
-      <option value="">全部（逐日）</option>
-      {WEEKDAY_TOGGLE_LABELS.map((label, idx) => (
-        <option key={label} value={idx}>
-          {label}
-        </option>
-      ))}
-    </select>
+      <button
+        type="button"
+        aria-pressed={selectedIdxs.length === 0}
+        onClick={() => onChange([])}
+        className={cn(
+          'min-h-9 rounded-lg border px-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm',
+          selectedIdxs.length === 0
+            ? 'border-amber-500/45 bg-amber-600/20 text-amber-200'
+            : 'border-zinc-700 bg-zinc-950 text-zinc-400 hover:border-amber-600/35',
+        )}
+      >
+        全部
+      </button>
+      {WEEKDAY_TOGGLE_LABELS.map((label, idx) => {
+        const active = selected.has(idx);
+        return (
+          <button
+            key={label}
+            type="button"
+            aria-pressed={active}
+            onClick={() => toggle(idx)}
+            className={cn(
+              'min-h-9 rounded-lg border px-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm',
+              active
+                ? 'border-amber-500/45 bg-amber-600/20 text-amber-200'
+                : 'border-zinc-700 bg-zinc-950 text-zinc-400 hover:border-amber-600/35',
+            )}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1054,9 +1090,8 @@ export default function Dashboard({
   });
   const [bossStallSalesScope, setBossStallSalesScope] = useState<BossStallSalesScope>('direct');
   const [stallSalesBoardPage, setStallSalesBoardPage] = useState(1);
-  /** 對照「本週／上週／上上週…」之同名星期：0＝週一 … 6＝週日 */
-  /** null＝不篩星期，表格為區間內逐日；0–6＝週一…週日同名星期對照 */
-  const [weekdayChainFocusIdx, setWeekdayChainFocusIdx] = useState<number | null>(null);
+  /** 對照星期：空陣列＝全部；可複選 0＝週一 … 6＝週日 */
+  const [weekdayFocusIdxs, setWeekdayFocusIdxs] = useState<number[]>([]);
   /** 銷售數據表列點選之聚焦日（null 時取區間內最近一筆同名星期） */
   const [stallBoardFocusYmd, setStallBoardFocusYmd] = useState<string | null>(null);
   const dashboardOrderDateRanges = useMemo(() => {
@@ -1112,7 +1147,7 @@ export default function Dashboard({
   useEffect(() => {
     setStallBoardFocusYmd(null);
     setStallSalesBoardPage(1);
-  }, [weekdayChainFocusIdx, stallSalesBoardRange, bossStallSalesScope]);
+  }, [weekdayFocusIdxs, stallSalesBoardRange, bossStallSalesScope]);
 
   useEffect(() => {
     if (!stallSalesBoardOpen) {
@@ -1243,14 +1278,13 @@ export default function Dashboard({
   );
 
   const stallWeekdayChainRows = useMemo((): StallWeekdayChainRow[] => {
-    const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
     const ymdsInScope: string[] = [];
 
     if (stallSalesBoardRange.kind === 'none') {
       for (const ymd of stallSalesEconomicsByYmd.keys()) {
         if (ymd > todayStr) continue;
-        if (d !== null && mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+        if (!weekdayMatchesSelection(ymd, weekdayFocusIdxs)) continue;
         ymdsInScope.push(ymd);
       }
       ymdsInScope.sort((a, b) => b.localeCompare(a));
@@ -1259,8 +1293,7 @@ export default function Dashboard({
       const end = endYmd > todayStr ? todayStr : endYmd;
       if (startYmd <= end) {
         for (let cur = startYmd; cur <= end; cur = addDaysYmd(cur, 1)) {
-          const wd = mondayFirstWeekdayIndexFromYmd(cur);
-          if (d !== null && wd !== d) continue;
+          if (!weekdayMatchesSelection(cur, weekdayFocusIdxs)) continue;
           ymdsInScope.push(cur);
         }
         ymdsInScope.sort((a, b) => b.localeCompare(a));
@@ -1269,23 +1302,23 @@ export default function Dashboard({
 
     const rows: StallWeekdayChainRow[] = ymdsInScope.map((ymd) => {
       const wd = mondayFirstWeekdayIndexFromYmd(ymd);
-      const dayShort = WEEKDAY_TOGGLE_LABELS[d ?? wd];
+      const dayShort = WEEKDAY_TOGGLE_LABELS[wd];
       const weeksBack = weeksBackFromCurrentWeekMonday(ymd);
       return {
         periodLabel:
-          d !== null ? weekdayChainPeriodLabel(weeksBack, dayShort) : dayShort,
+          weekdayFocusIdxs.length > 0 ? weekdayChainPeriodLabel(weeksBack, dayShort) : dayShort,
         ymd,
         weeksBack,
         eco: stallSalesEconomicsByYmd.get(ymd) ?? null,
       };
     });
-    if (d !== null) return rows.slice(0, WEEKDAY_CHAIN_ROW_COUNT);
+    if (weekdayFocusIdxs.length > 0) return rows.slice(0, WEEKDAY_CHAIN_ROW_COUNT);
     return rows;
   }, [
     stallSalesEconomicsByYmd,
     stallSalesBoardRange,
     stallSalesBoardResolvedYmd,
-    weekdayChainFocusIdx,
+    weekdayFocusIdxs,
   ]);
 
   const stallSalesBoardSummary = useMemo(() => {
@@ -1334,14 +1367,14 @@ export default function Dashboard({
     const { endYmd } = stallSalesBoardResolvedYmd;
     const rangeEnd = endYmd > todayStr ? todayStr : endYmd;
     const fallback =
-      weekdayChainFocusIdx !== null
-        ? addDaysYmd(startOfWeekMondayYmd(todayStr), weekdayChainFocusIdx)
+      weekdayFocusIdxs.length === 1
+        ? addDaysYmd(startOfWeekMondayYmd(todayStr), weekdayFocusIdxs[0]!)
         : rangeEnd;
     return stallWeekdayChainRows[0]?.ymd ?? fallback;
   }, [
     stallBoardFocusYmd,
     stallWeekdayChainRows,
-    weekdayChainFocusIdx,
+    weekdayFocusIdxs,
     stallSalesBoardResolvedYmd,
   ]);
 
@@ -1350,13 +1383,12 @@ export default function Dashboard({
   }, [stallSalesEconomicsByYmd, calendarWeekFocusYmd]);
 
   const sameWeekdayActualStats = useMemo(() => {
-    const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
     const { startYmd, endYmd } = stallSalesBoardResolvedYmd;
     const filterByRange = stallSalesBoardRange.kind !== 'none';
     const entries: { ymd: string; actual: number }[] = [];
     for (const [ymd, row] of stallSalesEconomicsByYmd.entries()) {
-      if (d !== null && mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+      if (!weekdayMatchesSelection(ymd, weekdayFocusIdxs)) continue;
       if (filterByRange && (ymd < startYmd || ymd > endYmd)) continue;
       if (ymd > todayStr) continue;
       if (row.actual === null) continue;
@@ -1378,14 +1410,13 @@ export default function Dashboard({
     return { dayCount: entries.length, sum, avg, max, min };
   }, [
     stallSalesEconomicsByYmd,
-    weekdayChainFocusIdx,
+    weekdayFocusIdxs,
     stallSalesBoardRange,
     stallSalesBoardResolvedYmd,
   ]);
 
   /** 與「銷售統計」相同之曆日集合：各品項當日售出量加總後，再算平均／最高／最低 */
   const sameWeekdayProductSoldStats = useMemo(() => {
-    const d = weekdayChainFocusIdx;
     const todayStr = toYmd(new Date());
     const { startYmd, endYmd } = stallSalesBoardResolvedYmd;
     const filterByRange = stallSalesBoardRange.kind !== 'none';
@@ -1396,7 +1427,7 @@ export default function Dashboard({
 
     const qualifyingYmds: string[] = [];
     for (const [ymd, row] of stallSalesEconomicsByYmd.entries()) {
-      if (d !== null && mondayFirstWeekdayIndexFromYmd(ymd) !== d) continue;
+      if (!weekdayMatchesSelection(ymd, weekdayFocusIdxs)) continue;
       if (filterByRange && (ymd < startYmd || ymd > endYmd)) continue;
       if (ymd > todayStr) continue;
       if (row.actual === null) continue;
@@ -1482,7 +1513,7 @@ export default function Dashboard({
     return { dayCount: n, rows };
   }, [
     stallSalesEconomicsByYmd,
-    weekdayChainFocusIdx,
+    weekdayFocusIdxs,
     stallSalesBoardRange,
     stallSalesBoardResolvedYmd,
     effectiveOrders,
@@ -2276,8 +2307,8 @@ export default function Dashboard({
                     對照星期
                   </span>
                   <WeekdayChainPicker
-                    focusIdx={weekdayChainFocusIdx}
-                    onChange={setWeekdayChainFocusIdx}
+                    selectedIdxs={weekdayFocusIdxs}
+                    onChange={setWeekdayFocusIdxs}
                   />
                 </label>
                 <p className="text-xs sm:text-sm text-zinc-500 shrink-0 lg:text-right">
@@ -2353,7 +2384,7 @@ export default function Dashboard({
                     <thead className="bg-zinc-900/90 border-b border-zinc-800 text-zinc-500 text-xs">
                       <tr>
                         <th className="px-3 py-2 font-medium">
-                          {weekdayChainFocusIdx === null ? '星期' : '週期'}
+                          {weekdayFocusIdxs.length === 0 ? '星期' : '週期'}
                         </th>
                         <th className="px-3 py-2 font-medium">日期</th>
                         <th className="px-3 py-2 font-medium text-right">應收</th>
@@ -2437,13 +2468,13 @@ export default function Dashboard({
                 />
 
                 <p className="text-[11px] text-zinc-500">
-                  {weekdayChainFocusIdx === null
+                  {weekdayFocusIdxs.length === 0
                     ? stallSalesBoardRange.kind === 'none'
                       ? '全部已建檔營業日（已登錄實收）'
                       : `區間內逐日（已登錄實收，${stallSalesBoardRangeLabel(stallSalesBoardRange)}）`
                     : stallSalesBoardRange.kind === 'none'
-                      ? `全部同名 ${WEEKDAY_TOGGLE_LABELS[weekdayChainFocusIdx]}（已登錄實收）`
-                      : `區間內同名星期（已登錄實收，${stallSalesBoardRangeLabel(stallSalesBoardRange)}）`}
+                      ? `全部同名 ${weekdaySelectionLabel(weekdayFocusIdxs)}（已登錄實收）`
+                      : `區間內同名星期：${weekdaySelectionLabel(weekdayFocusIdxs)}（已登錄實收，${stallSalesBoardRangeLabel(stallSalesBoardRange)}）`}
                   ：{sameWeekdayActualStats.dayCount} 日
                 </p>
               </div>
