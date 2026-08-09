@@ -340,6 +340,12 @@ export function formatOrderPrintSlipQty(line: Pick<OrderPrintSlipLine, 'qty' | '
   return jin ? `${base}（${jin} 斤）` : base;
 }
 
+export function formatOrderPrintSlipUnit(line: Pick<OrderPrintSlipLine, 'qty' | 'unit'>): string {
+  if (!pieceUnitIsLiang(line.unit)) return line.unit;
+  const jin = formatJinFromLiangQty(line.qty);
+  return jin ? `${line.unit}（${jin} 斤）` : line.unit;
+}
+
 export function buildOrderPrintSlipText(storeLabel: string, lines: OrderPrintSlipLine[]): string {
   const body = lines.length
     ? lines.map((line) => `${line.name} ${formatOrderPrintSlipQty(line)}`).join('\n')
@@ -381,8 +387,9 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
     .map(
       (line) => `
         <tr>
-          <td>${escapeReceiptHtml(line.name)}</td>
-          <td class="qty" colspan="2">${escapeReceiptHtml(formatOrderPrintSlipQty(line))}</td>
+          <td class="item">${escapeReceiptHtml(line.name)}</td>
+          <td class="qty">${escapeReceiptHtml(fmtLineQty(line.qty))}</td>
+          <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
         </tr>`,
     )
     .join('');
@@ -430,8 +437,9 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
       font-weight: 700;
       word-break: break-word;
     }
-    th.qty, td.qty { width: 31mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 0; padding: 0; }
+    th.item, td.item { padding-left: 2mm; text-align: left; }
+    th.qty, td.qty { width: 16mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 20mm; padding-right: 2mm; text-align: right; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -469,7 +477,7 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
     lines.length
       ? `<table>
           <thead>
-            <tr><th>品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
+            <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>`

@@ -4,6 +4,7 @@ import {
   buildOrderPrintSlipLines,
   buildOrderPrintSlipText,
   formatOrderPrintSlipQty,
+  formatOrderPrintSlipUnit,
 } from './Orders';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 
@@ -116,6 +117,7 @@ describe('order print slip', () => {
       { productId: 'pork', name: '大腸', unit: '兩', qty: 24 },
     ]);
     expect(formatOrderPrintSlipQty(lines[1])).toBe('24 兩（1.5 斤）');
+    expect(formatOrderPrintSlipUnit(lines[1])).toBe('兩（1.5 斤）');
     expect(buildOrderPrintSlipText('高雄三民', lines)).toBe('高雄三民\n黑輪 12 片\n大腸 24 兩（1.5 斤）');
   });
 });
