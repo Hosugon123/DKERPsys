@@ -28,8 +28,8 @@ function order(input: {
 }
 
 describe('open store order summaries', () => {
-  it('groups only unshipped and uncounted orders by store and product', () => {
-    const summaries = buildOpenStoreOrderSummaries([
+  it('totals only unshipped and uncounted orders across stores and follows catalog order', () => {
+    const summary = buildOpenStoreOrderSummaries([
       order({
         id: 'open-today-a',
         ymd: '2026-08-08',
@@ -72,18 +72,15 @@ describe('open store order summaries', () => {
         storeLabel: '屏東高樹',
         lines: [{ productId: 'rice', name: '米血', unitPrice: 6, qty: 2, unit: '片' }],
       }),
-    ]);
+    ], [{ id: 'rice' }, { id: 'black' }]);
 
-    expect(summaries).toHaveLength(2);
-    const sanmin = summaries.find((s) => s.storeLabel === '高雄三民');
-    expect(sanmin?.orderCount).toBe(2);
-    expect(sanmin?.procurementAmount).toBe(82);
-    expect(sanmin?.lines.find((line) => line.productId === 'black')?.qty).toBe(13);
-    expect(sanmin?.lines.find((line) => line.productId === 'black')?.amount).toBe(52);
-    expect(sanmin?.lines.find((line) => line.productId === 'rice')?.qty).toBe(5);
-
-    const gaoshu = summaries.find((s) => s.storeLabel === '屏東高樹');
-    expect(gaoshu?.orderCount).toBe(1);
-    expect(gaoshu?.procurementAmount).toBe(12);
+    expect(summary.storeCount).toBe(2);
+    expect(summary.orderCount).toBe(3);
+    expect(summary.procurementAmount).toBe(94);
+    expect(summary.lines.map((line) => line.productId)).toEqual(['rice', 'black']);
+    expect(summary.lines.find((line) => line.productId === 'black')?.qty).toBe(13);
+    expect(summary.lines.find((line) => line.productId === 'black')?.amount).toBe(52);
+    expect(summary.lines.find((line) => line.productId === 'rice')?.qty).toBe(7);
+    expect(summary.lines.find((line) => line.productId === 'rice')?.amount).toBe(42);
   });
 });

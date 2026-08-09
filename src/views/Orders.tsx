@@ -138,7 +138,7 @@ type OpenStoreOrderSummaryLine = {
 };
 
 type OpenStoreOrderSummary = {
-  storeLabel: string;
+  storeCount: number;
   orderCount: number;
   procurementAmount: number;
   lines: OpenStoreOrderSummaryLine[];
@@ -413,79 +413,73 @@ function orderStoreLabelForSummary(order: RawOrder): string {
   });
 }
 
-export function buildOpenStoreOrderSummaries(rawOrders: RawOrder[]): OpenStoreOrderSummary[] {
-  const byStore = new Map<
-    string,
-    {
-      storeLabel: string;
-      orderCount: number;
-      procurementAmount: number;
-      lineMap: Map<string, OpenStoreOrderSummaryLine>;
-    }
-  >();
+export function buildOpenStoreOrderSummaries(
+  rawOrders: RawOrder[],
+  catalogItems: readonly Pick<SupplyItem, 'id'>[] = [],
+): OpenStoreOrderSummary {
+  const storeLabels = new Set<string>();
+  const lineMap = new Map<string, OpenStoreOrderSummaryLine>();
+  const lineFirstSeen = new Map<string, number>();
+  const catalogOrder = new Map(catalogItems.map((item, index) => [item.id, index]));
+  let orderCount = 0;
+  let procurementAmount = 0;
+  let firstSeenSeq = 0;
 
   for (const order of rawOrders) {
     if (order.status !== '待出貨') continue;
     if (orderHasStallCountCompleted(order)) continue;
     const storeLabel = orderStoreLabelForSummary(order);
-    const bucket =
-      byStore.get(storeLabel) ??
-      {
-        storeLabel,
-        orderCount: 0,
-        procurementAmount: 0,
-        lineMap: new Map<string, OpenStoreOrderSummaryLine>(),
-      };
-    bucket.orderCount += 1;
-    bucket.procurementAmount = Math.round((bucket.procurementAmount + (Number(order.totalAmount) || 0)) * 100) / 100;
+    storeLabels.add(storeLabel);
+    orderCount += 1;
+    procurementAmount = Math.round((procurementAmount + (Number(order.totalAmount) || 0)) * 100) / 100;
 
     for (const line of order.lines) {
       const qty = roundProcurementQty(Number(line.qty) || 0);
       if (qty <= 0) continue;
       const key = line.productId || `${line.name}\u001f${line.unit}`;
-      const prev = bucket.lineMap.get(key);
+      const prev = lineMap.get(key);
       const amount = Math.round((Number(line.unitPrice) || 0) * qty * 100) / 100;
       if (prev) {
         prev.qty = roundProcurementQty(prev.qty + qty);
         prev.amount = Math.round((prev.amount + amount) * 100) / 100;
       } else {
-        bucket.lineMap.set(key, {
+        lineMap.set(key, {
           productId: line.productId,
           name: line.name,
           unit: line.unit,
           qty,
           amount,
         });
+        lineFirstSeen.set(key, firstSeenSeq);
+        firstSeenSeq += 1;
       }
     }
-
-    byStore.set(storeLabel, bucket);
   }
 
-  return Array.from(byStore.values())
-    .map((bucket) => ({
-      storeLabel: bucket.storeLabel,
-      orderCount: bucket.orderCount,
-      procurementAmount: bucket.procurementAmount,
-      lines: Array.from(bucket.lineMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')),
-    }))
-    .sort((a, b) => {
-      if (a.storeLabel === HQ_STORE_LABEL && b.storeLabel !== HQ_STORE_LABEL) return -1;
-      if (a.storeLabel !== HQ_STORE_LABEL && b.storeLabel === HQ_STORE_LABEL) return 1;
-      return a.storeLabel.localeCompare(b.storeLabel, 'zh-Hant');
-    });
+  const lines = Array.from(lineMap.entries())
+    .sort(([keyA, a], [keyB, b]) => {
+      const orderA = catalogOrder.get(a.productId);
+      const orderB = catalogOrder.get(b.productId);
+      if (orderA !== undefined && orderB !== undefined) return orderA - orderB;
+      if (orderA !== undefined) return -1;
+      if (orderB !== undefined) return 1;
+      return (lineFirstSeen.get(keyA) ?? 0) - (lineFirstSeen.get(keyB) ?? 0);
+    })
+    .map(([, line]) => line);
+
+  return {
+    storeCount: storeLabels.size,
+    orderCount,
+    procurementAmount,
+    lines,
+  };
 }
 
 function OpenStoreOrderSummaryPanel({
-  summaries,
+  summary,
 }: {
-  summaries: OpenStoreOrderSummary[];
+  summary: OpenStoreOrderSummary;
 }) {
-  const totalOrderCount = summaries.reduce((sum, row) => sum + row.orderCount, 0);
-  const totalProcurementAmount = Math.round(
-    summaries.reduce((sum, row) => sum + row.procurementAmount, 0) * 100,
-  ) / 100;
-
   return (
     <details className="group rounded-2xl border border-zinc-800/90 bg-zinc-900/35">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden sm:p-5">
@@ -498,7 +492,7 @@ function OpenStoreOrderSummaryPanel({
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            共 {summaries.length} 家店、{totalOrderCount} 筆訂單，叫貨金額 $ {totalProcurementAmount.toLocaleString('zh-TW')}
+            共 {summary.storeCount} 家店、{summary.orderCount} 筆訂單，叫貨金額 $ {summary.procurementAmount.toLocaleString('zh-TW')}
           </p>
         </div>
         <ChevronDown
@@ -509,53 +503,37 @@ function OpenStoreOrderSummaryPanel({
       </summary>
 
       <div className="border-t border-zinc-800/80 p-3 sm:p-4">
-        {summaries.length === 0 ? (
+        {summary.orderCount === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/30 px-4 py-8 text-center text-sm text-zinc-500">
-            目前尚無可彙總的未完成訂單。
+            沒有符合條件的待出貨訂單；若要查看已盤點訂單，請點「已盤點」。
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {summaries.map((store) => (
-              <section
-                key={store.storeLabel}
-                className="overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/35"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/80 px-3 py-3">
-                  <div className="min-w-0">
-                    <h4 className="truncate text-base font-semibold text-[#f5f2ed]">{store.storeLabel}</h4>
-                    <p className="mt-0.5 text-xs text-zinc-500">{store.orderCount} 筆訂單</p>
-                  </div>
-                  <div className="text-right text-sm tabular-nums text-amber-400">
-                    $ {store.procurementAmount.toLocaleString('zh-TW')}
-                  </div>
-                </div>
-                <div className="max-h-72 overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="sticky top-0 bg-zinc-900 text-xs text-zinc-500">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-medium">品項</th>
-                        <th className="px-3 py-2 text-right font-medium">總數量</th>
-                        <th className="px-3 py-2 text-right font-medium">叫貨金額</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800/70">
-                      {store.lines.map((line) => (
-                        <tr key={line.productId || `${line.name}-${line.unit}`}>
-                          <td className="px-3 py-2 text-zinc-200">{line.name}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-amber-200">
-                            {fmtLineQty(line.qty)} {line.unit}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                            $ {line.amount.toLocaleString('zh-TW')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            ))}
-          </div>
+          <section className="overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/35">
+            <div className="max-h-[28rem] overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-zinc-900 text-xs text-zinc-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">品項</th>
+                    <th className="px-3 py-2 text-right font-medium">總數量</th>
+                    <th className="px-3 py-2 text-right font-medium">叫貨金額</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/70">
+                  {summary.lines.map((line) => (
+                    <tr key={line.productId || `${line.name}-${line.unit}`}>
+                      <td className="px-3 py-2 text-zinc-200">{line.name}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-amber-200">
+                        {fmtLineQty(line.qty)} {line.unit}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                        $ {line.amount.toLocaleString('zh-TW')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         )}
       </div>
     </details>
@@ -946,13 +924,12 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   );
 
   const rawById = useMemo(() => new Map(rawList.map((r) => [r.id, r])), [rawList]);
-  const openStoreOrderSummaries = useMemo(
-    () => buildOpenStoreOrderSummaries(rawList),
-    [rawList],
-  );
-
   const supplyRetailView = useMemo(() => userRoleToSupplyRetailView(userRole), [userRole]);
   const catalogItemsForOrderDetail = useSupplyCatalogItems(userRole);
+  const openStoreOrderSummary = useMemo(
+    () => buildOpenStoreOrderSummaries(rawList, catalogItemsForOrderDetail),
+    [rawList, catalogItemsForOrderDetail],
+  );
 
   const effectiveDateRange = useMemo(() => {
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(orderListPeriod);
@@ -1698,7 +1675,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         </div>
       </section>
 
-      <OpenStoreOrderSummaryPanel summaries={openStoreOrderSummaries} />
+      <OpenStoreOrderSummaryPanel summary={openStoreOrderSummary} />
 
       <div className="space-y-4">
         {filteredOrders.length === 0 && (
