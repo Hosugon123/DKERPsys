@@ -340,10 +340,16 @@ export function formatOrderPrintSlipQty(line: Pick<OrderPrintSlipLine, 'qty' | '
   return jin ? `${base}（${jin} 斤）` : base;
 }
 
+export function formatOrderPrintSlipTableQty(line: Pick<OrderPrintSlipLine, 'qty' | 'unit'>): string {
+  const qty = fmtLineQty(line.qty);
+  if (!pieceUnitIsLiang(line.unit)) return qty;
+  const jin = formatJinFromLiangQty(line.qty);
+  return jin ? `${qty}（${jin}）` : qty;
+}
+
 export function formatOrderPrintSlipUnit(line: Pick<OrderPrintSlipLine, 'qty' | 'unit'>): string {
   if (!pieceUnitIsLiang(line.unit)) return line.unit;
-  const jin = formatJinFromLiangQty(line.qty);
-  return jin ? `${line.unit}（${jin} 斤）` : line.unit;
+  return '兩（斤）';
 }
 
 export function buildOrderPrintSlipText(storeLabel: string, lines: OrderPrintSlipLine[]): string {
@@ -388,7 +394,7 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
       (line) => `
         <tr>
           <td class="item">${escapeReceiptHtml(line.name)}</td>
-          <td class="qty">${escapeReceiptHtml(fmtLineQty(line.qty))}</td>
+          <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
           <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
         </tr>`,
     )
