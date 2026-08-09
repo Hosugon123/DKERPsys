@@ -8,7 +8,7 @@ import {
   memo,
   type MouseEvent,
 } from 'react';
-import { Package, X, Minus, Plus, ListOrdered, Store, ChevronDown } from 'lucide-react';
+import { Package, X, Minus, Plus, ListOrdered, Store, ChevronDown, Printer } from 'lucide-react';
 import {
   DashboardMonthCustomRangePicker,
   resolveDashboardPeriodYmd,
@@ -323,6 +323,190 @@ function computeOrderDetailLineMetrics(
     batchUnitPrice,
     unitRetail,
   };
+}
+
+type OrderPrintSlipLine = {
+  productId: string;
+  name: string;
+  unit: string;
+  qty: number;
+};
+
+export function buildOrderPrintSlipText(storeLabel: string, lines: OrderPrintSlipLine[]): string {
+  const body = lines.length
+    ? lines.map((line) => `${line.name} ${fmtLineQty(line.qty)} ${line.unit}`).join('\n')
+    : '此訂單沒有可列印的出貨數量';
+  return `${storeLabel}\n${body}`;
+}
+
+export function buildOrderPrintSlipLines(
+  lines: OrderHistoryLine[],
+  stallSnap: MergedStallSnapForOrderDetail | null,
+  carrySnapForDisplay: CarrySnapForOrderDetail,
+  supplyRetailView: SupplyRetailView,
+): OrderPrintSlipLine[] {
+  return lines
+    .map((line) => {
+      const d = computeOrderDetailLineMetrics(line, stallSnap, carrySnapForDisplay, supplyRetailView);
+      return {
+        productId: line.productId,
+        name: line.name,
+        unit: line.unit,
+        qty: roundProcurementQty(d.displayedBringOut),
+      };
+    })
+    .filter((line) => line.qty > 0);
+}
+
+function escapeReceiptHtml(v: string | number): string {
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]): string {
+  const plainText = buildOrderPrintSlipText(storeLabel, lines);
+  const rows = lines
+    .map(
+      (line) => `
+        <tr>
+          <td>${escapeReceiptHtml(line.name)}</td>
+          <td class="qty">${escapeReceiptHtml(fmtLineQty(line.qty))}</td>
+          <td class="unit">${escapeReceiptHtml(line.unit)}</td>
+        </tr>`,
+    )
+    .join('');
+  return `<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeReceiptHtml(storeLabel)} 出貨單</title>
+  <style>
+    @page { size: 80mm auto; margin: 4mm; }
+    * { box-sizing: border-box; }
+    body {
+      width: 72mm;
+      margin: 0;
+      color: #111;
+      background: #fff;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    h1 {
+      margin: 0 0 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #111;
+      font-size: 22px;
+      line-height: 1.15;
+      text-align: center;
+      word-break: break-word;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th {
+      border-bottom: 1px solid #111;
+      padding: 5px 0;
+      font-size: 12px;
+      text-align: left;
+    }
+    td {
+      border-bottom: 1px dashed #999;
+      padding: 7px 0;
+      vertical-align: top;
+      font-size: 16px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+    th.qty, td.qty { width: 17mm; text-align: right; font-variant-numeric: tabular-nums; }
+    th.unit, td.unit { width: 10mm; padding-left: 2mm; text-align: left; white-space: nowrap; }
+    .empty {
+      padding: 16px 0;
+      text-align: center;
+      font-size: 14px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .toolbar button {
+      flex: 1;
+      border: 1px solid #111;
+      border-radius: 6px;
+      background: #fff;
+      color: #111;
+      padding: 8px 4px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    @media print {
+      .toolbar { display: none; }
+      body { width: 72mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button type="button" onclick="window.print()">列印</button>
+    <button type="button" onclick="shareSlip()">分享</button>
+    <button type="button" onclick="copySlip()">複製</button>
+  </div>
+  <h1>${escapeReceiptHtml(storeLabel)}</h1>
+  ${
+    lines.length
+      ? `<table>
+          <thead>
+            <tr><th>品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      : '<div class="empty">此訂單沒有可列印的出貨數量</div>'
+  }
+  <script>
+    var slipText = ${JSON.stringify(plainText)};
+    function copySlip() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(slipText).then(function () {
+          window.alert('已複製出貨單文字');
+        }).catch(function () {
+          window.prompt('請手動複製出貨單文字', slipText);
+        });
+      } else {
+        window.prompt('請手動複製出貨單文字', slipText);
+      }
+    }
+    function shareSlip() {
+      if (navigator.share) {
+        navigator.share({ title: ${JSON.stringify(`${storeLabel} 出貨單`)}, text: slipText }).catch(function () {});
+      } else {
+        copySlip();
+      }
+    }
+    window.addEventListener('load', function () {
+      window.focus();
+      var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (!isiOS) window.print();
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function openOrderPrintSlip(storeLabel: string, lines: OrderPrintSlipLine[]) {
+  const w = window.open('', '_blank', 'width=420,height=720');
+  if (!w) {
+    window.alert('瀏覽器阻擋了列印視窗，請允許彈出視窗後再試一次。');
+    return;
+  }
+  w.document.open();
+  w.document.write(buildOrderPrintSlipHtml(storeLabel, lines));
+  w.document.close();
 }
 
 /**
@@ -1736,6 +1920,15 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                   ) * 100,
                 ) / 100
               : null;
+          const printSlipLines =
+            expandedDetailLinesForTable && !isPickingThis && !isPriceAdjustThis
+              ? buildOrderPrintSlipLines(
+                  expandedDetailLinesForTable,
+                  stallSnap,
+                  carrySnapForDisplay,
+                  supplyRetailView,
+                )
+              : [];
           const pickKept = isPickingThis ? pickingLines.filter((l) => l.qty > 0) : [];
           const pickTotal = isPickingThis
             ? Math.round(
@@ -1911,6 +2104,19 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                           )}
                           <div className="w-full min-w-0 rounded-xl border border-zinc-800/90 bg-zinc-900/50 p-2.5 sm:p-3">
                             <div className="grid w-full grid-cols-2 gap-1.5 sm:grid-cols-[repeat(auto-fit,minmax(7.25rem,1fr))]">
+                              {!isPickingThis && !isPriceAdjustThis && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openOrderPrintSlip(order.franchisee, printSlipLines);
+                                  }}
+                                  className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-600/80 bg-zinc-950/70 px-2 text-sm font-semibold text-zinc-100 transition-colors hover:border-amber-500/60 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  <Printer size={16} aria-hidden />
+                                  列印單據
+                                </button>
+                              )}
                               {!isPickingThis && !isPriceAdjustThis && !stallLocked && (
                                 <button
                                   type="button"

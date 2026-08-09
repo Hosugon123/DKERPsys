@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOpenStoreOrderSummaries } from './Orders';
+import { buildOpenStoreOrderSummaries, buildOrderPrintSlipLines, buildOrderPrintSlipText } from './Orders';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 
 function order(input: {
@@ -82,5 +82,29 @@ describe('open store order summaries', () => {
     expect(summary.lines.find((line) => line.productId === 'black')?.amount).toBe(52);
     expect(summary.lines.find((line) => line.productId === 'rice')?.qty).toBe(7);
     expect(summary.lines.find((line) => line.productId === 'rice')?.amount).toBe(42);
+  });
+});
+
+describe('order print slip', () => {
+  it('prints store item names and bring-out quantities only', () => {
+    const lines = buildOrderPrintSlipLines(
+      [
+        { productId: 'black', name: '黑輪', unitPrice: 4, qty: 10, unit: '片' },
+        { productId: 'rice', name: '米血', unitPrice: 6, qty: 0, unit: '片' },
+      ],
+      null,
+      {
+        actualRevenue: '0',
+        updatedAt: '2026-08-08T10:00:00.000Z',
+        lines: {
+          black: { out: '', remain: '2' },
+          rice: { out: '', remain: '0' },
+        },
+      },
+      'headquarter',
+    );
+
+    expect(lines).toEqual([{ productId: 'black', name: '黑輪', unit: '片', qty: 12 }]);
+    expect(buildOrderPrintSlipText('高雄三民', lines)).toBe('高雄三民\n黑輪 12 片');
   });
 });
