@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildOpenStoreOrderSummaries, buildOrderPrintSlipLines, buildOrderPrintSlipText } from './Orders';
+import {
+  buildOpenStoreOrderSummaries,
+  buildOrderPrintSlipLines,
+  buildOrderPrintSlipText,
+  formatOrderPrintSlipQty,
+} from './Orders';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 
 function order(input: {
@@ -90,6 +95,7 @@ describe('order print slip', () => {
     const lines = buildOrderPrintSlipLines(
       [
         { productId: 'black', name: '黑輪', unitPrice: 4, qty: 10, unit: '片' },
+        { productId: 'pork', name: '大腸', unitPrice: 15, qty: 24, unit: '兩' },
         { productId: 'rice', name: '米血', unitPrice: 6, qty: 0, unit: '片' },
       ],
       null,
@@ -98,13 +104,18 @@ describe('order print slip', () => {
         updatedAt: '2026-08-08T10:00:00.000Z',
         lines: {
           black: { out: '', remain: '2' },
+          pork: { out: '', remain: '0' },
           rice: { out: '', remain: '0' },
         },
       },
       'headquarter',
     );
 
-    expect(lines).toEqual([{ productId: 'black', name: '黑輪', unit: '片', qty: 12 }]);
-    expect(buildOrderPrintSlipText('高雄三民', lines)).toBe('高雄三民\n黑輪 12 片');
+    expect(lines).toEqual([
+      { productId: 'black', name: '黑輪', unit: '片', qty: 12 },
+      { productId: 'pork', name: '大腸', unit: '兩', qty: 24 },
+    ]);
+    expect(formatOrderPrintSlipQty(lines[1])).toBe('24 兩（1.5 斤）');
+    expect(buildOrderPrintSlipText('高雄三民', lines)).toBe('高雄三民\n黑輪 12 片\n大腸 24 兩（1.5 斤）');
   });
 });

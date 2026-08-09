@@ -63,6 +63,7 @@ import {
   type SupplyItem,
   type SupplyRetailView,
 } from '../lib/supplyCatalog';
+import { formatJinFromLiangQty, pieceUnitIsLiang } from '../lib/liangJinQty';
 import { computeLine, num, roundProcurementQty } from '../lib/stallMath';
 import { getSalesRecord, mergeSalesRecordWithCatalog } from '../lib/salesRecordStorage';
 import { loadRemainSnapshotForOrderManagementDisplay } from '../lib/stallInventoryStorage';
@@ -332,9 +333,16 @@ type OrderPrintSlipLine = {
   qty: number;
 };
 
+export function formatOrderPrintSlipQty(line: Pick<OrderPrintSlipLine, 'qty' | 'unit'>): string {
+  const base = `${fmtLineQty(line.qty)} ${line.unit}`;
+  if (!pieceUnitIsLiang(line.unit)) return base;
+  const jin = formatJinFromLiangQty(line.qty);
+  return jin ? `${base}（${jin} 斤）` : base;
+}
+
 export function buildOrderPrintSlipText(storeLabel: string, lines: OrderPrintSlipLine[]): string {
   const body = lines.length
-    ? lines.map((line) => `${line.name} ${fmtLineQty(line.qty)} ${line.unit}`).join('\n')
+    ? lines.map((line) => `${line.name} ${formatOrderPrintSlipQty(line)}`).join('\n')
     : '此訂單沒有可列印的出貨數量';
   return `${storeLabel}\n${body}`;
 }
@@ -374,8 +382,7 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
       (line) => `
         <tr>
           <td>${escapeReceiptHtml(line.name)}</td>
-          <td class="qty">${escapeReceiptHtml(fmtLineQty(line.qty))}</td>
-          <td class="unit">${escapeReceiptHtml(line.unit)}</td>
+          <td class="qty" colspan="2">${escapeReceiptHtml(formatOrderPrintSlipQty(line))}</td>
         </tr>`,
     )
     .join('');
@@ -423,8 +430,8 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
       font-weight: 700;
       word-break: break-word;
     }
-    th.qty, td.qty { width: 17mm; text-align: right; font-variant-numeric: tabular-nums; }
-    th.unit, td.unit { width: 10mm; padding-left: 2mm; text-align: left; white-space: nowrap; }
+    th.qty, td.qty { width: 31mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 0; padding: 0; }
     .empty {
       padding: 16px 0;
       text-align: center;
