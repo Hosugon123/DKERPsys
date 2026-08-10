@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCombinedOpenStoreOrdersPrintHtml,
+  buildCombinedOpenStoreOrdersPrintText,
   buildOpenStoreOrderSummaries,
   buildOpenStoreOrderSummaryPrintHtml,
   buildOpenStoreOrderSummaryPrintText,
@@ -132,6 +134,54 @@ describe('open store order summaries', () => {
     expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
     expect(html).toContain('<th class="amount">\u91d1\u984d</th>');
     expect(html).toContain('position: sticky');
+  });
+
+  it('prints the aggregate and each store slip in one batch print page', () => {
+    const summary = buildOpenStoreOrderSummaries([
+      order({
+        id: 'open-today-a',
+        ymd: '2026-08-08',
+        storeLabel: '\u76f4\u71df\u5e97',
+        lines: [
+          { productId: 'black', name: '\u9ed1\u8f2a', unitPrice: 4, qty: 10, unit: '\u7247' },
+          { productId: 'rice', name: '\u7c73\u8840', unitPrice: 6, qty: 5, unit: '\u7247' },
+        ],
+      }),
+      order({
+        id: 'open-today-b',
+        ymd: '2026-08-08',
+        storeLabel: 'DK002',
+        lines: [{ productId: 'black', name: '\u9ed1\u8f2a', unitPrice: 4, qty: 3, unit: '\u7247' }],
+      }),
+    ], [{ id: 'rice' }, { id: 'black' }]);
+    const slips = [
+      {
+        orderId: 'open-today-a',
+        storeLabel: '\u76f4\u71df\u5e97',
+        lines: [
+          { productId: 'black', name: '\u9ed1\u8f2a', unit: '\u7247', qty: 10 },
+          { productId: 'rice', name: '\u7c73\u8840', unit: '\u7247', qty: 5 },
+        ],
+      },
+      {
+        orderId: 'open-today-b',
+        storeLabel: 'DK002',
+        lines: [{ productId: 'black', name: '\u9ed1\u8f2a', unit: '\u7247', qty: 3 }],
+      },
+    ];
+
+    const text = buildCombinedOpenStoreOrdersPrintText(summary, slips);
+    expect(text).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
+    expect(text).toContain('\u76f4\u71df\u5e97');
+    expect(text).toContain('DK002');
+    expect(text).toContain('\u9ed1\u8f2a 10 \u7247');
+
+    const html = buildCombinedOpenStoreOrdersPrintHtml(summary, slips);
+    expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u6574\u6279\u5217\u5370');
+    expect(html).toContain('open-today-a');
+    expect(html).toContain('open-today-b');
+    expect(html).toContain('page-break-before: always');
+    expect(html).toContain('onclick="closeSlip()"');
   });
 });
 
