@@ -797,6 +797,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
           </table>`
         : '<div class="empty">沒有需要列印的出貨數量</div>'
     }
+    <div class="cut-line">剪裁線</div>
   </section>`;
     })
     .join('');
@@ -821,6 +822,8 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       width: 72mm;
       margin: 0;
       background: #fff;
+      break-after: page;
+      page-break-after: always;
     }
     h1 {
       margin: 0 0 6px;
@@ -895,6 +898,19 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       page-break-before: always;
       padding-top: 2mm;
     }
+    .cut-line {
+      margin: 10mm 0 2mm;
+      border-top: 1px dashed #111;
+      color: #111;
+      font-size: 11px;
+      line-height: 2;
+      text-align: center;
+      letter-spacing: 0;
+    }
+    .receipt-page:last-of-type {
+      break-after: auto;
+      page-break-after: auto;
+    }
     @media print {
       .toolbar { display: none; }
       .receipt-page { width: 72mm; }
@@ -925,6 +941,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
           </table>`
         : '<div class="empty">目前沒有待出貨訂單</div>'
     }
+    <div class="cut-line">剪裁線</div>
   </section>
 ${slipSections}
   <script>
