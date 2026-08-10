@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOpenStoreOrderSummaries,
+  buildOrderPrintSlipHtml,
   buildOrderPrintSlipLines,
   buildOrderPrintSlipText,
   formatOrderPrintSlipQty,
@@ -121,5 +122,16 @@ describe('order print slip', () => {
     expect(formatOrderPrintSlipTableQty(lines[1])).toBe('24（1.5）');
     expect(formatOrderPrintSlipUnit(lines[1])).toBe('兩（斤）');
     expect(buildOrderPrintSlipText('高雄三民', lines)).toBe('高雄三民\n黑輪 12 片\n大腸 24 兩（1.5 斤）');
+  });
+
+  it('includes a mobile-friendly close action in the print window', () => {
+    const html = buildOrderPrintSlipHtml('直營店', [
+      { productId: 'black', name: '黑輪', unit: '片', qty: 12 },
+    ]);
+
+    expect(html).toContain('onclick="closeSlip()"');
+    expect(html).toContain('function closeSlip()');
+    expect(html).toContain('關閉');
+    expect(html).toContain('position: sticky');
   });
 });

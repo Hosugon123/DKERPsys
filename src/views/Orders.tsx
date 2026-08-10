@@ -387,7 +387,7 @@ function escapeReceiptHtml(v: string | number): string {
     .replace(/'/g, '&#39;');
 }
 
-function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]): string {
+export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]): string {
   const plainText = buildOrderPrintSlipText(storeLabel, lines);
   const rows = lines
     .map(
@@ -452,9 +452,14 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
       font-size: 14px;
     }
     .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
       display: flex;
       gap: 6px;
       margin-bottom: 8px;
+      padding-bottom: 4px;
+      background: #fff;
     }
     .toolbar button {
       flex: 1;
@@ -465,6 +470,10 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
       padding: 8px 4px;
       font-size: 13px;
       font-weight: 700;
+    }
+    .toolbar .close {
+      background: #111;
+      color: #fff;
     }
     @media print {
       .toolbar { display: none; }
@@ -477,6 +486,7 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
     <button type="button" onclick="window.print()">列印</button>
     <button type="button" onclick="shareSlip()">分享</button>
     <button type="button" onclick="copySlip()">複製</button>
+    <button class="close" type="button" onclick="closeSlip()">關閉</button>
   </div>
   <h1>${escapeReceiptHtml(storeLabel)}</h1>
   ${
@@ -509,6 +519,17 @@ function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]
         copySlip();
       }
     }
+    function closeSlip() {
+      window.close();
+      window.setTimeout(function () {
+        if (!window.closed) {
+          document.body.innerHTML = '<div class="toolbar"><button class="close" type="button" onclick="history.back()">返回</button></div><div class="empty">請使用瀏覽器返回或關閉此頁。</div>';
+        }
+      }, 120);
+    }
+    window.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeSlip();
+    });
     window.addEventListener('load', function () {
       window.focus();
       var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
