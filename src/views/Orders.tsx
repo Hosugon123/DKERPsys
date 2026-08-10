@@ -551,6 +551,196 @@ function openOrderPrintSlip(storeLabel: string, lines: OrderPrintSlipLine[]) {
   w.document.close();
 }
 
+export function buildOpenStoreOrderSummaryPrintText(summary: OpenStoreOrderSummary): string {
+  const header = [
+    '未完成訂單總和',
+    `共 ${summary.storeCount} 家店、${summary.orderCount} 筆訂單`,
+    `叫貨金額 $ ${summary.procurementAmount.toLocaleString('zh-TW')}`,
+  ];
+  const body = summary.lines.length
+    ? summary.lines.map((line) => `${line.name} ${formatOrderPrintSlipQty(line)} $ ${line.amount.toLocaleString('zh-TW')}`)
+    : ['目前沒有待出貨訂單'];
+  return [...header, ...body].join('\n');
+}
+
+export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSummary): string {
+  const plainText = buildOpenStoreOrderSummaryPrintText(summary);
+  const rows = summary.lines
+    .map(
+      (line) => `
+        <tr>
+          <td class="item">${escapeReceiptHtml(line.name)}</td>
+          <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
+          <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
+          <td class="amount">$ ${escapeReceiptHtml(line.amount.toLocaleString('zh-TW'))}</td>
+        </tr>`,
+    )
+    .join('');
+
+  return `<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <title>未完成訂單總和</title>
+  <style>
+    @page { size: 80mm auto; margin: 4mm; }
+    * { box-sizing: border-box; }
+    body {
+      width: 72mm;
+      margin: 0;
+      color: #111;
+      background: #fff;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    h1 {
+      margin: 0 0 6px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #111;
+      font-size: 20px;
+      line-height: 1.15;
+      text-align: center;
+    }
+    .summary {
+      margin: 0 0 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #111;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th {
+      border-bottom: 1px solid #111;
+      padding: 5px 0;
+      font-size: 11px;
+      text-align: left;
+    }
+    td {
+      border-bottom: 1px dashed #999;
+      padding: 7px 0;
+      vertical-align: top;
+      font-size: 14px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+    th.item, td.item { padding-left: 1mm; text-align: left; }
+    th.qty, td.qty { width: 14mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 15mm; text-align: center; white-space: nowrap; }
+    th.amount, td.amount { width: 18mm; padding-right: 1mm; text-align: right; white-space: nowrap; }
+    .empty {
+      padding: 16px 0;
+      text-align: center;
+      font-size: 14px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      background: #fff;
+    }
+    .toolbar button {
+      flex: 1;
+      border: 1px solid #111;
+      border-radius: 6px;
+      background: #fff;
+      color: #111;
+      padding: 8px 4px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .toolbar .close {
+      background: #111;
+      color: #fff;
+    }
+    @media print {
+      .toolbar { display: none; }
+      body { width: 72mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button type="button" onclick="window.print()">列印</button>
+    <button type="button" onclick="shareSlip()">分享</button>
+    <button type="button" onclick="copySlip()">複製</button>
+    <button class="close" type="button" onclick="closeSlip()">關閉</button>
+  </div>
+  <h1>未完成訂單總和</h1>
+  <div class="summary">
+    <div>出貨前對點</div>
+    <div>共 ${escapeReceiptHtml(summary.storeCount)} 家店、${escapeReceiptHtml(summary.orderCount)} 筆訂單</div>
+    <div>叫貨金額 $ ${escapeReceiptHtml(summary.procurementAmount.toLocaleString('zh-TW'))}</div>
+  </div>
+  ${
+    summary.lines.length
+      ? `<table>
+          <thead>
+            <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th><th class="amount">金額</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      : '<div class="empty">目前沒有待出貨訂單</div>'
+  }
+  <script>
+    var slipText = ${JSON.stringify(plainText)};
+    function copySlip() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(slipText).then(function () {
+          window.alert('已複製總和單文字');
+        }).catch(function () {
+          window.prompt('請手動複製總和單文字', slipText);
+        });
+      } else {
+        window.prompt('請手動複製總和單文字', slipText);
+      }
+    }
+    function shareSlip() {
+      if (navigator.share) {
+        navigator.share({ title: '未完成訂單總和', text: slipText }).catch(function () {});
+      } else {
+        copySlip();
+      }
+    }
+    function closeSlip() {
+      window.close();
+      window.setTimeout(function () {
+        if (!window.closed) {
+          document.body.innerHTML = '<div class="toolbar"><button class="close" type="button" onclick="history.back()">返回</button></div><div class="empty">請使用瀏覽器返回或關閉此頁。</div>';
+        }
+      }, 120);
+    }
+    window.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeSlip();
+    });
+    window.addEventListener('load', function () {
+      window.focus();
+      var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (!isiOS) window.print();
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function openOpenStoreOrderSummaryPrint(summary: OpenStoreOrderSummary) {
+  const w = window.open('', '_blank', 'width=420,height=720');
+  if (!w) {
+    window.alert('瀏覽器阻擋了列印視窗，請允許彈出視窗後再試一次。');
+    return;
+  }
+  w.document.open();
+  w.document.write(buildOpenStoreOrderSummaryPrintHtml(summary));
+  w.document.close();
+}
+
 /**
  * 訂單列表「預估金額」：已完成盤點用快照 estTotal；否則依叫貨列＋扣庫參考剩餘推算帶出零售預估（與明細表一致）。
  * @param stall 已算好的盤點經濟欄位，避免重複 aggregate
@@ -706,6 +896,12 @@ function OpenStoreOrderSummaryPanel({
 }: {
   summary: OpenStoreOrderSummary;
 }) {
+  const handlePrint = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openOpenStoreOrderSummaryPrint(summary);
+  };
+
   return (
     <details className="group rounded-2xl border border-zinc-800/90 bg-zinc-900/35">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-left [&::-webkit-details-marker]:hidden sm:p-5">
@@ -721,11 +917,23 @@ function OpenStoreOrderSummaryPanel({
             共 {summary.storeCount} 家店、{summary.orderCount} 筆訂單，叫貨金額 $ {summary.procurementAmount.toLocaleString('zh-TW')}
           </p>
         </div>
-        <ChevronDown
-          className="shrink-0 text-zinc-500 transition-transform group-open:rotate-180"
-          size={20}
-          aria-hidden
-        />
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={summary.orderCount === 0}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-amber-600/50 bg-amber-600/10 px-3 text-xs font-semibold text-amber-200 hover:bg-amber-600/20 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="列印未完成訂單總和"
+          >
+            <Printer size={15} aria-hidden />
+            列印
+          </button>
+          <ChevronDown
+            className="text-zinc-500 transition-transform group-open:rotate-180"
+            size={20}
+            aria-hidden
+          />
+        </div>
       </summary>
 
       <div className="border-t border-zinc-800/80 p-3 sm:p-4">

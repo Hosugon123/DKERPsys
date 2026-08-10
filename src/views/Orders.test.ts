@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOpenStoreOrderSummaries,
+  buildOpenStoreOrderSummaryPrintHtml,
+  buildOpenStoreOrderSummaryPrintText,
   buildOrderPrintSlipHtml,
   buildOrderPrintSlipLines,
   buildOrderPrintSlipText,
@@ -90,6 +92,46 @@ describe('open store order summaries', () => {
     expect(summary.lines.find((line) => line.productId === 'black')?.amount).toBe(52);
     expect(summary.lines.find((line) => line.productId === 'rice')?.qty).toBe(7);
     expect(summary.lines.find((line) => line.productId === 'rice')?.amount).toBe(42);
+  });
+
+  it('prints the unfinished order aggregate with totals and a mobile close action', () => {
+    const summary = buildOpenStoreOrderSummaries([
+      order({
+        id: 'open-today-a',
+        ymd: '2026-08-08',
+        storeLabel: '\u76f4\u71df\u5e97',
+        lines: [
+          { productId: 'black', name: '\u9ed1\u8f2a', unitPrice: 4, qty: 10, unit: '\u7247' },
+          { productId: 'rice', name: '\u7c73\u8840', unitPrice: 6, qty: 5, unit: '\u7247' },
+        ],
+      }),
+      order({
+        id: 'open-today-b',
+        ymd: '2026-08-08',
+        storeLabel: 'DK002',
+        lines: [{ productId: 'black', name: '\u9ed1\u8f2a', unitPrice: 4, qty: 3, unit: '\u7247' }],
+      }),
+      order({
+        id: 'open-other-day',
+        ymd: '2026-08-07',
+        storeLabel: 'DK003',
+        lines: [{ productId: 'rice', name: '\u7c73\u8840', unitPrice: 6, qty: 2, unit: '\u7247' }],
+      }),
+    ], [{ id: 'rice' }, { id: 'black' }]);
+
+    const text = buildOpenStoreOrderSummaryPrintText(summary);
+    expect(text).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
+    expect(text).toContain('\u5171 3 \u5bb6\u5e97\u30013 \u7b46\u8a02\u55ae');
+    expect(text).toContain('\u53eb\u8ca8\u91d1\u984d $ 94');
+    expect(text).toContain('\u7c73\u8840 7 \u7247 $ 42');
+    expect(text).toContain('\u9ed1\u8f2a 13 \u7247 $ 52');
+
+    const html = buildOpenStoreOrderSummaryPrintHtml(summary);
+    expect(html).toContain('onclick="closeSlip()"');
+    expect(html).toContain('function closeSlip()');
+    expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
+    expect(html).toContain('<th class="amount">\u91d1\u984d</th>');
+    expect(html).toContain('position: sticky');
   });
 });
 
