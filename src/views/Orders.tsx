@@ -570,10 +570,9 @@ export function buildOpenStoreOrderSummaryPrintText(summary: OpenStoreOrderSumma
   const header = [
     '未完成訂單總和',
     `共 ${summary.storeCount} 家店、${summary.orderCount} 筆訂單`,
-    `叫貨金額 $ ${summary.procurementAmount.toLocaleString('zh-TW')}`,
   ];
   const body = summary.lines.length
-    ? summary.lines.map((line) => `${line.name} ${formatOrderPrintSlipQty(line)} $ ${line.amount.toLocaleString('zh-TW')}`)
+    ? summary.lines.map((line) => `${line.name} ${formatOrderPrintSlipQty(line)}`)
     : ['目前沒有待出貨訂單'];
   return [...header, ...body].join('\n');
 }
@@ -587,7 +586,6 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
           <td class="item">${escapeReceiptHtml(line.name)}</td>
           <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
           <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
-          <td class="amount">$ ${escapeReceiptHtml(line.amount.toLocaleString('zh-TW'))}</td>
         </tr>`,
     )
     .join('');
@@ -652,9 +650,8 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 18mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 18mm; text-align: center; white-space: nowrap; }
-    th.amount, td.amount { width: 24mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
+    th.qty, td.qty { width: 26mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 22mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -701,13 +698,12 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   <div class="summary">
     <div>出貨前對點</div>
     <div>共 ${escapeReceiptHtml(summary.storeCount)} 家店、${escapeReceiptHtml(summary.orderCount)} 筆訂單</div>
-    <div>叫貨金額 $ ${escapeReceiptHtml(summary.procurementAmount.toLocaleString('zh-TW'))}</div>
   </div>
   ${
     summary.lines.length
       ? `<table>
           <thead>
-            <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th><th class="amount">金額</th></tr>
+            <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>`
@@ -785,7 +781,6 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
           <td class="item">${escapeReceiptHtml(line.name)}</td>
           <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
           <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
-          <td class="amount">$ ${escapeReceiptHtml(line.amount.toLocaleString('zh-TW'))}</td>
         </tr>`,
     )
     .join('');
@@ -891,9 +886,8 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 18mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 18mm; text-align: center; white-space: nowrap; }
-    th.amount, td.amount { width: 24mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
+    th.qty, td.qty { width: 26mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 22mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -953,13 +947,12 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     <div class="summary">
       <div>出貨前對點</div>
       <div>共 ${escapeReceiptHtml(summary.storeCount)} 家店、${escapeReceiptHtml(summary.orderCount)} 筆訂單</div>
-      <div>叫貨金額 $ ${escapeReceiptHtml(summary.procurementAmount.toLocaleString('zh-TW'))}</div>
     </div>
     ${
       summary.lines.length
         ? `<table>
             <thead>
-              <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th><th class="amount">金額</th></tr>
+              <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
             </thead>
             <tbody>${summaryRows}</tbody>
           </table>`

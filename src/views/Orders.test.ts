@@ -124,15 +124,17 @@ describe('open store order summaries', () => {
     const text = buildOpenStoreOrderSummaryPrintText(summary);
     expect(text).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
     expect(text).toContain('\u5171 3 \u5bb6\u5e97\u30013 \u7b46\u8a02\u55ae');
-    expect(text).toContain('\u53eb\u8ca8\u91d1\u984d $ 94');
-    expect(text).toContain('\u7c73\u8840 7 \u7247 $ 42');
-    expect(text).toContain('\u9ed1\u8f2a 13 \u7247 $ 52');
+    expect(text).not.toContain('\u53eb\u8ca8\u91d1\u984d');
+    expect(text).toContain('\u7c73\u8840 7 \u7247');
+    expect(text).toContain('\u9ed1\u8f2a 13 \u7247');
+    expect(text).not.toContain('$ 42');
 
     const html = buildOpenStoreOrderSummaryPrintHtml(summary);
     expect(html).toContain('onclick="closeSlip()"');
     expect(html).toContain('function closeSlip()');
     expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
-    expect(html).toContain('<th class="amount">\u91d1\u984d</th>');
+    expect(html).not.toContain('\u53eb\u8ca8\u91d1\u984d');
+    expect(html).not.toContain('<th class="amount">\u91d1\u984d</th>');
     expect(html).toContain('position: sticky');
   });
 
@@ -180,6 +182,7 @@ describe('open store order summaries', () => {
     expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u6574\u6279\u5217\u5370');
     expect(html).toContain('open-today-a');
     expect(html).toContain('open-today-b');
+    expect(html).not.toContain('<th class="amount">\u91d1\u984d</th>');
     expect(html).not.toContain('page-break-before: always');
     expect(html).toContain('width: 80mm');
     expect(html).toContain('page-break-inside: avoid');
