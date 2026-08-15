@@ -413,22 +413,24 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
   <style>
     @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    html { width: 80mm; margin: 0; padding: 0; }
+    html { width: 100%; min-width: 80mm; margin: 0; padding: 0; }
     body {
-      width: 80mm;
+      width: 100%;
+      min-width: 80mm;
+      max-width: 100vw;
       margin: 0;
-      padding: 3mm 3mm 4mm;
+      padding: 1.5mm 1.5mm 3mm;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-      font-size: 13px;
+      font-size: 17px;
       line-height: 1.25;
     }
     h1 {
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 22px;
+      font-size: 30px;
       line-height: 1.15;
       text-align: center;
       word-break: break-word;
@@ -436,28 +438,29 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     table {
       width: 100%;
       border-collapse: collapse;
+      table-layout: fixed;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     th {
       border-bottom: 1px solid #111;
       padding: 5px 0;
-      font-size: 12px;
+      font-size: 16px;
       text-align: left;
     }
     td {
       border-bottom: 1px dashed #999;
-      padding: 7px 0;
+      padding: 8px 0;
       vertical-align: top;
-      font-size: 16px;
+      font-size: 22px;
       font-weight: 700;
       word-break: break-word;
       break-inside: avoid;
       page-break-inside: avoid;
     }
-    th.item, td.item { padding-left: 2mm; text-align: left; }
-    th.qty, td.qty { width: 16mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 20mm; padding-right: 2mm; text-align: right; white-space: nowrap; }
+    th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
+    th.qty, td.qty { width: 20mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 22mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -480,7 +483,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       background: #fff;
       color: #111;
       padding: 8px 4px;
-      font-size: 13px;
+      font-size: 17px;
       font-weight: 700;
     }
     .toolbar .close {
@@ -489,7 +492,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     }
     @media print {
       .toolbar { display: none; }
-      html, body { width: 80mm; }
+      html, body { width: 80mm; min-width: 80mm; max-width: 80mm; }
     }
   </style>
 </head>
@@ -597,22 +600,24 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   <style>
     @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    html { width: 80mm; margin: 0; padding: 0; }
+    html { width: 100%; min-width: 80mm; margin: 0; padding: 0; }
     body {
-      width: 80mm;
+      width: 100%;
+      min-width: 80mm;
+      max-width: 100vw;
       margin: 0;
-      padding: 3mm 3mm 4mm;
+      padding: 1.5mm 1.5mm 3mm;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-      font-size: 13px;
+      font-size: 17px;
       line-height: 1.25;
     }
     h1 {
       margin: 0 0 6px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 20px;
+      font-size: 30px;
       line-height: 1.15;
       text-align: center;
     }
@@ -620,35 +625,36 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 12px;
+      font-size: 18px;
       line-height: 1.5;
     }
     table {
       width: 100%;
       border-collapse: collapse;
+      table-layout: fixed;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     th {
       border-bottom: 1px solid #111;
       padding: 5px 0;
-      font-size: 11px;
+      font-size: 15px;
       text-align: left;
     }
     td {
       border-bottom: 1px dashed #999;
-      padding: 7px 0;
+      padding: 8px 0;
       vertical-align: top;
-      font-size: 14px;
+      font-size: 20px;
       font-weight: 700;
       word-break: break-word;
       break-inside: avoid;
       page-break-inside: avoid;
     }
-    th.item, td.item { padding-left: 1mm; text-align: left; }
-    th.qty, td.qty { width: 14mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 15mm; text-align: center; white-space: nowrap; }
-    th.amount, td.amount { width: 18mm; padding-right: 1mm; text-align: right; white-space: nowrap; }
+    th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
+    th.qty, td.qty { width: 18mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 18mm; text-align: center; white-space: nowrap; }
+    th.amount, td.amount { width: 24mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -680,7 +686,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
     }
     @media print {
       .toolbar { display: none; }
-      html, body { width: 80mm; }
+      html, body { width: 80mm; min-width: 80mm; max-width: 80mm; }
     }
   </style>
 </head>
@@ -822,20 +828,25 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
   <style>
     @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    html { width: 80mm; margin: 0; padding: 0; }
+    html { width: 100%; min-width: 80mm; margin: 0; padding: 0; }
     body {
+      width: 100%;
+      min-width: 80mm;
+      max-width: 100vw;
       margin: 0;
       padding: 0;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-      font-size: 13px;
+      font-size: 17px;
       line-height: 1.25;
     }
     .receipt-page {
-      width: 80mm;
+      width: 100%;
+      min-width: 80mm;
+      max-width: 100vw;
       margin: 0;
-      padding: 3mm 3mm 4mm;
+      padding: 1.5mm 1.5mm 3mm;
       background: #fff;
       break-inside: avoid;
       page-break-inside: avoid;
@@ -844,7 +855,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       margin: 0 0 6px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 20px;
+      font-size: 30px;
       line-height: 1.15;
       text-align: center;
       word-break: break-word;
@@ -853,35 +864,36 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 12px;
+      font-size: 18px;
       line-height: 1.5;
     }
     table {
       width: 100%;
       border-collapse: collapse;
+      table-layout: fixed;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     th {
       border-bottom: 1px solid #111;
       padding: 5px 0;
-      font-size: 11px;
+      font-size: 15px;
       text-align: left;
     }
     td {
       border-bottom: 1px dashed #999;
-      padding: 7px 0;
+      padding: 8px 0;
       vertical-align: top;
-      font-size: 14px;
+      font-size: 20px;
       font-weight: 700;
       word-break: break-word;
       break-inside: avoid;
       page-break-inside: avoid;
     }
-    th.item, td.item { padding-left: 1mm; text-align: left; }
-    th.qty, td.qty { width: 14mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 15mm; text-align: center; white-space: nowrap; }
-    th.amount, td.amount { width: 18mm; padding-right: 1mm; text-align: right; white-space: nowrap; }
+    th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
+    th.qty, td.qty { width: 18mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.unit, td.unit { width: 18mm; text-align: center; white-space: nowrap; }
+    th.amount, td.amount { width: 24mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -893,7 +905,8 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       z-index: 10;
       display: flex;
       gap: 6px;
-      width: 80mm;
+      width: 100%;
+      min-width: 80mm;
       margin-bottom: 8px;
       padding-bottom: 4px;
       background: #fff;
@@ -912,10 +925,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       background: #111;
       color: #fff;
     }
-    .slip-page {
-      break-before: page;
-      page-break-before: always;
-    }
+    .slip-page { margin-top: 4mm; }
     .cut-line {
       margin: 10mm 0 2mm;
       border-top: 1px dashed #111;
@@ -927,7 +937,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     }
     @media print {
       .toolbar { display: none; }
-      html, body, .receipt-page { width: 80mm; }
+      html, body, .receipt-page { width: 80mm; min-width: 80mm; max-width: 80mm; }
     }
   </style>
 </head>

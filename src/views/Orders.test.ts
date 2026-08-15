@@ -180,7 +180,7 @@ describe('open store order summaries', () => {
     expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u6574\u6279\u5217\u5370');
     expect(html).toContain('open-today-a');
     expect(html).toContain('open-today-b');
-    expect(html).toContain('page-break-before: always');
+    expect(html).not.toContain('page-break-before: always');
     expect(html).toContain('width: 80mm');
     expect(html).toContain('page-break-inside: avoid');
     expect(html).toContain('\u526a\u88c1\u7dda');
