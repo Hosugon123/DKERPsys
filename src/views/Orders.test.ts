@@ -181,7 +181,8 @@ describe('open store order summaries', () => {
     expect(html).toContain('open-today-a');
     expect(html).toContain('open-today-b');
     expect(html).toContain('page-break-before: always');
-    expect(html).toContain('page-break-after: always');
+    expect(html).toContain('width: 80mm');
+    expect(html).toContain('page-break-inside: avoid');
     expect(html).toContain('\u526a\u88c1\u7dda');
     expect(html).toContain('onclick="closeSlip()"');
   });

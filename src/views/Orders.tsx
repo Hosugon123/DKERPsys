@@ -411,11 +411,13 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
   <meta charset="utf-8" />
   <title>${escapeReceiptHtml(storeLabel)} 出貨單</title>
   <style>
-    @page { size: 80mm auto; margin: 4mm; }
+    @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
+    html { width: 80mm; margin: 0; padding: 0; }
     body {
-      width: 72mm;
+      width: 80mm;
       margin: 0;
+      padding: 3mm 3mm 4mm;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
@@ -434,6 +436,8 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     table {
       width: 100%;
       border-collapse: collapse;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     th {
       border-bottom: 1px solid #111;
@@ -448,6 +452,8 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       font-size: 16px;
       font-weight: 700;
       word-break: break-word;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     th.item, td.item { padding-left: 2mm; text-align: left; }
     th.qty, td.qty { width: 16mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -483,7 +489,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     }
     @media print {
       .toolbar { display: none; }
-      body { width: 72mm; }
+      html, body { width: 80mm; }
     }
   </style>
 </head>
@@ -589,11 +595,13 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   <meta charset="utf-8" />
   <title>未完成訂單總和</title>
   <style>
-    @page { size: 80mm auto; margin: 4mm; }
+    @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
+    html { width: 80mm; margin: 0; padding: 0; }
     body {
-      width: 72mm;
+      width: 80mm;
       margin: 0;
+      padding: 3mm 3mm 4mm;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
@@ -618,6 +626,8 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
     table {
       width: 100%;
       border-collapse: collapse;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     th {
       border-bottom: 1px solid #111;
@@ -632,6 +642,8 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       font-size: 14px;
       font-weight: 700;
       word-break: break-word;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     th.item, td.item { padding-left: 1mm; text-align: left; }
     th.qty, td.qty { width: 14mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -668,7 +680,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
     }
     @media print {
       .toolbar { display: none; }
-      body { width: 72mm; }
+      html, body { width: 80mm; }
     }
   </style>
 </head>
@@ -808,10 +820,12 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
   <meta charset="utf-8" />
   <title>未完成訂單整批列印</title>
   <style>
-    @page { size: 80mm auto; margin: 4mm; }
+    @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
+    html { width: 80mm; margin: 0; padding: 0; }
     body {
       margin: 0;
+      padding: 0;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
@@ -819,11 +833,12 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       line-height: 1.25;
     }
     .receipt-page {
-      width: 72mm;
+      width: 80mm;
       margin: 0;
+      padding: 3mm 3mm 4mm;
       background: #fff;
-      break-after: page;
-      page-break-after: always;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     h1 {
       margin: 0 0 6px;
@@ -844,6 +859,8 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     table {
       width: 100%;
       border-collapse: collapse;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     th {
       border-bottom: 1px solid #111;
@@ -858,6 +875,8 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       font-size: 14px;
       font-weight: 700;
       word-break: break-word;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     th.item, td.item { padding-left: 1mm; text-align: left; }
     th.qty, td.qty { width: 14mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -874,7 +893,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       z-index: 10;
       display: flex;
       gap: 6px;
-      width: 72mm;
+      width: 80mm;
       margin-bottom: 8px;
       padding-bottom: 4px;
       background: #fff;
@@ -896,7 +915,6 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     .slip-page {
       break-before: page;
       page-break-before: always;
-      padding-top: 2mm;
     }
     .cut-line {
       margin: 10mm 0 2mm;
@@ -907,13 +925,9 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       text-align: center;
       letter-spacing: 0;
     }
-    .receipt-page:last-of-type {
-      break-after: auto;
-      page-break-after: auto;
-    }
     @media print {
       .toolbar { display: none; }
-      .receipt-page { width: 72mm; }
+      html, body, .receipt-page { width: 80mm; }
     }
   </style>
 </head>
