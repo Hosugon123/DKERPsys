@@ -403,6 +403,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>${escapeReceiptHtml(storeLabel)} 出貨單</title>
   <style>
     @page { size: 80mm auto; margin: 0; }
@@ -419,6 +420,9 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
       font-size: 17px;
       line-height: 1.25;
+      overflow: visible;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
     h1 {
       margin: 0 0 8px;
@@ -484,8 +488,20 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       color: #fff;
     }
     @media print {
+      * { overflow: visible !important; }
       .toolbar { display: none; }
-      html, body { width: 80mm; min-width: 80mm; max-width: 80mm; }
+      html, body {
+        width: 80mm;
+        min-width: 80mm;
+        max-width: 80mm;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+      }
+      table, thead, tbody, tr, td, th {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
     }
   </style>
 </head>
@@ -586,6 +602,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>未完成訂單總和</title>
   <style>
     @page { size: 80mm auto; margin: 0; }
@@ -602,6 +619,9 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
       font-size: 17px;
       line-height: 1.25;
+      overflow: visible;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
     h1 {
       margin: 0 0 6px;
@@ -673,8 +693,20 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       color: #fff;
     }
     @media print {
+      * { overflow: visible !important; }
       .toolbar { display: none; }
-      html, body { width: 80mm; min-width: 80mm; max-width: 80mm; }
+      html, body {
+        width: 80mm;
+        min-width: 80mm;
+        max-width: 80mm;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+      }
+      table, thead, tbody, tr, td, th {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
     }
   </style>
 </head>
@@ -808,6 +840,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>未完成訂單整批列印</title>
   <style>
     @page { size: 80mm auto; margin: 0; }
@@ -824,6 +857,9 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
       font-size: 17px;
       line-height: 1.25;
+      overflow: visible;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
     .receipt-page {
       width: 100%;
@@ -918,8 +954,20 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       letter-spacing: 0;
     }
     @media print {
+      * { overflow: visible !important; }
       .toolbar { display: none; }
-      html, body, .receipt-page { width: 80mm; min-width: 80mm; max-width: 80mm; }
+      html, body, .receipt-page {
+        width: 80mm;
+        min-width: 80mm;
+        max-width: 80mm;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+      }
+      .receipt-page, table, thead, tbody, tr, td, th {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
     }
   </style>
 </head>

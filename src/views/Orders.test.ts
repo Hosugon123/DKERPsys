@@ -228,6 +228,8 @@ describe('order print slip', () => {
     expect(html).toContain('onclick="closeSlip()"');
     expect(html).toContain('function closeSlip()');
     expect(html).toContain('關閉');
+    expect(html).toContain('name="viewport"');
+    expect(html).toContain('height: auto !important');
     expect(html).toContain('<th class="qty">數量</th>');
     expect(html).not.toContain('<th class="unit">單位</th>');
     expect(html).toContain('position: sticky');
