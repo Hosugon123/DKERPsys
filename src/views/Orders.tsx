@@ -388,8 +388,50 @@ function escapeReceiptHtml(v: string | number): string {
     .replace(/'/g, '&#39;');
 }
 
+const THERMAL_RECEIPT_WIDTH_MM = 80;
+const IOS_PRINT_PDF_WIDTH_MM = 210;
+const IOS_PRINT_SCALE = IOS_PRINT_PDF_WIDTH_MM / THERMAL_RECEIPT_WIDTH_MM;
+
+function estimateReceiptPageHeightMm(rowCount: number, sectionCount = 1): number {
+  return Math.max(120, Math.ceil(30 + sectionCount * 18 + rowCount * 11));
+}
+
+function estimateCombinedReceiptPageHeightMm(summaryRows: number, slips: OpenStoreOrderPrintSlip[]): number {
+  const slipRows = slips.reduce((total, slip) => total + slip.lines.length, 0);
+  const sectionCount = 1 + slips.length;
+  return Math.max(160, Math.ceil(34 + sectionCount * 24 + (summaryRows + slipRows) * 11));
+}
+
+function buildIosPrintAppFitScript(pageHeightMm: number): string {
+  const iosPageHeightMm = Math.ceil(pageHeightMm * IOS_PRINT_SCALE);
+  return `
+    function installIosPrintAppFit() {
+      var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (!isiOS) return false;
+      document.documentElement.classList.add('ios-print-app');
+      var style = document.createElement('style');
+      style.textContent = '@page { size: ${IOS_PRINT_PDF_WIDTH_MM}mm ${iosPageHeightMm}mm; margin: 0; }' +
+        '@media print {' +
+        '* { overflow: visible !important; }' +
+        'html, body, .receipt-page { width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; min-width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; max-width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; height: auto !important; min-height: 0 !important; }' +
+        'body { padding: 4mm 5mm 8mm !important; font-size: 48px !important; line-height: 1.18 !important; }' +
+        '.receipt-page { padding: 4mm 5mm 8mm !important; }' +
+        'h1 { margin-bottom: 12px !important; padding-bottom: 14px !important; border-bottom: 3px solid #111 !important; font-size: 84px !important; line-height: 1.08 !important; }' +
+        '.summary, .meta { margin-bottom: 14px !important; padding-bottom: 14px !important; border-bottom: 3px solid #111 !important; font-size: 48px !important; line-height: 1.35 !important; }' +
+        'th { padding: 12px 0 !important; border-bottom: 3px solid #111 !important; font-size: 42px !important; }' +
+        'td { padding: 16px 0 !important; border-bottom: 3px dashed #777 !important; font-size: 64px !important; line-height: 1.16 !important; }' +
+        'th.item, td.item { padding-left: 2mm !important; }' +
+        'th.qty, td.qty { width: 118mm !important; padding-right: 2mm !important; }' +
+        '.cut-line { margin: 24mm 0 6mm !important; border-top: 3px dashed #111 !important; font-size: 28px !important; }' +
+        '}';
+      document.head.appendChild(style);
+      return true;
+    }`;
+}
+
 export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]): string {
   const plainText = buildOrderPrintSlipText(storeLabel, lines);
+  const pageHeightMm = estimateReceiptPageHeightMm(lines.length);
   const rows = lines
     .map(
       (line) => `
@@ -406,7 +448,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>${escapeReceiptHtml(storeLabel)} 出貨單</title>
   <style>
-    @page { size: 80mm auto; margin: 0; }
+    @page { size: ${THERMAL_RECEIPT_WIDTH_MM}mm ${pageHeightMm}mm; margin: 0; }
     * { box-sizing: border-box; }
     html { width: 100%; min-width: 80mm; margin: 0; padding: 0; }
     body {
@@ -418,7 +460,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-      font-size: 17px;
+      font-size: 19px;
       line-height: 1.25;
       overflow: visible;
       -webkit-print-color-adjust: exact;
@@ -428,7 +470,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 30px;
+      font-size: 34px;
       line-height: 1.15;
       text-align: center;
       word-break: break-word;
@@ -443,21 +485,21 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     th {
       border-bottom: 1px solid #111;
       padding: 5px 0;
-      font-size: 16px;
+      font-size: 18px;
       text-align: left;
     }
     td {
       border-bottom: 1px dashed #999;
       padding: 8px 0;
       vertical-align: top;
-      font-size: 22px;
+      font-size: 26px;
       font-weight: 700;
       word-break: break-word;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 42mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.qty, td.qty { width: 48mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -480,7 +522,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       background: #fff;
       color: #111;
       padding: 8px 4px;
-      font-size: 17px;
+      font-size: 19px;
       font-weight: 700;
     }
     .toolbar .close {
@@ -491,9 +533,9 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       * { overflow: visible !important; }
       .toolbar { display: none; }
       html, body {
-        width: 80mm;
-        min-width: 80mm;
-        max-width: 80mm;
+        width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
+        min-width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
+        max-width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
         height: auto !important;
         min-height: 0 !important;
         overflow: visible !important;
@@ -588,6 +630,7 @@ export function buildOpenStoreOrderSummaryPrintText(summary: OpenStoreOrderSumma
 
 export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSummary): string {
   const plainText = buildOpenStoreOrderSummaryPrintText(summary);
+  const pageHeightMm = estimateReceiptPageHeightMm(summary.lines.length, 2);
   const rows = summary.lines
     .map(
       (line) => `
@@ -605,7 +648,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>未完成訂單總和</title>
   <style>
-    @page { size: 80mm auto; margin: 0; }
+    @page { size: ${THERMAL_RECEIPT_WIDTH_MM}mm ${pageHeightMm}mm; margin: 0; }
     * { box-sizing: border-box; }
     html { width: 100%; min-width: 80mm; margin: 0; padding: 0; }
     body {
@@ -617,7 +660,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-      font-size: 17px;
+      font-size: 19px;
       line-height: 1.25;
       overflow: visible;
       -webkit-print-color-adjust: exact;
@@ -627,7 +670,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       margin: 0 0 6px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 30px;
+      font-size: 34px;
       line-height: 1.15;
       text-align: center;
     }
@@ -635,7 +678,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 18px;
+      font-size: 20px;
       line-height: 1.5;
     }
     table {
@@ -648,21 +691,21 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
     th {
       border-bottom: 1px solid #111;
       padding: 5px 0;
-      font-size: 15px;
+      font-size: 18px;
       text-align: left;
     }
     td {
       border-bottom: 1px dashed #999;
       padding: 8px 0;
       vertical-align: top;
-      font-size: 20px;
+      font-size: 26px;
       font-weight: 700;
       word-break: break-word;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 42mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.qty, td.qty { width: 48mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -696,9 +739,9 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       * { overflow: visible !important; }
       .toolbar { display: none; }
       html, body {
-        width: 80mm;
-        min-width: 80mm;
-        max-width: 80mm;
+        width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
+        min-width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
+        max-width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
         height: auto !important;
         min-height: 0 !important;
         overflow: visible !important;
@@ -734,6 +777,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   }
   <script>
     var slipText = ${JSON.stringify(plainText)};
+    ${buildIosPrintAppFitScript(pageHeightMm)}
     function copySlip() {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(slipText).then(function () {
@@ -765,7 +809,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
     });
     window.addEventListener('load', function () {
       window.focus();
-      var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var isiOS = installIosPrintAppFit();
       if (!isiOS) window.print();
     });
   </script>
@@ -797,6 +841,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
   slips: OpenStoreOrderPrintSlip[],
 ): string {
   const plainText = buildCombinedOpenStoreOrdersPrintText(summary, slips);
+  const pageHeightMm = estimateCombinedReceiptPageHeightMm(summary.lines.length, slips);
   const summaryRows = summary.lines
     .map(
       (line) => `
@@ -843,7 +888,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>未完成訂單整批列印</title>
   <style>
-    @page { size: 80mm auto; margin: 0; }
+    @page { size: ${THERMAL_RECEIPT_WIDTH_MM}mm ${pageHeightMm}mm; margin: 0; }
     * { box-sizing: border-box; }
     html { width: 100%; min-width: 80mm; margin: 0; padding: 0; }
     body {
@@ -855,7 +900,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-      font-size: 17px;
+      font-size: 19px;
       line-height: 1.25;
       overflow: visible;
       -webkit-print-color-adjust: exact;
@@ -875,7 +920,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       margin: 0 0 6px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 30px;
+      font-size: 34px;
       line-height: 1.15;
       text-align: center;
       word-break: break-word;
@@ -884,7 +929,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 18px;
+      font-size: 20px;
       line-height: 1.5;
     }
     table {
@@ -897,21 +942,21 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     th {
       border-bottom: 1px solid #111;
       padding: 5px 0;
-      font-size: 15px;
+      font-size: 18px;
       text-align: left;
     }
     td {
       border-bottom: 1px dashed #999;
       padding: 8px 0;
       vertical-align: top;
-      font-size: 20px;
+      font-size: 26px;
       font-weight: 700;
       word-break: break-word;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 42mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    th.qty, td.qty { width: 48mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -957,9 +1002,9 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       * { overflow: visible !important; }
       .toolbar { display: none; }
       html, body, .receipt-page {
-        width: 80mm;
-        min-width: 80mm;
-        max-width: 80mm;
+        width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
+        min-width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
+        max-width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
         height: auto !important;
         min-height: 0 !important;
         overflow: visible !important;
@@ -999,6 +1044,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
 ${slipSections}
   <script>
     var slipText = ${JSON.stringify(plainText)};
+    ${buildIosPrintAppFitScript(pageHeightMm)}
     function copySlip() {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(slipText).then(function () {
@@ -1030,7 +1076,7 @@ ${slipSections}
     });
     window.addEventListener('load', function () {
       window.focus();
-      var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var isiOS = installIosPrintAppFit();
       if (!isiOS) window.print();
     });
   </script>
