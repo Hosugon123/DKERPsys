@@ -10,7 +10,6 @@ import {
   buildOrderPrintSlipText,
   formatOrderPrintSlipQty,
   formatOrderPrintSlipTableQty,
-  formatOrderPrintSlipUnit,
 } from './Orders';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 
@@ -217,8 +216,7 @@ describe('order print slip', () => {
       { productId: 'pork', name: '大腸', unit: '兩', qty: 24 },
     ]);
     expect(formatOrderPrintSlipQty(lines[1])).toBe('24 兩（1.5 斤）');
-    expect(formatOrderPrintSlipTableQty(lines[1])).toBe('24（1.5）');
-    expect(formatOrderPrintSlipUnit(lines[1])).toBe('兩（斤）');
+    expect(formatOrderPrintSlipTableQty(lines[1])).toBe('24 兩（1.5 斤）');
     expect(buildOrderPrintSlipText('高雄三民', lines)).toBe('高雄三民\n黑輪 12 片\n大腸 24 兩（1.5 斤）');
   });
 
@@ -230,6 +228,8 @@ describe('order print slip', () => {
     expect(html).toContain('onclick="closeSlip()"');
     expect(html).toContain('function closeSlip()');
     expect(html).toContain('關閉');
+    expect(html).toContain('<th class="qty">數量</th>');
+    expect(html).not.toContain('<th class="unit">單位</th>');
     expect(html).toContain('position: sticky');
   });
 });

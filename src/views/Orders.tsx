@@ -347,15 +347,10 @@ export function formatOrderPrintSlipQty(line: Pick<OrderPrintSlipLine, 'qty' | '
 }
 
 export function formatOrderPrintSlipTableQty(line: Pick<OrderPrintSlipLine, 'qty' | 'unit'>): string {
-  const qty = fmtLineQty(line.qty);
+  const qty = `${fmtLineQty(line.qty)} ${line.unit}`;
   if (!pieceUnitIsLiang(line.unit)) return qty;
   const jin = formatJinFromLiangQty(line.qty);
-  return jin ? `${qty}（${jin}）` : qty;
-}
-
-export function formatOrderPrintSlipUnit(line: Pick<OrderPrintSlipLine, 'qty' | 'unit'>): string {
-  if (!pieceUnitIsLiang(line.unit)) return line.unit;
-  return '兩（斤）';
+  return jin ? `${qty}（${jin} 斤）` : qty;
 }
 
 export function buildOrderPrintSlipText(storeLabel: string, lines: OrderPrintSlipLine[]): string {
@@ -401,7 +396,6 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
         <tr>
           <td class="item">${escapeReceiptHtml(line.name)}</td>
           <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
-          <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
         </tr>`,
     )
     .join('');
@@ -459,8 +453,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 20mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 22mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
+    th.qty, td.qty { width: 42mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -508,7 +501,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     lines.length
       ? `<table>
           <thead>
-            <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
+            <tr><th class="item">品項</th><th class="qty">數量</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>`
@@ -585,7 +578,6 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
         <tr>
           <td class="item">${escapeReceiptHtml(line.name)}</td>
           <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
-          <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
         </tr>`,
     )
     .join('');
@@ -650,8 +642,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 26mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 22mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
+    th.qty, td.qty { width: 42mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -703,7 +694,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
     summary.lines.length
       ? `<table>
           <thead>
-            <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
+            <tr><th class="item">品項</th><th class="qty">數量</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>`
@@ -780,7 +771,6 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
         <tr>
           <td class="item">${escapeReceiptHtml(line.name)}</td>
           <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
-          <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
         </tr>`,
     )
     .join('');
@@ -792,7 +782,6 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
         <tr>
           <td class="item">${escapeReceiptHtml(line.name)}</td>
           <td class="qty">${escapeReceiptHtml(formatOrderPrintSlipTableQty(line))}</td>
-          <td class="unit">${escapeReceiptHtml(formatOrderPrintSlipUnit(line))}</td>
         </tr>`,
         )
         .join('');
@@ -804,7 +793,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       slip.lines.length
         ? `<table>
             <thead>
-              <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
+              <tr><th class="item">品項</th><th class="qty">數量</th></tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>`
@@ -886,8 +875,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       page-break-inside: avoid;
     }
     th.item, td.item { width: auto; padding-left: 0.5mm; text-align: left; }
-    th.qty, td.qty { width: 26mm; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.unit, td.unit { width: 22mm; padding-right: 0.5mm; text-align: right; white-space: nowrap; }
+    th.qty, td.qty { width: 42mm; padding-right: 0.5mm; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .empty {
       padding: 16px 0;
       text-align: center;
@@ -952,7 +940,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       summary.lines.length
         ? `<table>
             <thead>
-              <tr><th class="item">品項</th><th class="qty">數量</th><th class="unit">單位</th></tr>
+            <tr><th class="item">品項</th><th class="qty">數量</th></tr>
             </thead>
             <tbody>${summaryRows}</tbody>
           </table>`
