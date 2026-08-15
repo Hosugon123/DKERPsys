@@ -178,13 +178,18 @@ describe('open store order summaries', () => {
     expect(text).toContain('\u9ed1\u8f2a 10 \u7247');
 
     const html = buildCombinedOpenStoreOrdersPrintHtml(summary, slips);
-    expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u6574\u6279\u5217\u5370');
+    expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u6210\u5217\u5370');
     expect(html).toContain('open-today-a');
     expect(html).toContain('open-today-b');
     expect(html).not.toContain('<th class="amount">\u91d1\u984d</th>');
     expect(html).not.toContain('page-break-before: always');
     expect(html).toContain('width: 80mm');
     expect(html).toContain('page-break-inside: avoid');
+    expect(html).toContain('<body class="batch-print">');
+    expect(html).toContain('.batch-print .receipt-page');
+    expect(html).toContain('break-after: page');
+    expect(html).toContain('page-break-after: always');
+    expect(html).toContain('.batch-print .receipt-page:last-of-type');
     expect(html).toContain('\u526a\u88c1\u7dda');
     expect(html).toContain('onclick="closeSlip()"');
   });

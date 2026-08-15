@@ -397,9 +397,9 @@ function estimateReceiptPageHeightMm(rowCount: number, sectionCount = 1): number
 }
 
 function estimateCombinedReceiptPageHeightMm(summaryRows: number, slips: OpenStoreOrderPrintSlip[]): number {
-  const slipRows = slips.reduce((total, slip) => total + slip.lines.length, 0);
-  const sectionCount = 1 + slips.length;
-  return Math.max(160, Math.ceil(34 + sectionCount * 24 + (summaryRows + slipRows) * 11));
+  const summaryHeight = estimateReceiptPageHeightMm(summaryRows, 2);
+  const slipHeights = slips.map((slip) => estimateReceiptPageHeightMm(slip.lines.length, 2));
+  return Math.max(160, summaryHeight, ...slipHeights);
 }
 
 function buildIosPrintAppFitScript(pageHeightMm: number): string {
@@ -422,6 +422,8 @@ function buildIosPrintAppFitScript(pageHeightMm: number): string {
         'td { padding: 16px 0 !important; border-bottom: 3px dashed #777 !important; font-size: 64px !important; line-height: 1.16 !important; }' +
         'th.item, td.item { padding-left: 2mm !important; }' +
         'th.qty, td.qty { width: 118mm !important; padding-right: 2mm !important; }' +
+        '.batch-print .receipt-page { break-after: page !important; page-break-after: always !important; }' +
+        '.batch-print .receipt-page:last-of-type { break-after: auto !important; page-break-after: auto !important; }' +
         '.cut-line { margin: 24mm 0 6mm !important; border-top: 3px dashed #111 !important; font-size: 28px !important; }' +
         '}';
       document.head.appendChild(style);
@@ -897,7 +899,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>未完成訂單整批列印</title>
+  <title>未完成訂單總成列印</title>
   <style>
     @page { size: ${THERMAL_RECEIPT_WIDTH_MM}mm ${pageHeightMm}mm; margin: 0; }
     * { box-sizing: border-box; }
@@ -926,6 +928,14 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       background: #fff;
       break-inside: avoid;
       page-break-inside: avoid;
+    }
+    .batch-print .receipt-page {
+      break-after: page;
+      page-break-after: always;
+    }
+    .batch-print .receipt-page:last-of-type {
+      break-after: auto;
+      page-break-after: auto;
     }
     h1 {
       margin: 0 0 6px;
@@ -1024,10 +1034,18 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
         break-inside: avoid;
         page-break-inside: avoid;
       }
+      .batch-print .receipt-page {
+        break-after: page;
+        page-break-after: always;
+      }
+      .batch-print .receipt-page:last-of-type {
+        break-after: auto;
+        page-break-after: auto;
+      }
     }
   </style>
 </head>
-<body>
+<body class="batch-print">
   <div class="toolbar">
     <button type="button" onclick="printSlip()">列印</button>
     <button type="button" onclick="shareSlip()">分享</button>
@@ -1064,17 +1082,17 @@ ${slipSections}
     function copySlip() {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(slipText).then(function () {
-          window.alert('已複製整批列印文字');
+          window.alert('已複製總成列印文字');
         }).catch(function () {
-          window.prompt('請手動複製整批列印文字', slipText);
+          window.prompt('請手動複製總成列印文字', slipText);
         });
       } else {
-        window.prompt('請手動複製整批列印文字', slipText);
+        window.prompt('請手動複製總成列印文字', slipText);
       }
     }
     function shareSlip() {
       if (navigator.share) {
-        navigator.share({ title: '未完成訂單整批列印', text: slipText }).catch(function () {});
+        navigator.share({ title: '未完成訂單總成列印', text: slipText }).catch(function () {});
       } else {
         copySlip();
       }
@@ -1316,10 +1334,10 @@ function OpenStoreOrderSummaryPanel({
             onClick={handleBatchPrint}
             disabled={summary.orderCount === 0 || printSlips.length === 0}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-3 text-xs font-semibold text-emerald-200 hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label="整批列印未完成訂單"
+            aria-label="總成列印未完成訂單"
           >
             <Printer size={15} aria-hidden />
-            整批
+            總成列印
           </button>
           <ChevronDown
             className="text-zinc-500 transition-transform group-open:rotate-180"
