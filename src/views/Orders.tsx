@@ -549,7 +549,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
 </head>
 <body>
   <div class="toolbar">
-    <button type="button" onclick="window.print()">列印</button>
+    <button type="button" onclick="printSlip()">列印</button>
     <button type="button" onclick="shareSlip()">分享</button>
     <button type="button" onclick="copySlip()">複製</button>
     <button class="close" type="button" onclick="closeSlip()">關閉</button>
@@ -567,6 +567,12 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
   }
   <script>
     var slipText = ${JSON.stringify(plainText)};
+    ${buildIosPrintAppFitScript(pageHeightMm)}
+    function printSlip() {
+      if (typeof installIosPrintAppFit === 'function') installIosPrintAppFit();
+      window.focus();
+      window.print();
+    }
     function copySlip() {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(slipText).then(function () {
@@ -598,7 +604,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     });
     window.addEventListener('load', function () {
       window.focus();
-      var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var isiOS = installIosPrintAppFit();
       if (!isiOS) window.print();
     });
   </script>
@@ -755,7 +761,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
 </head>
 <body>
   <div class="toolbar">
-    <button type="button" onclick="window.print()">列印</button>
+    <button type="button" onclick="printSlip()">列印</button>
     <button type="button" onclick="shareSlip()">分享</button>
     <button type="button" onclick="copySlip()">複製</button>
     <button class="close" type="button" onclick="closeSlip()">關閉</button>
@@ -778,6 +784,11 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   <script>
     var slipText = ${JSON.stringify(plainText)};
     ${buildIosPrintAppFitScript(pageHeightMm)}
+    function printSlip() {
+      if (typeof installIosPrintAppFit === 'function') installIosPrintAppFit();
+      window.focus();
+      window.print();
+    }
     function copySlip() {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(slipText).then(function () {
@@ -1018,7 +1029,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
 </head>
 <body>
   <div class="toolbar">
-    <button type="button" onclick="window.print()">列印</button>
+    <button type="button" onclick="printSlip()">列印</button>
     <button type="button" onclick="shareSlip()">分享</button>
     <button type="button" onclick="copySlip()">複製</button>
     <button class="close" type="button" onclick="closeSlip()">關閉</button>
@@ -1045,6 +1056,11 @@ ${slipSections}
   <script>
     var slipText = ${JSON.stringify(plainText)};
     ${buildIosPrintAppFitScript(pageHeightMm)}
+    function printSlip() {
+      if (typeof installIosPrintAppFit === 'function') installIosPrintAppFit();
+      window.focus();
+      window.print();
+    }
     function copySlip() {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(slipText).then(function () {
