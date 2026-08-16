@@ -436,7 +436,45 @@ function buildReceiptWindowScript(opts: {
   shareTitle: string;
   copySuccessMessage: string;
   copyPromptMessage: string;
+  sequentialPrint?: boolean;
+  autoPrint?: boolean;
 }): string {
+  const sequentialPrintScript = opts.sequentialPrint
+    ? `
+    var receiptPages = [];
+    var currentReceiptIndex = 0;
+    function refreshReceiptPages() {
+      receiptPages = Array.prototype.slice.call(document.querySelectorAll('.receipt-page'));
+      if (currentReceiptIndex >= receiptPages.length) currentReceiptIndex = Math.max(0, receiptPages.length - 1);
+      receiptPages.forEach(function (page, index) {
+        page.classList.toggle('is-print-current', index === currentReceiptIndex);
+      });
+      var label = document.getElementById('sequentialPrintLabel');
+      if (label) label.textContent = receiptPages.length ? String(currentReceiptIndex + 1) + ' / ' + String(receiptPages.length) : '0 / 0';
+    }
+    function printCurrentReceipt() {
+      refreshReceiptPages();
+      if (!receiptPages.length) return;
+      document.body.classList.add('sequential-printing');
+      printSlip();
+    }
+    function printNextReceipt() {
+      refreshReceiptPages();
+      if (receiptPages.length && currentReceiptIndex < receiptPages.length - 1) currentReceiptIndex += 1;
+      refreshReceiptPages();
+      printCurrentReceipt();
+    }
+    function resetSequentialPrint() {
+      document.body.classList.remove('sequential-printing');
+      currentReceiptIndex = 0;
+      refreshReceiptPages();
+    }
+    window.addEventListener('afterprint', function () {
+      if (!document.body.classList.contains('sequential-printing')) return;
+      if (currentReceiptIndex < receiptPages.length - 1) currentReceiptIndex += 1;
+      refreshReceiptPages();
+    });`
+    : '';
   return `<script>
     var slipText = ${JSON.stringify(opts.plainText)};
     ${buildIosPrintAppFitScript(opts.pageHeightMm)}
@@ -463,6 +501,7 @@ function buildReceiptWindowScript(opts: {
         copySlip();
       }
     }
+    ${sequentialPrintScript}
     function closeSlip() {
       window.close();
       window.setTimeout(function () {
@@ -476,8 +515,11 @@ function buildReceiptWindowScript(opts: {
     });
     window.addEventListener('load', function () {
       window.focus();
-      var isiOS = installIosPrintAppFit();
-      if (!isiOS) window.print();
+      if (typeof refreshReceiptPages === 'function') refreshReceiptPages();
+      if (${opts.autoPrint === false ? 'false' : 'true'}) {
+        var isiOS = installIosPrintAppFit();
+        if (!isiOS) window.print();
+      }
     });
   </script>`;
 }
@@ -1036,12 +1078,22 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
         break-after: auto;
         page-break-after: auto;
       }
+      .batch-print.sequential-printing .receipt-page {
+        display: none !important;
+        break-after: auto !important;
+        page-break-after: auto !important;
+      }
+      .batch-print.sequential-printing .receipt-page.is-print-current {
+        display: block !important;
+      }
     }
   </style>
 </head>
 <body class="batch-print">
   <div class="toolbar">
-    <button type="button" onclick="printSlip()">列印</button>
+    <button type="button" onclick="resetSequentialPrint(); printSlip()">列印全部</button>
+    <button type="button" onclick="printCurrentReceipt()">逐張列印 <span id="sequentialPrintLabel">1 / 1</span></button>
+    <button type="button" onclick="printNextReceipt()">下一張</button>
     <button type="button" onclick="shareSlip()">分享</button>
     <button type="button" onclick="copySlip()">複製</button>
     <button class="close" type="button" onclick="closeSlip()">關閉</button>
@@ -1072,6 +1124,8 @@ ${slipSections}
     shareTitle: '未完成訂單總成列印',
     copySuccessMessage: '已複製總成列印文字',
     copyPromptMessage: '請手動複製總成列印文字',
+    sequentialPrint: true,
+    autoPrint: false,
   })}
 </body>
 </html>`;
