@@ -142,6 +142,7 @@ type OpenStoreOrderSummary = {
   storeCount: number;
   orderCount: number;
   procurementAmount: number;
+  dateLabel: string;
   lines: OpenStoreOrderSummaryLine[];
 };
 
@@ -628,6 +629,7 @@ function openOrderPrintSlip(storeLabel: string, lines: OrderPrintSlipLine[]) {
 export function buildOpenStoreOrderSummaryPrintText(summary: OpenStoreOrderSummary): string {
   const header = [
     '未完成訂單總和',
+    summary.dateLabel,
     `共 ${summary.storeCount} 家店、${summary.orderCount} 筆訂單`,
   ];
   const body = summary.lines.length
@@ -638,7 +640,7 @@ export function buildOpenStoreOrderSummaryPrintText(summary: OpenStoreOrderSumma
 
 export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSummary): string {
   const plainText = buildOpenStoreOrderSummaryPrintText(summary);
-  const pageHeightMm = estimateReceiptPageHeightMm(summary.lines.length, 2);
+  const pageHeightMm = estimateReceiptPageHeightMm(summary.lines.length, 3);
   const rows = summary.lines
     .map(
       (line) => `
@@ -771,6 +773,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   <h1>未完成訂單總和</h1>
   <div class="summary">
     <div>出貨前對點</div>
+    <div>${escapeReceiptHtml(summary.dateLabel)}</div>
     <div>共 ${escapeReceiptHtml(summary.storeCount)} 家店、${escapeReceiptHtml(summary.orderCount)} 筆訂單</div>
   </div>
   ${
@@ -1056,6 +1059,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     <h1>未完成訂單總和</h1>
     <div class="summary">
       <div>出貨前對點</div>
+      <div>${escapeReceiptHtml(summary.dateLabel)}</div>
       <div>共 ${escapeReceiptHtml(summary.storeCount)} 家店、${escapeReceiptHtml(summary.orderCount)} 筆訂單</div>
     </div>
     ${
@@ -1224,11 +1228,19 @@ function isOpenStoreOrderForSummary(order: RawOrder): boolean {
   return order.status === '待出貨' && !orderHasStallCountCompleted(order);
 }
 
+function formatOpenStoreOrderSummaryDateLabel(ymds: Iterable<string>): string {
+  const dates = Array.from(new Set(Array.from(ymds).filter(Boolean))).sort();
+  if (dates.length === 0) return '未指定日期';
+  if (dates.length === 1) return formatSlashYmdWithWeekdayFromYmd(dates[0]);
+  return `${formatSlashYmdWithWeekdayFromYmd(dates[0])} - ${formatSlashYmdWithWeekdayFromYmd(dates[dates.length - 1])}`;
+}
+
 export function buildOpenStoreOrderSummaries(
   rawOrders: RawOrder[],
   catalogItems: readonly Pick<SupplyItem, 'id'>[] = [],
 ): OpenStoreOrderSummary {
   const storeLabels = new Set<string>();
+  const orderDates = new Set<string>();
   const lineMap = new Map<string, OpenStoreOrderSummaryLine>();
   const lineFirstSeen = new Map<string, number>();
   const catalogOrder = new Map(catalogItems.map((item, index) => [item.id, index]));
@@ -1240,6 +1252,7 @@ export function buildOpenStoreOrderSummaries(
     if (!isOpenStoreOrderForSummary(order)) continue;
     const storeLabel = orderStoreLabelForSummary(order);
     storeLabels.add(storeLabel);
+    orderDates.add(effectiveOrderDateYmd(order));
     orderCount += 1;
     procurementAmount = Math.round((procurementAmount + (Number(order.totalAmount) || 0)) * 100) / 100;
 
@@ -1281,6 +1294,7 @@ export function buildOpenStoreOrderSummaries(
     storeCount: storeLabels.size,
     orderCount,
     procurementAmount,
+    dateLabel: formatOpenStoreOrderSummaryDateLabel(orderDates),
     lines,
   };
 }
