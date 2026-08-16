@@ -165,6 +165,7 @@ describe('open store order summaries', () => {
       {
         orderId: 'open-today-a',
         storeLabel: '\u76f4\u71df\u5e97',
+        dateLabel: '2026/8/8（週六）',
         lines: [
           { productId: 'black', name: '\u9ed1\u8f2a', unit: '\u7247', qty: 10 },
           { productId: 'rice', name: '\u7c73\u8840', unit: '\u7247', qty: 5 },
@@ -173,6 +174,7 @@ describe('open store order summaries', () => {
       {
         orderId: 'open-today-b',
         storeLabel: 'DK002',
+        dateLabel: '2026/8/8（週六）',
         lines: [{ productId: 'black', name: '\u9ed1\u8f2a', unit: '\u7247', qty: 3 }],
       },
     ];
@@ -181,6 +183,7 @@ describe('open store order summaries', () => {
     expect(text).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
     expect(text).toContain('\u76f4\u71df\u5e97');
     expect(text).toContain('DK002');
+    expect(text).toContain('2026/8/8（週六）');
     expect(text).toContain('\u9ed1\u8f2a 10 \u7247');
 
     const html = buildCombinedOpenStoreOrdersPrintHtml(summary, slips);
@@ -188,6 +191,7 @@ describe('open store order summaries', () => {
     expect(html).toContain('2026/8/8');
     expect(html).toContain('open-today-a');
     expect(html).toContain('open-today-b');
+    expect(html).toContain('2026/8/8（週六） ・ 訂單 open-today-a');
     expect(html).not.toContain('<th class="amount">\u91d1\u984d</th>');
     expect(html).not.toContain('page-break-before: always');
     expect(html).toContain('width: 80mm');
@@ -217,15 +221,21 @@ describe('order print slip', () => {
     expect(formatOrderPrintSlipQty(lines[1])).toBe('24 兩（1.5 斤）');
     expect(formatOrderPrintSlipTableQty(lines[1])).toBe('24 兩（1.5 斤）');
     expect(buildOrderPrintSlipText('高雄三民', lines)).toBe('高雄三民\n黑輪 10 片\n大腸 24 兩（1.5 斤）');
+    expect(buildOrderPrintSlipText('高雄三民', lines, '2026/8/16（週日）')).toBe(
+      '高雄三民\n2026/8/16（週日）\n黑輪 10 片\n大腸 24 兩（1.5 斤）',
+    );
   });
 
   it('includes a mobile-friendly close action in the print window', () => {
-    const html = buildOrderPrintSlipHtml('直營店', [
-      { productId: 'black', name: '黑輪', unit: '片', qty: 12 },
-    ]);
+    const html = buildOrderPrintSlipHtml(
+      '直營店',
+      [{ productId: 'black', name: '黑輪', unit: '片', qty: 12 }],
+      '2026/8/16（週日）',
+    );
 
     expect(html).toContain('onclick="closeSlip()"');
     expect(html).toContain('function closeSlip()');
+    expect(html).toContain('<div class="date">2026/8/16（週日）</div>');
     expect(html).toContain('關閉');
     expect(html).toContain('name="viewport"');
     expect(html).toContain('height: auto !important');

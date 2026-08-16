@@ -149,6 +149,7 @@ type OpenStoreOrderSummary = {
 type OpenStoreOrderPrintSlip = {
   orderId: string;
   storeLabel: string;
+  dateLabel: string;
   lines: OrderPrintSlipLine[];
 };
 
@@ -354,11 +355,16 @@ export function formatOrderPrintSlipTableQty(line: Pick<OrderPrintSlipLine, 'qty
   return jin ? `${qty}（${jin} 斤）` : qty;
 }
 
-export function buildOrderPrintSlipText(storeLabel: string, lines: OrderPrintSlipLine[]): string {
+export function buildOrderPrintSlipText(
+  storeLabel: string,
+  lines: OrderPrintSlipLine[],
+  dateLabel?: string,
+): string {
+  const header = dateLabel ? [storeLabel, dateLabel] : [storeLabel];
   const body = lines.length
     ? lines.map((line) => `${line.name} ${formatOrderPrintSlipQty(line)}`).join('\n')
     : '此訂單沒有可列印的出貨數量';
-  return `${storeLabel}\n${body}`;
+  return [...header, body].join('\n');
 }
 
 export function buildOrderPrintSlipLines(lines: OrderHistoryLine[]): OrderPrintSlipLine[] {
@@ -424,9 +430,13 @@ function buildIosPrintAppFitScript(pageHeightMm: number): string {
     }`;
 }
 
-export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSlipLine[]): string {
-  const plainText = buildOrderPrintSlipText(storeLabel, lines);
-  const pageHeightMm = estimateReceiptPageHeightMm(lines.length);
+export function buildOrderPrintSlipHtml(
+  storeLabel: string,
+  lines: OrderPrintSlipLine[],
+  dateLabel?: string,
+): string {
+  const plainText = buildOrderPrintSlipText(storeLabel, lines, dateLabel);
+  const pageHeightMm = estimateReceiptPageHeightMm(lines.length, dateLabel ? 2 : 1);
   const rows = lines
     .map(
       (line) => `
@@ -462,13 +472,19 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
       print-color-adjust: exact;
     }
     h1 {
-      margin: 0 0 8px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid #111;
+      margin: 0 0 4px;
       font-size: 34px;
       line-height: 1.15;
       text-align: center;
       word-break: break-word;
+    }
+    .date {
+      margin: 0 0 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #111;
+      text-align: center;
+      font-size: 19px;
+      font-weight: 700;
     }
     table {
       width: 100%;
@@ -550,6 +566,7 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
     <button class="close" type="button" onclick="closeSlip()">關閉</button>
   </div>
   <h1>${escapeReceiptHtml(storeLabel)}</h1>
+  ${dateLabel ? `<div class="date">${escapeReceiptHtml(dateLabel)}</div>` : ''}
   ${
     lines.length
       ? `<table>
@@ -607,14 +624,14 @@ export function buildOrderPrintSlipHtml(storeLabel: string, lines: OrderPrintSli
 </html>`;
 }
 
-function openOrderPrintSlip(storeLabel: string, lines: OrderPrintSlipLine[]) {
+function openOrderPrintSlip(storeLabel: string, lines: OrderPrintSlipLine[], dateLabel?: string) {
   const w = window.open('', '_blank', 'width=420,height=720');
   if (!w) {
     window.alert('瀏覽器阻擋了列印視窗，請允許彈出視窗後再試一次。');
     return;
   }
   w.document.open();
-  w.document.write(buildOrderPrintSlipHtml(storeLabel, lines));
+  w.document.write(buildOrderPrintSlipHtml(storeLabel, lines, dateLabel));
   w.document.close();
 }
 
@@ -840,7 +857,9 @@ export function buildCombinedOpenStoreOrdersPrintText(
   summary: OpenStoreOrderSummary,
   slips: OpenStoreOrderPrintSlip[],
 ): string {
-  const slipText = slips.map((slip) => buildOrderPrintSlipText(slip.storeLabel, slip.lines));
+  const slipText = slips.map((slip) =>
+    buildOrderPrintSlipText(slip.storeLabel, slip.lines, slip.dateLabel),
+  );
   return [buildOpenStoreOrderSummaryPrintText(summary), ...slipText].join('\n\n---\n\n');
 }
 
@@ -873,7 +892,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       return `
   <section class="receipt-page slip-page">
     <h1>${escapeReceiptHtml(slip.storeLabel)}</h1>
-    <div class="meta">訂單 ${escapeReceiptHtml(slip.orderId)}</div>
+    <div class="meta">${escapeReceiptHtml(slip.dateLabel)} ・ 訂單 ${escapeReceiptHtml(slip.orderId)}</div>
     ${
       slip.lines.length
         ? `<table>
@@ -1796,6 +1815,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         return {
           orderId: raw.id,
           storeLabel: orderStoreLabelForSummary(raw),
+          dateLabel: formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(raw)),
           lines: buildOrderPrintSlipLines(detailLines),
         };
       });
@@ -2793,7 +2813,13 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    openOrderPrintSlip(order.franchisee, printSlipLines);
+                                    openOrderPrintSlip(
+                                      order.franchisee,
+                                      printSlipLines,
+                                      raw
+                                        ? formatSlashYmdWithWeekdayFromYmd(effectiveOrderDateYmd(raw))
+                                        : undefined,
+                                    );
                                   }}
                                   className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-600/80 bg-zinc-950/70 px-2 text-sm font-semibold text-zinc-100 transition-colors hover:border-amber-500/60 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
