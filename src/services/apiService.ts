@@ -146,6 +146,48 @@ export type { AccountingLedgerEntry, NewAccountingLedgerInput, AccountingLedgerU
 
 // ——— 訂單 ———
 
+type BasisDeductionContext = {
+  basisYmd: string;
+  scopeId: string;
+};
+
+function getBasisDeductionContext(basisOrderId: string): BasisDeductionContext | null {
+  const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
+  const basisOrder = orderHistory.readMergedOrderByIdFromStores(basisOrderId);
+  if (!basisYmd || !basisOrder) return null;
+  return {
+    basisYmd,
+    scopeId: resolveOrderStallStorageScopeId(basisOrder),
+  };
+}
+
+function applyBasisRemainDeduction(
+  basisOrderId: string,
+  toDeduct: Record<string, number>,
+): boolean {
+  if (Object.keys(toDeduct).length === 0) return true;
+  const ctx = getBasisDeductionContext(basisOrderId);
+  if (!ctx) return false;
+  stallInventory.ensureBasisDayFromOrderSnapshot(basisOrderId);
+  stallInventory.applyOrderDeductionToDayRemain(ctx.basisYmd, toDeduct, ctx.scopeId);
+  return true;
+}
+
+function restoreBasisRemainDeduction(
+  basisOrderId: string,
+  restoredQty: Record<string, number>,
+): boolean {
+  if (Object.keys(restoredQty).length === 0) return true;
+  const ctx = getBasisDeductionContext(basisOrderId);
+  if (!ctx) return false;
+  stallInventory.restoreOrderDeductionToDayRemain(ctx.basisYmd, restoredQty, ctx.scopeId);
+  return true;
+}
+
+function orderLinesForRemainDeduction(lines: orderHistory.OrderHistoryLine[]) {
+  return lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty }));
+}
+
 export const orders = {
   async loadOrderHistory(): Promise<orderHistory.OrderHistoryEntry[]> {
     return withRemoteStorageRead(() => orderHistory.loadOrderHistory());
@@ -226,20 +268,14 @@ export const orders = {
       });
       const appliedQtyByBasisOrderId: Record<string, Record<string, number>> = {};
       for (const basisOrderId of basisOrderIds) {
-        const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
-        if (!basisYmd) continue;
-        const basisOrder = basisOrderId
-          ? orderHistory.readMergedOrderByIdFromStores(basisOrderId)
-          : null;
-        const scopeId = basisOrder ? resolveOrderStallStorageScopeId(basisOrder) : undefined;
+        if (!getBasisDeductionContext(basisOrderId)) continue;
         const toDeduct = stallInventory.buildProcurementRemainDeductionsFromLines(
           basisOrderId,
-          params.lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty })),
+          orderLinesForRemainDeduction(params.lines),
         );
         if (Object.keys(toDeduct).length > 0) {
           appliedQtyByBasisOrderId[basisOrderId] = toDeduct;
-          stallInventory.ensureBasisDayFromOrderSnapshot(basisOrderId);
-          stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+          applyBasisRemainDeduction(basisOrderId, toDeduct);
         }
       }
       return orderHistory.appendProcurementOrderEntry({
@@ -272,10 +308,9 @@ export const orders = {
       const totalDeductByProductId: Record<string, number> = {};
       const appliedQtyByBasisOrderId: Record<string, Record<string, number>> = {};
       for (const basisOrderId of basisOrderIds) {
-        const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
-        if (!basisYmd) return { ok: false, reason: 'basis_not_found' };
-        const basisOrder = orderHistory.readMergedOrderByIdFromStores(basisOrderId);
-        if (!basisOrder) return { ok: false, reason: 'basis_not_found' };
+        if (!getBasisDeductionContext(basisOrderId)) {
+          return { ok: false, reason: 'basis_not_found' };
+        }
         const remainingLines = order.lines.map((l) => ({
           productId: l.productId,
           name: l.name,
@@ -310,12 +345,9 @@ export const orders = {
       for (const basisOrderId of basisOrderIds) {
         const toDeduct = appliedQtyByBasisOrderId[basisOrderId];
         if (!toDeduct) continue;
-        const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
-        const basisOrder = orderHistory.readMergedOrderByIdFromStores(basisOrderId);
-        if (!basisYmd || !basisOrder) continue;
-        const scopeId = resolveOrderStallStorageScopeId(basisOrder);
-        stallInventory.ensureBasisDayFromOrderSnapshot(basisOrderId);
-        stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
+        if (!applyBasisRemainDeduction(basisOrderId, toDeduct)) {
+          return { ok: false, reason: 'basis_not_found' };
+        }
       }
       stallInventory.syncStallOutAfterOrderLinesChanged(orderId);
       return { ok: true };
@@ -328,17 +360,11 @@ export const orders = {
     return withUiRemoteStorageWrite(() => {
       const orderId = params.orderId.trim();
       const basisOrderId = params.basisOrderId.trim();
-      const basisYmd = stallInventory.getOrderStallCountBasisYmdForDeduction(basisOrderId);
-      const basisOrder = orderHistory.readMergedOrderByIdFromStores(basisOrderId);
-      if (!basisYmd || !basisOrder) return { ok: false, reason: 'basis_not_found' };
+      if (!getBasisDeductionContext(basisOrderId)) return { ok: false, reason: 'basis_not_found' };
       const res = orderHistory.removeProcurementDeductionBasisOrderIdInEitherStore(orderId, basisOrderId);
       if (!res.ok) return res;
-      if (Object.keys(res.restoredQty).length > 0) {
-        stallInventory.restoreOrderDeductionToDayRemain(
-          basisYmd,
-          res.restoredQty,
-          resolveOrderStallStorageScopeId(basisOrder),
-        );
+      if (!restoreBasisRemainDeduction(basisOrderId, res.restoredQty)) {
+        return { ok: false, reason: 'basis_not_found' };
       }
       stallInventory.syncStallOutAfterOrderLinesChanged(orderId);
       return res;
