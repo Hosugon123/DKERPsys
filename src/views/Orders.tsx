@@ -361,22 +361,14 @@ export function buildOrderPrintSlipText(storeLabel: string, lines: OrderPrintSli
   return `${storeLabel}\n${body}`;
 }
 
-export function buildOrderPrintSlipLines(
-  lines: OrderHistoryLine[],
-  stallSnap: MergedStallSnapForOrderDetail | null,
-  carrySnapForDisplay: CarrySnapForOrderDetail,
-  supplyRetailView: SupplyRetailView,
-): OrderPrintSlipLine[] {
+export function buildOrderPrintSlipLines(lines: OrderHistoryLine[]): OrderPrintSlipLine[] {
   return lines
-    .map((line) => {
-      const d = computeOrderDetailLineMetrics(line, stallSnap, carrySnapForDisplay, supplyRetailView);
-      return {
-        productId: line.productId,
-        name: line.name,
-        unit: line.unit,
-        qty: roundProcurementQty(d.displayedBringOut),
-      };
-    })
+    .map((line) => ({
+      productId: line.productId,
+      name: line.name,
+      unit: line.unit,
+      qty: roundProcurementQty(Number(line.qty) || 0),
+    }))
     .filter((line) => line.qty > 0);
 }
 
@@ -1804,12 +1796,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         return {
           orderId: raw.id,
           storeLabel: orderStoreLabelForSummary(raw),
-          lines: buildOrderPrintSlipLines(
-            detailLines,
-            mergeOrderStallSnapshot(raw),
-            loadRemainSnapshotForOrderManagementDisplay(raw),
-            supplyRetailView,
-          ),
+          lines: buildOrderPrintSlipLines(detailLines),
         };
       });
   }, [catalogItemsForOrderDetail, rawList, supplyRetailView]);
@@ -2624,12 +2611,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
               : null;
           const printSlipLines =
             expandedDetailLinesForTable && !isPickingThis && !isPriceAdjustThis
-              ? buildOrderPrintSlipLines(
-                  expandedDetailLinesForTable,
-                  stallSnap,
-                  carrySnapForDisplay,
-                  supplyRetailView,
-                )
+              ? buildOrderPrintSlipLines(expandedDetailLinesForTable)
               : [];
           const pickKept = isPickingThis ? pickingLines.filter((l) => l.qty > 0) : [];
           const pickTotal = isPickingThis
