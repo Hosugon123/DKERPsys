@@ -430,6 +430,58 @@ function buildIosPrintAppFitScript(pageHeightMm: number): string {
     }`;
 }
 
+function buildReceiptWindowScript(opts: {
+  plainText: string;
+  pageHeightMm: number;
+  shareTitle: string;
+  copySuccessMessage: string;
+  copyPromptMessage: string;
+}): string {
+  return `<script>
+    var slipText = ${JSON.stringify(opts.plainText)};
+    ${buildIosPrintAppFitScript(opts.pageHeightMm)}
+    function printSlip() {
+      if (typeof installIosPrintAppFit === 'function') installIosPrintAppFit();
+      window.focus();
+      window.print();
+    }
+    function copySlip() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(slipText).then(function () {
+          window.alert(${JSON.stringify(opts.copySuccessMessage)});
+        }).catch(function () {
+          window.prompt(${JSON.stringify(opts.copyPromptMessage)}, slipText);
+        });
+      } else {
+        window.prompt(${JSON.stringify(opts.copyPromptMessage)}, slipText);
+      }
+    }
+    function shareSlip() {
+      if (navigator.share) {
+        navigator.share({ title: ${JSON.stringify(opts.shareTitle)}, text: slipText }).catch(function () {});
+      } else {
+        copySlip();
+      }
+    }
+    function closeSlip() {
+      window.close();
+      window.setTimeout(function () {
+        if (!window.closed) {
+          document.body.innerHTML = '<div class="toolbar"><button class="close" type="button" onclick="history.back()">返回</button></div><div class="empty">請使用瀏覽器返回或關閉此頁。</div>';
+        }
+      }, 120);
+    }
+    window.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeSlip();
+    });
+    window.addEventListener('load', function () {
+      window.focus();
+      var isiOS = installIosPrintAppFit();
+      if (!isiOS) window.print();
+    });
+  </script>`;
+}
+
 export function buildOrderPrintSlipHtml(
   storeLabel: string,
   lines: OrderPrintSlipLine[],
@@ -577,49 +629,13 @@ export function buildOrderPrintSlipHtml(
         </table>`
       : '<div class="empty">此訂單沒有可列印的出貨數量</div>'
   }
-  <script>
-    var slipText = ${JSON.stringify(plainText)};
-    ${buildIosPrintAppFitScript(pageHeightMm)}
-    function printSlip() {
-      if (typeof installIosPrintAppFit === 'function') installIosPrintAppFit();
-      window.focus();
-      window.print();
-    }
-    function copySlip() {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(slipText).then(function () {
-          window.alert('已複製出貨單文字');
-        }).catch(function () {
-          window.prompt('請手動複製出貨單文字', slipText);
-        });
-      } else {
-        window.prompt('請手動複製出貨單文字', slipText);
-      }
-    }
-    function shareSlip() {
-      if (navigator.share) {
-        navigator.share({ title: ${JSON.stringify(`${storeLabel} 出貨單`)}, text: slipText }).catch(function () {});
-      } else {
-        copySlip();
-      }
-    }
-    function closeSlip() {
-      window.close();
-      window.setTimeout(function () {
-        if (!window.closed) {
-          document.body.innerHTML = '<div class="toolbar"><button class="close" type="button" onclick="history.back()">返回</button></div><div class="empty">請使用瀏覽器返回或關閉此頁。</div>';
-        }
-      }, 120);
-    }
-    window.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') closeSlip();
-    });
-    window.addEventListener('load', function () {
-      window.focus();
-      var isiOS = installIosPrintAppFit();
-      if (!isiOS) window.print();
-    });
-  </script>
+  ${buildReceiptWindowScript({
+    plainText,
+    pageHeightMm,
+    shareTitle: `${storeLabel} 出貨單`,
+    copySuccessMessage: '已複製出貨單文字',
+    copyPromptMessage: '請手動複製出貨單文字',
+  })}
 </body>
 </html>`;
 }
@@ -795,49 +811,13 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
         </table>`
       : '<div class="empty">目前沒有待出貨訂單</div>'
   }
-  <script>
-    var slipText = ${JSON.stringify(plainText)};
-    ${buildIosPrintAppFitScript(pageHeightMm)}
-    function printSlip() {
-      if (typeof installIosPrintAppFit === 'function') installIosPrintAppFit();
-      window.focus();
-      window.print();
-    }
-    function copySlip() {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(slipText).then(function () {
-          window.alert('已複製總和單文字');
-        }).catch(function () {
-          window.prompt('請手動複製總和單文字', slipText);
-        });
-      } else {
-        window.prompt('請手動複製總和單文字', slipText);
-      }
-    }
-    function shareSlip() {
-      if (navigator.share) {
-        navigator.share({ title: '未完成訂單總和', text: slipText }).catch(function () {});
-      } else {
-        copySlip();
-      }
-    }
-    function closeSlip() {
-      window.close();
-      window.setTimeout(function () {
-        if (!window.closed) {
-          document.body.innerHTML = '<div class="toolbar"><button class="close" type="button" onclick="history.back()">返回</button></div><div class="empty">請使用瀏覽器返回或關閉此頁。</div>';
-        }
-      }, 120);
-    }
-    window.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') closeSlip();
-    });
-    window.addEventListener('load', function () {
-      window.focus();
-      var isiOS = installIosPrintAppFit();
-      if (!isiOS) window.print();
-    });
-  </script>
+  ${buildReceiptWindowScript({
+    plainText,
+    pageHeightMm,
+    shareTitle: '未完成訂單總和',
+    copySuccessMessage: '已複製總和單文字',
+    copyPromptMessage: '請手動複製總和單文字',
+  })}
 </body>
 </html>`;
 }
@@ -1086,49 +1066,13 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     <div class="cut-line">剪裁線</div>
   </section>
 ${slipSections}
-  <script>
-    var slipText = ${JSON.stringify(plainText)};
-    ${buildIosPrintAppFitScript(pageHeightMm)}
-    function printSlip() {
-      if (typeof installIosPrintAppFit === 'function') installIosPrintAppFit();
-      window.focus();
-      window.print();
-    }
-    function copySlip() {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(slipText).then(function () {
-          window.alert('已複製總成列印文字');
-        }).catch(function () {
-          window.prompt('請手動複製總成列印文字', slipText);
-        });
-      } else {
-        window.prompt('請手動複製總成列印文字', slipText);
-      }
-    }
-    function shareSlip() {
-      if (navigator.share) {
-        navigator.share({ title: '未完成訂單總成列印', text: slipText }).catch(function () {});
-      } else {
-        copySlip();
-      }
-    }
-    function closeSlip() {
-      window.close();
-      window.setTimeout(function () {
-        if (!window.closed) {
-          document.body.innerHTML = '<div class="toolbar"><button class="close" type="button" onclick="history.back()">返回</button></div><div class="empty">請使用瀏覽器返回或關閉此頁。</div>';
-        }
-      }, 120);
-    }
-    window.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') closeSlip();
-    });
-    window.addEventListener('load', function () {
-      window.focus();
-      var isiOS = installIosPrintAppFit();
-      if (!isiOS) window.print();
-    });
-  </script>
+  ${buildReceiptWindowScript({
+    plainText,
+    pageHeightMm,
+    shareTitle: '未完成訂單總成列印',
+    copySuccessMessage: '已複製總成列印文字',
+    copyPromptMessage: '請手動複製總成列印文字',
+  })}
 </body>
 </html>`;
 }
