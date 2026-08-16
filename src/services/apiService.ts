@@ -317,6 +317,7 @@ export const orders = {
         stallInventory.ensureBasisDayFromOrderSnapshot(basisOrderId);
         stallInventory.applyOrderDeductionToDayRemain(basisYmd, toDeduct, scopeId);
       }
+      stallInventory.syncStallOutAfterOrderLinesChanged(orderId);
       return { ok: true };
     }, '套用扣除餘貨訂單');
   },
@@ -339,6 +340,7 @@ export const orders = {
           resolveOrderStallStorageScopeId(basisOrder),
         );
       }
+      stallInventory.syncStallOutAfterOrderLinesChanged(orderId);
       return res;
     }, '移除扣除餘貨訂單');
   },

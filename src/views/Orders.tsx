@@ -3087,7 +3087,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                     ORDER_DETAIL_TH_TOP,
                                   )}
                                 >
-                                  帶出數量
+                                  {stallLocked ? '盤點帶出量' : '帶出數量'}
                                 </th>
                                 <th
                                   className={cn(
