@@ -342,6 +342,21 @@ describe('mergeDongshanBundlesLocalWinsDirty (multi-device)', () => {
     cloud.keys.dongshan_franchise_mgmt_orders_v1 = JSON.stringify([
       orderRow('0012026060302', 2, '2026-06-03T12:05:00.000Z'),
     ]);
+    cloud.keys.dongshan_sales_records_v1 = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          completedAt: '2026-06-03T12:30:00.000Z',
+          snapshot: {
+            updatedAt: '2026-06-03T12:30:00.000Z',
+            actualRevenue: '1000',
+            lines: {
+              p1: { out: '8', remain: '2', updatedAt: '2026-06-03T12:30:00.000Z' },
+            },
+          },
+        },
+      },
+    });
     cloud.keys.dongshan_pwa_icon_v1 = 'data:image/png;base64,too-large';
     cloud.keys.dongshan_data_archives_v1 = JSON.stringify({
       version: 1,
@@ -365,6 +380,10 @@ describe('mergeDongshanBundlesLocalWinsDirty (multi-device)', () => {
       localStorage.getItem('dongshan_franchise_mgmt_orders_v1') ?? '[]',
     ) as { id: string }[];
     expect(stored.map((x) => x.id)).toEqual(['0012026060302']);
+    const sales = JSON.parse(localStorage.getItem('dongshan_sales_records_v1') ?? '{}') as {
+      byDate?: Record<string, { snapshot: { actualRevenue: string } }>;
+    };
+    expect(sales.byDate?.['scope:hq|2026-06-03']?.snapshot.actualRevenue).toBe('1000');
     expect(localStorage.getItem('dongshan_pwa_icon_v1')).toBeNull();
     expect(localStorage.getItem('dongshan_data_archives_v1')).toBeNull();
   });

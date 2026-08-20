@@ -96,4 +96,31 @@ describe('雲端合併尊重刪除墓碑', () => {
     expect(hist.some((x) => x.id === ORDER_ID)).toBe(false);
     expect(merged.keys.dongshan_deleted_order_ids_v1).toContain(ORDER_ID);
   });
+
+  it('手機舊墓碑早於雲端訂單更新時間時，不會把雲端訂單濾掉', () => {
+    const row = {
+      ...orderRow(),
+      updatedAt: '2026-06-03T13:00:00.000Z',
+    };
+    const local = baseBundle();
+    local.keys.dongshan_franchise_mgmt_orders_v1 = JSON.stringify([]);
+    local.keys.dongshan_order_history_v1 = JSON.stringify([]);
+    local.keys.dongshan_deleted_order_ids_v1 = JSON.stringify({
+      version: 1,
+      byId: { [ORDER_ID]: '2026-06-03T12:00:00.000Z' },
+    });
+
+    const cloud = baseBundle();
+    cloud.keys.dongshan_franchise_mgmt_orders_v1 = JSON.stringify([row]);
+    cloud.keys.dongshan_order_history_v1 = JSON.stringify([row]);
+
+    const merged = mergeDongshanBundlesLocalWinsDirty(local, cloud, []);
+
+    const mgmt = JSON.parse(merged.keys.dongshan_franchise_mgmt_orders_v1 ?? '[]') as {
+      id: string;
+    }[];
+    const hist = JSON.parse(merged.keys.dongshan_order_history_v1 ?? '[]') as { id: string }[];
+    expect(mgmt.some((x) => x.id === ORDER_ID)).toBe(true);
+    expect(hist.some((x) => x.id === ORDER_ID)).toBe(true);
+  });
 });

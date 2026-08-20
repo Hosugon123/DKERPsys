@@ -103,16 +103,19 @@ export function filterOrderArrayJsonByTombstones(
   tombstonesJson: string,
 ): string {
   const tombstones = parseDeletedOrderIdsStore(tombstonesJson);
-  const tombstoneIds = new Set(
-    Object.keys(tombstones.byId).map((id) => id.trim()).filter(Boolean),
-  );
-  if (tombstoneIds.size === 0) return ordersJson;
+  const tombstoneIds = Object.keys(tombstones.byId).map((id) => id.trim()).filter(Boolean);
+  if (tombstoneIds.length === 0) return ordersJson;
   const arr = safeParseJson(ordersJson);
   if (!Array.isArray(arr)) return ordersJson;
   const filtered = arr.filter((x) => {
     if (x == null || typeof x !== 'object') return true;
     const id = (x as { id?: string }).id?.trim();
-    return !id || !tombstoneIds.has(id);
+    if (!id) return true;
+    const deletedAt = tombstones.byId[id];
+    if (!deletedAt) return true;
+    const deletedAtMs = recordUpdatedAtMs({ createdAt: deletedAt });
+    const orderMs = recordUpdatedAtMs(x as { updatedAt?: string; createdAt?: string });
+    return deletedAtMs < orderMs;
   });
   return JSON.stringify(filtered);
 }
