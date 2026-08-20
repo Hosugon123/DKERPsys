@@ -8,7 +8,7 @@ import {
   mergeDeletedOrderIdsStore,
   mergeStorageKeyRecords,
 } from './bundleRecordMerge';
-import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+import { isQuotaExceededError, setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 export const DONGSHAN_DATA_BUNDLE_VERSION = 1;
 export const DONGSHAN_APP_ID = 'dongshan-ya-to';
@@ -42,6 +42,11 @@ export const DONGSHAN_EXPORT_STORAGE_KEYS = [
 ] as const;
 
 export type DongshanStorageKey = (typeof DONGSHAN_EXPORT_STORAGE_KEYS)[number];
+
+const OPTIONAL_REMOTE_IMPORT_KEYS = new Set<string>([
+  'dongshan_pwa_icon_v1',
+  'dongshan_data_archives_v1',
+]);
 
 export type DongshanDataBundleV1 = {
   bundleVersion: typeof DONGSHAN_DATA_BUNDLE_VERSION;
@@ -156,6 +161,11 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
         storageChanged = true;
       }
     } catch (error) {
+      if (OPTIONAL_REMOTE_IMPORT_KEYS.has(storageKey) && isQuotaExceededError(error)) {
+        localStorage.removeItem(storageKey);
+        importedKeyCount += 1;
+        continue;
+      }
       const message = error instanceof Error && error.message.trim()
         ? error.message.trim()
         : '瀏覽器拒絕寫入資料。';

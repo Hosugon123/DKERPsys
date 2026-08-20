@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   mergeArraysById,
   mergeOrderLikeRecord,
@@ -293,6 +293,12 @@ describe('mergeStorageKeyRecords (franchise mgmt orders)', () => {
 });
 
 describe('mergeDongshanBundlesLocalWinsDirty (multi-device)', () => {
+  const originalSetItem = Storage.prototype.setItem;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('本機新批貨單 + 雲端另一筆單 → bundle 內兩筆皆保留', () => {
     const local = baseBundle();
     local.keys.dongshan_franchise_mgmt_orders_v1 = JSON.stringify([
@@ -328,6 +334,39 @@ describe('mergeDongshanBundlesLocalWinsDirty (multi-device)', () => {
       localStorage.getItem('dongshan_franchise_mgmt_orders_v1') ?? '[]',
     ) as { id: string }[];
     expect(stored.map((x) => x.id).sort()).toEqual(['0012026060301', '0012026060302']);
+  });
+
+  it('手機容量不足時略過非核心大資料，仍匯入直營訂單資料', () => {
+    localStorage.clear();
+    const cloud = baseBundle();
+    cloud.keys.dongshan_franchise_mgmt_orders_v1 = JSON.stringify([
+      orderRow('0012026060302', 2, '2026-06-03T12:05:00.000Z'),
+    ]);
+    cloud.keys.dongshan_pwa_icon_v1 = 'data:image/png;base64,too-large';
+    cloud.keys.dongshan_data_archives_v1 = JSON.stringify({
+      version: 1,
+      archives: [{ id: 'archive-1', payload: 'too-large' }],
+    });
+
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function setItem(key: string, value: string) {
+      if (key === 'dongshan_pwa_icon_v1' || key === 'dongshan_data_archives_v1') {
+        const error = new Error('quota exceeded') as Error & { code: number };
+        error.name = 'QuotaExceededError';
+        error.code = 22;
+        throw error;
+      }
+      return originalSetItem.call(this, key, value);
+    });
+
+    const imp = importDongshanDataBundle(cloud);
+
+    expect(imp.ok).toBe(true);
+    const stored = JSON.parse(
+      localStorage.getItem('dongshan_franchise_mgmt_orders_v1') ?? '[]',
+    ) as { id: string }[];
+    expect(stored.map((x) => x.id)).toEqual(['0012026060302']);
+    expect(localStorage.getItem('dongshan_pwa_icon_v1')).toBeNull();
+    expect(localStorage.getItem('dongshan_data_archives_v1')).toBeNull();
   });
 
   it('模擬：A 機送出批貨後 B 機舊快照推送 — 合併後 A 的單仍在', () => {

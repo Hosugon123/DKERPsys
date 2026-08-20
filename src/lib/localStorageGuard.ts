@@ -35,6 +35,7 @@ export function isQuotaExceededError(error: unknown): boolean {
   const message = typeof e.message === 'string' ? e.message.toLowerCase() : '';
   return (
     name === 'quotaexceedederror' ||
+    name === 'localstoragequotaerror' ||
     name === 'ns_error_dom_quota_reached' ||
     e.code === 22 ||
     e.code === 1014 ||
