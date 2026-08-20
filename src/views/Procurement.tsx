@@ -56,6 +56,7 @@ import {
   formatYmdWithWeekday,
   ymd,
 } from '../lib/stallInventoryStorage';
+import { isQuotaExceededError } from '../lib/localStorageGuard';
 import { computeLine, aggregateStallKpis, roundProcurementQty, PROCUREMENT_QTY_MAX } from '../lib/stallMath';
 import {
   formatSlashDateTimeFromIso,
@@ -93,6 +94,25 @@ const PROC_DOCK_SELECT_CLASS =
 const PROC_WEEKDAY_SELECT_CLASS =
   `${PROC_DOCK_SELECT_CLASS} min-w-[5rem] max-w-[9.5rem] px-2 lg:max-w-[7rem]`;
 
+function procurementSubmitErrorMessage(error: unknown, orderCreated: boolean): string {
+  const fallback = orderCreated
+    ? '訂單已建立，但後續同步資料失敗。請截圖此錯誤給管理員確認。'
+    : '訂單未建立，請截圖此錯誤給管理員確認。';
+  const rawMessage =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : '';
+  const message = rawMessage.trim();
+  if (isQuotaExceededError(error) || message.includes('儲存空間') || message.toLowerCase().includes('quota')) {
+    return orderCreated
+      ? '訂單已建立，但同步後續資料時此裝置的瀏覽器儲存空間已滿。請先關閉其他分頁後重試，若仍出現請聯絡管理員清理本機暫存或進行資料歸檔。'
+      : '訂單未建立：此裝置的瀏覽器儲存空間已滿。請先關閉其他分頁後重試，若仍出現請聯絡管理員清理本機暫存或進行資料歸檔。';
+  }
+  return message ? `${fallback}錯誤內容：${message}` : fallback;
+}
+
 type ProcurementWorkDraft = {
   cart: Record<string, number>;
   qtyInputDraft: Record<string, string>;
@@ -116,6 +136,8 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   const [cart, setCart] = useState<Record<string, number>>(() => restoredProcurement?.cart ?? {});
   const [activeCategory, setActiveCategory] = useState<'all' | ItemCategory>('all');
   const [orderSuccess, setOrderSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [stallTick, setStallTick] = useState(0);
   const [basisOrdersList, setBasisOrdersList] = useState<OrderHistoryEntry[]>([]);
   const [favorites, setFavorites] = useState<FavoriteOrder[]>([]);
@@ -522,10 +544,12 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
 
   const openSubmitConfirm = () => {
     if (buildLinesFromCart().length === 0) return;
+    setSubmitError('');
     setSubmitModalOpen(true);
   };
 
   const executeCheckout = useCallback(() => {
+    if (checkoutBusy) return;
     const lines = buildLinesFromCart();
     if (lines.length === 0) {
       setSubmitModalOpen(false);
@@ -538,38 +562,57 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       if (userRole === 'franchisee' && isFranchiseeSelfSuppliedItem(item)) return s + l.unitPrice * l.qty;
       return s;
     }, 0);
+    setSubmitError('');
     setSubmitModalOpen(false);
 
     void (async () => {
-      const orderId = await ordersApi.appendProcurementOrderEntry({
-        lines,
-        totalAmount: amount,
-        payableAmount,
-        selfSuppliedCostAmount,
-        actorRole: userRole,
-        orderDateYmd: newOrderDateYmd,
-        ...(stallBasisOrderId.trim()
-          ? { procurementDeductionBasisOrderId: stallBasisOrderId.trim() }
-          : {}),
-      });
-      if (syncProcurementToLedger && (userRole === 'admin' || userRole === 'employee')) {
-        const draft = buildProcurementLedgerDraftInput({
+      let createdOrderId = '';
+      setCheckoutBusy(true);
+      try {
+        const orderId = await ordersApi.appendProcurementOrderEntry({
           lines,
+          totalAmount: amount,
           payableAmount,
+          selfSuppliedCostAmount,
+          actorRole: userRole,
           orderDateYmd: newOrderDateYmd,
-          orderId,
+          ...(stallBasisOrderId.trim()
+            ? { procurementDeductionBasisOrderId: stallBasisOrderId.trim() }
+            : {}),
         });
-        if (draft) await ledgerApi.append(draft);
+        createdOrderId = orderId;
+        if (syncProcurementToLedger && (userRole === 'admin' || userRole === 'employee')) {
+          const draft = buildProcurementLedgerDraftInput({
+            lines,
+            payableAmount,
+            orderDateYmd: newOrderDateYmd,
+            orderId,
+          });
+          if (draft) await ledgerApi.append(draft);
+        }
+        clearWorkDraft(WORK_DRAFT_IDS.procurement);
+        setOrderSuccess(true);
+        setSubmitError('');
+        setCart({});
+        setQtyInputDraft({});
+        setNewOrderDateYmd(ymd(new Date()));
+        setSyncProcurementToLedger(false);
+        setTimeout(() => setOrderSuccess(false), 3000);
+      } catch (error) {
+        setSubmitError(procurementSubmitErrorMessage(error, createdOrderId !== ''));
+      } finally {
+        setCheckoutBusy(false);
       }
-      clearWorkDraft(WORK_DRAFT_IDS.procurement);
-      setOrderSuccess(true);
-      setCart({});
-      setQtyInputDraft({});
-      setNewOrderDateYmd(ymd(new Date()));
-      setSyncProcurementToLedger(false);
-      setTimeout(() => setOrderSuccess(false), 3000);
     })();
-  }, [buildLinesFromCart, newOrderDateYmd, stallBasisOrderId, supplyRetailView, userRole, syncProcurementToLedger]);
+  }, [
+    buildLinesFromCart,
+    checkoutBusy,
+    newOrderDateYmd,
+    stallBasisOrderId,
+    supplyRetailView,
+    userRole,
+    syncProcurementToLedger,
+  ]);
 
   const applyFavoriteReplace = (f: FavoriteOrder) => {
     setFavoriteError('');
@@ -852,6 +895,16 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       {checkoutSyncNotice && (
         <div className="bg-amber-600/15 border border-amber-500/50 text-amber-100 px-4 py-3 rounded-xl text-sm sm:text-base leading-relaxed">
           {checkoutSyncNotice}
+        </div>
+      )}
+
+      {submitError && (
+        <div
+          className="bg-rose-600/15 border border-rose-500/60 text-rose-100 px-4 py-3 rounded-xl text-sm sm:text-base leading-relaxed"
+          role="alert"
+        >
+          <p className="font-semibold text-rose-200">訂單送出失敗</p>
+          <p className="mt-1">{submitError}</p>
         </div>
       )}
 
@@ -1456,13 +1509,13 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={openSubmitConfirm}
-                disabled={totalCount <= 0}
+                disabled={totalCount <= 0 || checkoutBusy}
                 className="min-w-0 h-9 lg:h-8 px-3 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold active:scale-[0.98] inline-flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="送出訂單"
               >
                 <ListOrdered size={15} className="shrink-0" aria-hidden />
-                <span className="lg:hidden">送出</span>
-                <span className="hidden lg:inline">送出訂單</span>
+                <span className="lg:hidden">{checkoutBusy ? '送出中' : '送出'}</span>
+                <span className="hidden lg:inline">{checkoutBusy ? '送出中' : '送出訂單'}</span>
               </button>
             </div>
           </div>
@@ -1527,6 +1580,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={() => setSubmitModalOpen(false)}
+                disabled={checkoutBusy}
                 className="p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 shrink-0"
                 aria-label="關閉"
               >
@@ -1572,16 +1626,18 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={() => setSubmitModalOpen(false)}
-                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl border border-zinc-600 text-zinc-300 text-sm font-medium hover:bg-zinc-800/80"
+                disabled={checkoutBusy}
+                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl border border-zinc-600 text-zinc-300 text-sm font-medium hover:bg-zinc-800/80 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 返回修改
               </button>
               <button
                 type="button"
                 onClick={executeCheckout}
-                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl bg-amber-500 text-zinc-950 text-sm font-bold hover:bg-amber-400"
+                disabled={checkoutBusy}
+                className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl bg-amber-500 text-zinc-950 text-sm font-bold hover:bg-amber-400 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                確定送出
+                {checkoutBusy ? '送出中…' : '確定送出'}
               </button>
             </div>
           </div>

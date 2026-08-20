@@ -34,6 +34,7 @@ import {
 } from './salesRecordStorage';
 import { ymdDashToSlash } from './dateDisplay';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const KEY = 'dongshan_stall_inventory_v1';
 
@@ -163,7 +164,7 @@ function writeStallDay(s: StoreV1, ymdStr: string, snap: DaySnapshot, scopeId?: 
 
 function saveAll(s: StoreV1) {
   const raw = JSON.stringify(s);
-  localStorage.setItem(KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(KEY, raw);
   cachedStoreRaw = raw;
   cachedStore = cloneStore(s);
   window.dispatchEvent(new Event('stallInventoryUpdated'));

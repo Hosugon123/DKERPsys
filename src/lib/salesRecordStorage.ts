@@ -8,6 +8,7 @@ import {
 import { getAllSupplyItems, getSupplyItem } from './supplyCatalog';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
 import { num, roundProcurementQty } from './stallMath';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 /** 與 stallInventoryStorage 之 DaySnapshot 結構一致（此檔避免反向 import 造成循環） */
 export type SalesRecordDayLine = { out: string; remain: string; updatedAt?: string };
@@ -106,7 +107,7 @@ function migrateLegacyBareDateKeys(s: StoreV1): StoreV1 {
 
 function saveStore(s: StoreV1) {
   const raw = JSON.stringify(s);
-  localStorage.setItem(SALES_KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(SALES_KEY, raw);
   cachedStoreRaw = raw;
   cachedStore = cloneStore(s);
   window.dispatchEvent(new Event('salesRecordUpdated'));

@@ -9,6 +9,7 @@ import { getSessionActorDisplayName, resolveUserDisplayNameById } from './sessio
 import { getSupplyItem, isConsumableItem, isFranchiseeSelfSuppliedItem } from './supplyCatalog';
 import { initialFranchiseeStoreLabelForOrder } from './orderStoreLabel';
 import { purgeStallDayRecordsForDeletedOrder } from './orderStallRecordCleanup';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 /** 寫入訂單／押記時可存檔的顯示名（登入者姓名 → 帳號 → 依 userId 查目錄） */
 function persistableActorDisplayName(): string | undefined {
@@ -127,7 +128,7 @@ export function tombstoneDeletedOrderId(orderId: string): void {
   if (!id) return;
   const store = loadDeletedOrderIdsStore();
   store.byId[id] = new Date().toISOString();
-  localStorage.setItem(DELETED_ORDER_IDS_KEY, JSON.stringify(store));
+  setLocalStorageItemWithQuotaRecovery(DELETED_ORDER_IDS_KEY, JSON.stringify(store));
 }
 
 export type FranchiseManagementOrder = {
@@ -497,7 +498,7 @@ export function loadOrderHistory(): OrderHistoryEntry[] {
 
 function saveOrderHistory(entries: OrderHistoryEntry[]) {
   const raw = JSON.stringify(entries);
-  localStorage.setItem(STORAGE_KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(STORAGE_KEY, raw);
   cachedHistoryRaw = raw;
   cachedHistoryAll = entries.map(cloneHistoryEntry);
   window.dispatchEvent(new Event('orderHistoryUpdated'));
@@ -594,7 +595,7 @@ export function loadFranchiseManagementOrders(): FranchiseManagementOrder[] {
 
 function saveFranchiseManagementOrders(orders: FranchiseManagementOrder[]) {
   const raw = JSON.stringify(orders);
-  localStorage.setItem(FRANCHISE_MGMT_KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(FRANCHISE_MGMT_KEY, raw);
   cachedFranchiseMgmtRaw = raw;
   cachedFranchiseMgmtAll = orders.map(cloneFranchiseManagementOrder);
   window.dispatchEvent(new Event('franchiseManagementOrdersUpdated'));

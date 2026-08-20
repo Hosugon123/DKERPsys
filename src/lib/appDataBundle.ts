@@ -8,6 +8,7 @@ import {
   mergeDeletedOrderIdsStore,
   mergeStorageKeyRecords,
 } from './bundleRecordMerge';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 export const DONGSHAN_DATA_BUNDLE_VERSION = 1;
 export const DONGSHAN_APP_ID = 'dongshan-ya-to';
@@ -151,7 +152,7 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
     }
     try {
       if (localStorage.getItem(storageKey) !== value) {
-        localStorage.setItem(storageKey, value);
+        setLocalStorageItemWithQuotaRecovery(storageKey, value);
         storageChanged = true;
       }
     } catch {

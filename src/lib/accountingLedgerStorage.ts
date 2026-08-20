@@ -9,6 +9,7 @@ import {
 } from './dataScope';
 import { resolveUserDisplayNameById } from './sessionActorDisplayName';
 import { listSystemUsers } from './systemUsersStorage';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const STORAGE_KEY = 'dongshan_accounting_ledger_v1';
 export const ACCOUNTING_LEDGER_UPDATED_EVENT = 'accountingLedgerUpdated';
@@ -346,7 +347,7 @@ function loadStore(): StoreV2 {
 
 function saveStore(s: StoreV2) {
   const raw = JSON.stringify(s);
-  localStorage.setItem(STORAGE_KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(STORAGE_KEY, raw);
   cachedStoreRaw = raw;
   cachedStore = cloneStore(s);
   window.dispatchEvent(new Event(ACCOUNTING_LEDGER_UPDATED_EVENT));
