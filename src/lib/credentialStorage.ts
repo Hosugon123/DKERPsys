@@ -2,6 +2,7 @@
  * 登入密碼本機儲存（localStorage 明文，僅供離線／內網管理用途；上線後應改後端驗證）。
  */
 import { SUPER_ADMIN_LOGIN_ID } from './authConstants';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const KEY = 'dongshan_login_credentials_v1';
 
@@ -26,7 +27,7 @@ function load(): Record<string, string> {
 }
 
 function save(map: Record<string, string>): void {
-  localStorage.setItem(KEY, JSON.stringify(map));
+  setLocalStorageItemWithQuotaRecovery(KEY, JSON.stringify(map));
 }
 
 export function registerCredential(loginId: string, password: string): void {

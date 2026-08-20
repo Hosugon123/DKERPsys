@@ -1,3 +1,5 @@
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+
 type PerfMetric = {
   name: string;
   durationMs?: number;
@@ -41,7 +43,7 @@ function queryFlag(): boolean {
       localStorage.removeItem(STORAGE_KEY);
       return false;
     }
-    localStorage.setItem(STORAGE_KEY, '1');
+    setLocalStorageItemWithQuotaRecovery(STORAGE_KEY, '1');
     return true;
   } catch {
     return false;

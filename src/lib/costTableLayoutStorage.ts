@@ -1,4 +1,5 @@
 import type { CostColumn } from './costStructureStorage';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const STORAGE_KEY = 'dongshan_cost_table_col_widths_v1';
 
@@ -76,7 +77,7 @@ export function saveCostTablePercents(columns: CostColumn[], percents: number[])
   try {
     const norm = normalizePercentsTo100(percents);
     const payload: SavedLayoutV1 = { v: 1, sig: costTableColumnSignature(columns), percents: norm };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    setLocalStorageItemWithQuotaRecovery(STORAGE_KEY, JSON.stringify(payload));
   } catch {
     /* ignore quota */
   }

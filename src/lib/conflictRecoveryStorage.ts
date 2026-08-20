@@ -6,12 +6,13 @@ import {
   parseBundleJson,
   serializeDongshanDataBundle,
 } from './appDataBundle';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const RECOVERY_KEY = 'dongshan_conflict_recovery_bundle_v1';
 
 export function stashLocalBundleForConflictRecovery(): void {
   try {
-    localStorage.setItem(RECOVERY_KEY, serializeDongshanDataBundle());
+    setLocalStorageItemWithQuotaRecovery(RECOVERY_KEY, serializeDongshanDataBundle());
   } catch {
     /* quota / private mode */
   }

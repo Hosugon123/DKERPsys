@@ -2,6 +2,7 @@
  * 權限設定／系統使用者目錄（本機 localStorage，結構預留對應 Cloud SQL `users` 表）。
  */
 import { SUPER_ADMIN_LOGIN_ID } from './authConstants';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 import { normalizeStoreCode3Digits } from './storeCodeStorage';
 
 const KEY = 'dongshan_system_users_v1';
@@ -271,7 +272,7 @@ function loadPersisted(): SystemUser[] | null {
 function savePersisted(users: SystemUser[]): void {
   const body: PersistV1 = { version: 1, users };
   const raw = JSON.stringify(body);
-  localStorage.setItem(KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(KEY, raw);
   cachedPersistedRaw = raw;
   cachedPersistedUsers = users.map((u) => ({ ...u }));
   dispatchUpdated();

@@ -1401,7 +1401,7 @@ export function getPreferredStallBasisYmd(): string {
 
 export function setPreferredStallBasisYmd(ymdStr: string) {
   try {
-    localStorage.setItem(PREF_STALL_BASIS, ymdStr);
+    setLocalStorageItemWithQuotaRecovery(PREF_STALL_BASIS, ymdStr);
   } catch {
     /* ignore */
   }
@@ -1428,7 +1428,7 @@ export function getPreferredProcurementBasisOrderId(): string {
 
 export function setPreferredProcurementBasisOrderId(id: string) {
   try {
-    localStorage.setItem(PREF_PROCUREMENT_BASIS_ORDER, id);
+    setLocalStorageItemWithQuotaRecovery(PREF_PROCUREMENT_BASIS_ORDER, id);
   } catch {
     /* ignore */
   }

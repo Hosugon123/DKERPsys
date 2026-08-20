@@ -1,4 +1,5 @@
 import { getStoreCode3, normalizeStoreCode3Digits } from './storeCodeStorage';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const SEQ_KEY = 'dongshan_order_seq_v1';
 
@@ -14,7 +15,7 @@ function readSeqMap(): Record<string, number> {
 }
 
 function writeSeqMap(m: Record<string, number>) {
-  localStorage.setItem(SEQ_KEY, JSON.stringify(m));
+  setLocalStorageItemWithQuotaRecovery(SEQ_KEY, JSON.stringify(m));
 }
 
 function ymd8Local(d: Date): string {

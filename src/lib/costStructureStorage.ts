@@ -11,6 +11,7 @@
  * 對外契約：寫入後皆 dispatch COST_STRUCTURE_UPDATED_EVENT；
  * 同 key 一併納入 appDataBundle 匯出白名單（見 appDataBundle.ts）。
  */
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const STORAGE_KEY = 'dongshan_cost_structure_v1';
 export const COST_STRUCTURE_UPDATED_EVENT = 'costStructureUpdated';
@@ -339,7 +340,7 @@ function saveStore(store: StoreV1): void {
   if (typeof window === 'undefined') return;
   store.storeUpdatedAt = nowIso();
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    setLocalStorageItemWithQuotaRecovery(STORAGE_KEY, JSON.stringify(store));
   } catch {
     /* localStorage 滿載或停用：靜默失敗，避免崩畫面 */
   }

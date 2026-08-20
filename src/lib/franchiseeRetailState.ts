@@ -2,6 +2,7 @@
  * 加盟主專用：每單位零售參考價（每位加盟主 user.id 一套），與總部 userCatalog 分開。
  */
 import { listSystemUsers } from './systemUsersStorage';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const KEY = 'dongshan_franchisee_retail_v1';
 const LEGACY_OWNER_KEY = '__legacy_v1__';
@@ -110,7 +111,7 @@ function loadStore(): StoreV2 {
 
 function saveStore(s: StoreV2) {
   const raw = JSON.stringify(s);
-  localStorage.setItem(KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(KEY, raw);
   cachedStoreRaw = raw;
   cachedStore = cloneStore(s);
   notify();

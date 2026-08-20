@@ -1,3 +1,5 @@
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+
 const AVATAR_KEY_PREFIX = 'dongshan_user_avatar_v1:';
 
 function normalizeLoginId(loginId: string): string {
@@ -17,7 +19,7 @@ export function getUserAvatar(loginId: string): string | null {
 }
 
 export function setUserAvatar(loginId: string, dataUrl: string): void {
-  localStorage.setItem(keyFor(loginId), dataUrl);
+  setLocalStorageItemWithQuotaRecovery(keyFor(loginId), dataUrl);
 }
 
 export function removeUserAvatar(loginId: string): void {

@@ -1,6 +1,7 @@
 import { SUPER_ADMIN_LOGIN_ID } from './authConstants';
 import * as credentialStorage from './credentialStorage';
 import { ensurePrimarySuperAdminAccount, listSystemUsers, type SystemUserRole } from './systemUsersStorage';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const SESSION_KEY = 'dongshan_session_v1';
 
@@ -69,7 +70,7 @@ export function writeSession(session: AuthSession): void {
     role: session.role,
   };
   const raw = JSON.stringify(body);
-  localStorage.setItem(SESSION_KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(SESSION_KEY, raw);
   cachedSessionRaw = raw;
   cachedSession = { ...body };
   dispatchChanged();

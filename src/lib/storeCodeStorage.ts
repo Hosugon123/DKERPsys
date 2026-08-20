@@ -1,6 +1,8 @@
 /**
  * 本機店號（3 位數，例 001）— 訂單單號前綴。預設 001，可由超級管理員在「權限設定」變更。
  */
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+
 const KEY = 'dongshan_store_code_v1';
 
 /** 訂單單號店號前綴：僅數字、最多 3 碼，左補 0；空則 001 */
@@ -21,6 +23,6 @@ export function getStoreCode3(): string {
 
 export function setStoreCode3(code: string): void {
   const n = normalizeStoreCode3Digits(code);
-  localStorage.setItem(KEY, n);
+  setLocalStorageItemWithQuotaRecovery(KEY, n);
   window.dispatchEvent(new Event('storeCodeUpdated'));
 }

@@ -1,6 +1,7 @@
 import { bareYmdFromStallStorageKey } from './scopedStallDateKey';
 import { effectiveOrderDateYmd } from './orderHistoryStorage';
 import { mergeOrderLikeRecord } from './bundleRecordMerge';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 export const DATA_ARCHIVE_STORAGE_KEY = 'dongshan_data_archives_v1';
 
@@ -79,11 +80,11 @@ function readArchiveStore(): DataArchiveStore {
 }
 
 function saveArchiveStore(store: DataArchiveStore): void {
-  localStorage.setItem(DATA_ARCHIVE_STORAGE_KEY, JSON.stringify(store));
+  setLocalStorageItemWithQuotaRecovery(DATA_ARCHIVE_STORAGE_KEY, JSON.stringify(store));
 }
 
 function writeJson(key: string, value: unknown): void {
-  localStorage.setItem(key, JSON.stringify(value));
+  setLocalStorageItemWithQuotaRecovery(key, JSON.stringify(value));
 }
 
 function isValidYmd(ymd: string): boolean {

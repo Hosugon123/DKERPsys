@@ -1,4 +1,6 @@
 /** 加入主畫面（PWA）自訂圖示，本機儲存（每台裝置／瀏覽器一份） */
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+
 export const PWA_ICON_STORAGE_KEY = 'dongshan_pwa_icon_v1';
 
 export const DEFAULT_PWA_ICON_URL = '/brand-logo.png';
@@ -27,7 +29,7 @@ export function getCustomPwaIconDataUrl(): string | null {
 }
 
 export function setCustomPwaIconDataUrl(dataUrl: string): void {
-  localStorage.setItem(PWA_ICON_STORAGE_KEY, dataUrl);
+  setLocalStorageItemWithQuotaRecovery(PWA_ICON_STORAGE_KEY, dataUrl);
   applyPwaIconsToDocument();
   window.dispatchEvent(new Event(PWA_ICON_UPDATED_EVENT));
 }

@@ -1,3 +1,5 @@
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+
 const KEY = 'dongshan_dashboard_revenue_notes_v1';
 
 type WeekRevenueNote = {
@@ -32,7 +34,7 @@ function loadStore(): StoreV1 {
 }
 
 function saveStore(store: StoreV1): void {
-  localStorage.setItem(KEY, JSON.stringify(store));
+  setLocalStorageItemWithQuotaRecovery(KEY, JSON.stringify(store));
   window.dispatchEvent(new Event(DASHBOARD_REVENUE_NOTES_UPDATED_EVENT));
 }
 

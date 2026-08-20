@@ -1,4 +1,5 @@
 import type { ItemCategory, SupplyItem } from './supplyCatalog';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const KEY_V1 = 'dongshan_supply_catalog_overrides_v1';
 const KEY = 'dongshan_user_catalog_v2';
@@ -78,7 +79,7 @@ function migrateV1ToV2(): StoreV2 | null {
       hiddenBaseIds: [],
       customItems: [],
     };
-    localStorage.setItem(KEY, JSON.stringify(st));
+    setLocalStorageItemWithQuotaRecovery(KEY, JSON.stringify(st));
     localStorage.removeItem(KEY_V1);
     return st;
   } catch {
@@ -127,7 +128,7 @@ function touchStoreMeta(s: StoreV2) {
 function saveStore(s: StoreV2) {
   touchStoreMeta(s);
   const raw = JSON.stringify(s);
-  localStorage.setItem(KEY, raw);
+  setLocalStorageItemWithQuotaRecovery(KEY, raw);
   cachedStoreRaw = raw;
   cachedLegacyRaw = localStorage.getItem(KEY_V1);
   cachedStore = cloneStore(s);

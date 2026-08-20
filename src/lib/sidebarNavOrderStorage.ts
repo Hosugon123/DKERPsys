@@ -1,4 +1,5 @@
 import { getStorageMode } from '../services/storageMode';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const PREFIX = 'dongshan_sidebar_main_nav_order_v1';
 
@@ -66,7 +67,7 @@ export function loadNavOrderForRole(role: string): string[] | null {
 
 export function saveNavOrderForRole(role: string, orderIds: string[]) {
   try {
-    localStorage.setItem(keyForRole(role), JSON.stringify(orderIds));
+    setLocalStorageItemWithQuotaRecovery(keyForRole(role), JSON.stringify(orderIds));
     scheduleRemoteBundlePush();
   } catch {
     /* ignore */

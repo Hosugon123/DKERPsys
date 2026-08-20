@@ -7,6 +7,7 @@
  */
 import * as credentialStorage from './credentialStorage';
 import { listSystemUsers } from './systemUsersStorage';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const STORAGE_KEY = 'dongshan_pw_reset_pending_v1';
 const OTP_TTL_MS = 15 * 60 * 1000;
@@ -47,7 +48,7 @@ function savePending(p: PendingV1 | null): void {
     localStorage.removeItem(STORAGE_KEY);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+  setLocalStorageItemWithQuotaRecovery(STORAGE_KEY, JSON.stringify(p));
 }
 
 function generateOtp(): string {

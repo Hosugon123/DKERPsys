@@ -1,4 +1,5 @@
 import { HQ_SCOPE_ID } from './dataScope';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const KEY = 'dongshan_dashboard_revenue_baseline_v1';
 export const REVENUE_BASELINE_UPDATED_EVENT = 'revenueBaselineUpdated';
@@ -23,7 +24,7 @@ function loadStore(): StoreV1 {
 }
 
 function saveStore(s: StoreV1) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  setLocalStorageItemWithQuotaRecovery(KEY, JSON.stringify(s));
   window.dispatchEvent(new Event(REVENUE_BASELINE_UPDATED_EVENT));
 }
 

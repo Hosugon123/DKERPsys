@@ -1,3 +1,5 @@
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+
 export type ColorTheme = 'dark' | 'light';
 
 export const COLOR_THEME_STORAGE_KEY = 'dongshan_color_theme_v1';
@@ -112,7 +114,7 @@ export function repairColorThemeIfNeeded(): void {
 export function setColorTheme(theme: ColorTheme): void {
   cachedTheme = theme;
   try {
-    localStorage.setItem(COLOR_THEME_STORAGE_KEY, theme);
+    setLocalStorageItemWithQuotaRecovery(COLOR_THEME_STORAGE_KEY, theme);
   } catch {
     /* ignore */
   }

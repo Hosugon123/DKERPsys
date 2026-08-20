@@ -1,6 +1,7 @@
 import { getAllSupplyItems } from './supplyCatalog';
 import { roundProcurementQty } from './stallMath';
 import { getDataScopeContext } from './dataScope';
+import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 const KEY = 'dongshan_procurement_favorites_v1';
 const MAX_TEMPLATES = 30;
@@ -53,7 +54,7 @@ function loadStore(): StoreV2 {
 }
 
 function saveStore(s: StoreV2) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  setLocalStorageItemWithQuotaRecovery(KEY, JSON.stringify(s));
   window.dispatchEvent(new Event('procurementFavoritesUpdated'));
 }
 
