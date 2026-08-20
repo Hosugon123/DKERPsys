@@ -33,6 +33,8 @@ describe('localStorage quota guard', () => {
   it('寫入額滿時清除可重建暫存並重試，不刪核心營運資料', () => {
     localStorage.setItem('dongshan_conflict_recovery_bundle_v1', 'temporary-conflict-backup');
     localStorage.setItem('dongshan_pwa_icon_v1', 'temporary-icon');
+    localStorage.setItem('dongshan_data_archives_v1', 'temporary-archives');
+    localStorage.setItem('dongshan_user_avatar_v1:admin', 'temporary-avatar');
     localStorage.setItem('dongshan_order_history_v1', '[{"id":"keep"}]');
 
     let targetWrites = 0;
@@ -46,10 +48,17 @@ describe('localStorage quota guard', () => {
 
     const removed = setLocalStorageItemWithQuotaRecovery('dongshan_order_history_v1', '[{"id":"new"}]');
 
-    expect(removed).toEqual(['dongshan_conflict_recovery_bundle_v1', 'dongshan_pwa_icon_v1']);
+    expect(removed).toEqual([
+      'dongshan_conflict_recovery_bundle_v1',
+      'dongshan_pwa_icon_v1',
+      'dongshan_data_archives_v1',
+      'dongshan_user_avatar_v1:admin',
+    ]);
     expect(localStorage.getItem('dongshan_order_history_v1')).toBe('[{"id":"new"}]');
     expect(localStorage.getItem('dongshan_conflict_recovery_bundle_v1')).toBeNull();
     expect(localStorage.getItem('dongshan_pwa_icon_v1')).toBeNull();
+    expect(localStorage.getItem('dongshan_data_archives_v1')).toBeNull();
+    expect(localStorage.getItem('dongshan_user_avatar_v1:admin')).toBeNull();
   });
 
   it('清除暫存後仍額滿時丟出中文可讀錯誤', () => {

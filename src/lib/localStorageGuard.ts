@@ -1,7 +1,12 @@
 const RECOVERABLE_LOCAL_STORAGE_KEYS = [
   'dongshan_conflict_recovery_bundle_v1',
   'dongshan_pwa_icon_v1',
+  'dongshan_data_archives_v1',
   'dongshan_performance_debug_v1',
+] as const;
+
+const RECOVERABLE_LOCAL_STORAGE_KEY_PREFIXES = [
+  'dongshan_user_avatar_v1:',
 ] as const;
 
 export class LocalStorageQuotaError extends Error {
@@ -52,6 +57,21 @@ function removeRecoverableStorageKeys(skipKey: string): string[] {
       if (localStorage.getItem(key) == null) continue;
       localStorage.removeItem(key);
       removed.push(key);
+    } catch {
+      /* ignore cleanup failures */
+    }
+  }
+  for (const prefix of RECOVERABLE_LOCAL_STORAGE_KEY_PREFIXES) {
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key && key !== skipKey && key.startsWith(prefix)) keys.push(key);
+      }
+      for (const key of keys) {
+        localStorage.removeItem(key);
+        removed.push(key);
+      }
     } catch {
       /* ignore cleanup failures */
     }

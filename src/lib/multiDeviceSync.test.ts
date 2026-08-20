@@ -47,6 +47,13 @@ function orderRow(id: string, qty: number, updatedAt: string) {
   };
 }
 
+function quotaError(): Error & { code: number } {
+  const error = new Error('quota exceeded') as Error & { code: number };
+  error.name = 'QuotaExceededError';
+  error.code = 22;
+  return error;
+}
+
 function twoLineOrder(
   id: string,
   qtyA: number,
@@ -386,6 +393,50 @@ describe('mergeDongshanBundlesLocalWinsDirty (multi-device)', () => {
     expect(sales.byDate?.['scope:hq|2026-06-03']?.snapshot.actualRevenue).toBe('1000');
     expect(localStorage.getItem('dongshan_pwa_icon_v1')).toBeNull();
     expect(localStorage.getItem('dongshan_data_archives_v1')).toBeNull();
+  });
+
+  it('手機容量不足導致核心資料匯入失敗時，不留下半套資料', () => {
+    localStorage.clear();
+    localStorage.setItem(
+      'dongshan_franchise_mgmt_orders_v1',
+      JSON.stringify([orderRow('local-order', 1, '2026-06-03T10:00:00.000Z')]),
+    );
+    localStorage.setItem(
+      'dongshan_sales_records_v1',
+      JSON.stringify({ version: 1, byDate: { 'scope:hq|2026-06-02': { snapshot: { lines: {} } } } }),
+    );
+    const cloud = baseBundle();
+    cloud.keys.dongshan_franchise_mgmt_orders_v1 = JSON.stringify([
+      orderRow('cloud-order', 2, '2026-06-03T12:05:00.000Z'),
+    ]);
+    cloud.keys.dongshan_sales_records_v1 = JSON.stringify({
+      version: 1,
+      byDate: {
+        'scope:hq|2026-06-03': {
+          completedAt: '2026-06-03T12:30:00.000Z',
+          snapshot: {
+            updatedAt: '2026-06-03T12:30:00.000Z',
+            actualRevenue: '1000',
+            lines: {},
+          },
+        },
+      },
+    });
+
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function setItem(key: string, value: string) {
+      if (key === 'dongshan_sales_records_v1') throw quotaError();
+      return originalSetItem.call(this, key, value);
+    });
+
+    const imp = importDongshanDataBundle(cloud);
+
+    expect(imp.ok).toBe(false);
+    const stored = JSON.parse(
+      localStorage.getItem('dongshan_franchise_mgmt_orders_v1') ?? '[]',
+    ) as { id: string }[];
+    expect(stored.map((x) => x.id)).toEqual(['local-order']);
+    expect(localStorage.getItem('dongshan_sales_records_v1')).toContain('2026-06-02');
+    expect(localStorage.getItem('dongshan_sales_records_v1')).not.toContain('2026-06-03');
   });
 
   it('模擬：A 機送出批貨後 B 機舊快照推送 — 合併後 A 的單仍在', () => {

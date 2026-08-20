@@ -122,6 +122,20 @@ export type ImportBundleResult =
   | { ok: true; importedKeyCount: number }
   | { ok: false; error: string };
 
+function rollbackImportMutations(previousValues: Map<string, string | null>): void {
+  for (const [key, previous] of [...previousValues.entries()].reverse()) {
+    try {
+      if (previous == null) {
+        localStorage.removeItem(key);
+      } else {
+        localStorage.setItem(key, previous);
+      }
+    } catch {
+      /* best-effort rollback */
+    }
+  }
+}
+
 /**
  * 將 bundle 寫回 localStorage。僅處理 `keys` 內出現的鍵；值為 null 則 removeItem。
  */
@@ -138,11 +152,17 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
   const allowed = new Set<string>(DONGSHAN_EXPORT_STORAGE_KEYS as unknown as string[]);
   let importedKeyCount = 0;
   let storageChanged = false;
+  const previousValues = new Map<string, string | null>();
+  const fail = (error: string): ImportBundleResult => {
+    rollbackImportMutations(previousValues);
+    return { ok: false, error };
+  };
   for (const [storageKey, value] of Object.entries(keyBag)) {
     if (!allowed.has(storageKey)) continue;
     if (value === null) {
       try {
         if (localStorage.getItem(storageKey) !== null) {
+          if (!previousValues.has(storageKey)) previousValues.set(storageKey, localStorage.getItem(storageKey));
           localStorage.removeItem(storageKey);
           storageChanged = true;
         }
@@ -153,15 +173,17 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
       continue;
     }
     if (typeof value !== 'string') {
-      return { ok: false, error: `鍵 ${storageKey} 的值必須為字串或 null。` };
+      return fail(`鍵 ${storageKey} 的值必須為字串或 null。`);
     }
     try {
       if (localStorage.getItem(storageKey) !== value) {
+        if (!previousValues.has(storageKey)) previousValues.set(storageKey, localStorage.getItem(storageKey));
         setLocalStorageItemWithQuotaRecovery(storageKey, value);
         storageChanged = true;
       }
     } catch (error) {
       if (OPTIONAL_REMOTE_IMPORT_KEYS.has(storageKey) && isQuotaExceededError(error)) {
+        if (!previousValues.has(storageKey)) previousValues.set(storageKey, localStorage.getItem(storageKey));
         localStorage.removeItem(storageKey);
         importedKeyCount += 1;
         continue;
@@ -169,7 +191,7 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
       const message = error instanceof Error && error.message.trim()
         ? error.message.trim()
         : '瀏覽器拒絕寫入資料。';
-      return { ok: false, error: `無法寫入 ${storageKey}：${message}` };
+      return fail(`無法寫入 ${storageKey}：${message}`);
     }
     importedKeyCount += 1;
   }
