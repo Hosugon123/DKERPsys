@@ -155,8 +155,11 @@ export function importDongshanDataBundle(raw: unknown): ImportBundleResult {
         setLocalStorageItemWithQuotaRecovery(storageKey, value);
         storageChanged = true;
       }
-    } catch {
-      return { ok: false, error: `無法寫入 ${storageKey}。` };
+    } catch (error) {
+      const message = error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : '瀏覽器拒絕寫入資料。';
+      return { ok: false, error: `無法寫入 ${storageKey}：${message}` };
     }
     importedKeyCount += 1;
   }

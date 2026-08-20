@@ -20,6 +20,7 @@ import {
   stashLocalBundleForConflictRecovery,
 } from '../lib/conflictRecoveryStorage';
 import { reportPerfMetric, timeAsync, timeSync } from '../lib/performanceDebug';
+import { reportUserError } from '../lib/userErrorReport';
 import { hasUnsavedWork } from '../lib/unsavedWorkGuard';
 import { getApiBaseUrl, getApiSyncToken, getAsyncStorageDelayMs, getStorageMode } from './storageMode';
 
@@ -396,6 +397,20 @@ function applySyncFailureFromUnknown(e: unknown): void {
   dispatchStatus('error');
 }
 
+function reportRemoteImportFailure(error: string, action: string): void {
+  const quotaLike = error.includes('儲存空間') || error.toLowerCase().includes('quota');
+  reportUserError({
+    title: '雲端資料載入失敗',
+    message: quotaLike
+      ? '手機已取得雲端資料，但此裝置的瀏覽器儲存空間不足，無法載入完整營運資料。請先不要在此手機新增或修改資料，並請管理員協助清理手機 Safari/PWA 網站資料或進行資料歸檔。'
+      : `雲端資料無法載入到此裝置。請先不要新增或修改資料，並將此錯誤截圖回報管理員：${error}`,
+    severity: 'error',
+    source: 'remoteSyncHub',
+    action,
+    technicalDetail: error,
+  });
+}
+
 /** 分頁重新可見時更新雲端版本戳記，降低下一筆 PUT 誤判 409 的機率。 */
 let lastVisibilityRefreshMs = 0;
 const VISIBILITY_REFRESH_MIN_MS = 60_000;
@@ -418,7 +433,10 @@ export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
       mergeDongshanBundlesLocalWinsDirty(local, cloud, []),
     );
     const result = timeSync('remote.visibility.import-bundle', () => importDongshanDataBundle(merged));
-    if (result.ok === false) throw new Error(result.error);
+    if (result.ok === false) {
+      reportRemoteImportFailure(result.error, '背景同步雲端資料');
+      throw new Error(result.error);
+    }
     noteRemoteBundleUpdatedAt(cloud);
     dispatchStatus('ok');
   } catch (e) {
@@ -445,6 +463,7 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
       );
       const result = timeSync('remote.init.import-bundle', () => importDongshanDataBundle(merged));
       if (result.ok === false) {
+        reportRemoteImportFailure(result.error, '啟動載入雲端資料');
         dispatchStatus('error');
         return;
       }

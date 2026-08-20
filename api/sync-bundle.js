@@ -301,6 +301,10 @@ export default async function handler(req, res) {
           ? readUpdatedAt(cloudBundle)
           : 0;
 
+      if (!partialKeys && !isCloudBundleEmpty(cloudBundle) && isCloudBundleEmpty(bundle)) {
+        return versionConflict(res);
+      }
+
       if (cloudUpdatedAt > 0) {
         if (syncedFromUpdatedAt < cloudUpdatedAt || incomingUpdatedAt < cloudUpdatedAt) {
           return versionConflict(res);

@@ -106,6 +106,9 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
+      if (getStorageMode() === 'remote') {
+        await timeAsync('remote.init-on-app-load', () => initRemoteSyncOnAppLoad());
+      }
       timeSync('auth.bootstrap', () => ensureAuthBootstrap());
       const s = timeSync('auth.read-session', () => readSession());
       if (s && validateSession(s)) setSession(s);
@@ -115,9 +118,6 @@ export default function App() {
       }
       setAuthReady(true);
       reportPerfMetric({ name: 'app.auth-ready', durationMs: performance.now() });
-      if (getStorageMode() === 'remote') {
-        void timeAsync('remote.init-on-app-load', () => initRemoteSyncOnAppLoad());
-      }
     })();
   }, []);
 
