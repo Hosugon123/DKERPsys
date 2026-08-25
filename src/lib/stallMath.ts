@@ -144,6 +144,46 @@ export function aggregateDayKpis(
   return aggregateStallKpis(itemIds, getOutRemain, getItem).retail;
 }
 
+function formatEstimatedStallQty(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  const rounded = Math.round(n * 1000) / 1000;
+  if (Number.isInteger(rounded)) return String(rounded);
+  return rounded.toFixed(3).replace(/\.?0+$/, '');
+}
+
+/**
+ * 雨天／特殊狀況快速盤點：用實收營業額占「全部帶出可售金額」的比例，反推各品項售出量並回填剩餘。
+ * 這只負責填表估算，不改變盤點完成、銷售紀錄、訂單押記的既有儲存流程。
+ */
+export function estimateStallRemainLinesFromRevenue(
+  itemIds: string[],
+  getOutRemain: (id: string) => { out: string; remain: string },
+  getItem: (id: string) => SupplyItem | undefined,
+  actualRevenue: number,
+  opts?: { unitBasis?: StallLineUnitBasis }
+): Record<string, string> {
+  const basis = opts?.unitBasis ?? 'retail';
+  const rows = itemIds
+    .map((id) => {
+      const item = getItem(id);
+      if (!item) return null;
+      const out = Math.max(0, num(getOutRemain(id).out));
+      const unit = unitPricePerPackage(item, basis);
+      return { id, out, possibleRevenue: out * unit };
+    })
+    .filter((row): row is { id: string; out: number; possibleRevenue: number } => row !== null);
+
+  const totalPossibleRevenue = rows.reduce((sum, row) => sum + row.possibleRevenue, 0);
+  if (totalPossibleRevenue <= 0) {
+    return Object.fromEntries(rows.map((row) => [row.id, '0']));
+  }
+
+  const soldRatio = Math.max(0, Math.min(1, actualRevenue / totalPossibleRevenue));
+  return Object.fromEntries(
+    rows.map((row) => [row.id, formatEstimatedStallQty(row.out * (1 - soldRatio))])
+  );
+}
+
 /** 叫貨（斤、份等）可輸入小數；與庫存扣減一併用三位小數內。 */
 export const PROCUREMENT_QTY_MAX = 99_999;
 

@@ -9,6 +9,7 @@ import {
   Minus,
   Plus,
   Wallet,
+  Calculator,
 } from 'lucide-react';
 import type { UserRole } from './Orders';
 import { DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT } from '../lib/appDataBundle';
@@ -28,6 +29,7 @@ import {
   num,
   computeLine,
   aggregateStallKpis,
+  estimateStallRemainLinesFromRevenue,
   isStallRemainEntryValid,
   parseMoneyInputForLedgerGap,
 } from '../lib/stallMath';
@@ -433,6 +435,36 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       setTimeout(() => setRecomputeMsg(null), 5000);
   };
 
+  const applyEstimatedRemainFromRevenue = () => {
+    const actualRevenue = parseMoneyInputForLedgerGap(snap.actualRevenue);
+    if (actualRevenue === null || actualRevenue < 0) {
+      setRecomputeMsg('請先輸入本日實收金額，再用實收估算剩餘。');
+      setTimeout(() => setRecomputeMsg(null), 5000);
+      return;
+    }
+    if (dayKpi.estTotal <= 0) {
+      setRecomputeMsg('目前沒有可估算的帶出貨量，請先植入訂單或填寫帶出貨量。');
+      setTimeout(() => setRecomputeMsg(null), 5000);
+      return;
+    }
+    const estimatedRemainById = estimateStallRemainLinesFromRevenue(
+      stallDisplayItems.map((item) => item.id),
+      (id) => snap.lines[id] ?? { out: '', remain: '' },
+      (id) => getSupplyItem(id, supplyRetailView),
+      actualRevenue,
+      { unitBasis: 'retail' }
+    );
+    setSnap((prev) => {
+      const lines = { ...prev.lines };
+      for (const [id, remain] of Object.entries(estimatedRemainById)) {
+        lines[id] = { ...lines[id], remain };
+      }
+      return { ...prev, lines };
+    });
+    setRecomputeMsg('已依實收金額與帶出比例估算剩餘貨量；請快速檢查後再送出盤點完成。');
+    setTimeout(() => setRecomputeMsg(null), 7000);
+  };
+
   return (
     <div className="space-y-4 max-w-[1600px] mx-auto pb-24">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -764,6 +796,14 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     : `${ledgerGap < 0 ? '−' : '+'}$${money(Math.abs(ledgerGap))}`}
               </span>
             </div>
+            <button
+              type="button"
+              onClick={applyEstimatedRemainFromRevenue}
+              className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-700/60 bg-amber-950/35 px-3 text-sm font-semibold text-amber-100 hover:bg-amber-900/45 lg:w-auto"
+            >
+              <Calculator size={16} className="text-amber-400" />
+              用實收估算剩餘
+            </button>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,13rem)_1fr] sm:gap-4 sm:items-end pt-1 border-t border-amber-900/35">
