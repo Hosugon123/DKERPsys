@@ -47,6 +47,7 @@ import { cn } from '../lib/utils';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
+import { HQ_SCOPE_ID } from '../lib/dataScope';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { useStorageRevisionGuard } from '../hooks/useStorageRevisionGuard';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
@@ -89,9 +90,16 @@ type StoreFilterOption = {
   count: number;
 };
 
+function orderStoreFilterLabel(o: OrderHistoryEntry): string {
+  return orderSalesOutletChannel(o) === 'direct' ? '直營店' : resolveOrderStoreLabel(o);
+}
+
 function orderStoreFilterKey(o: OrderHistoryEntry): string {
-  const scopeId = resolveOrderDataScopeId(o) ?? orderSalesOutletChannel(o);
-  return `${orderSalesOutletChannel(o)}|${scopeId}|${resolveOrderStoreLabel(o)}`;
+  const channel = orderSalesOutletChannel(o);
+  if (channel === 'direct') return `${channel}|${HQ_SCOPE_ID}|直營店`;
+
+  const scopeId = resolveOrderDataScopeId(o) ?? channel;
+  return `${channel}|${scopeId}|${orderStoreFilterLabel(o)}`;
 }
 
 export function buildSalesRecordStoreFilterOptions(
@@ -110,7 +118,7 @@ export function buildSalesRecordStoreFilterOptions(
     }
     byKey.set(key, {
       key,
-      label: resolveOrderStoreLabel(order),
+      label: orderStoreFilterLabel(order),
       channel,
       count: 1,
     });

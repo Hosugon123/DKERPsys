@@ -31,6 +31,7 @@ describe('sales record store filter options', () => {
     const rows = [
       order({ id: 'hq-1', storeLabel: '直營店', actorRole: 'employee', scopeId: 'scope:hq' }),
       order({ id: 'hq-2', storeLabel: '直營店', actorRole: 'admin', scopeId: 'scope:hq' }),
+      order({ id: 'hq-legacy', storeLabel: '直營店', actorRole: 'employee' }),
       order({
         id: 'fr-1',
         storeLabel: '屏東高樹',
@@ -39,9 +40,9 @@ describe('sales record store filter options', () => {
       }),
     ];
 
-    expect(buildSalesRecordStoreFilterOptions(rows, 'direct')).toMatchObject([
-      { label: '直營店', count: 2 },
-    ]);
+    const directOptions = buildSalesRecordStoreFilterOptions(rows, 'direct');
+    expect(directOptions).toHaveLength(1);
+    expect(directOptions).toMatchObject([{ label: '直營店', count: 3 }]);
     expect(buildSalesRecordStoreFilterOptions(rows, 'franchise')).toMatchObject([
       { label: '屏東高樹', count: 1 },
     ]);
