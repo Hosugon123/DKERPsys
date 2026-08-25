@@ -182,7 +182,6 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   const supplyItems = useSupplyCatalogItems(userRole);
   const supplyRetailView = userRoleToSupplyRetailView(userRole);
   const [orders, setOrders] = useState<OrderHistoryEntry[]>([]);
-  const [outletFilter, setOutletFilter] = useState<OutletFilter>(userRole === 'admin' ? 'direct' : 'all');
   const [storeFilterKey, setStoreFilterKey] = useState(ALL_STORE_FILTER);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeWeekdays, setActiveWeekdays] = useState<number[]>([]);
@@ -264,8 +263,8 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
   }, [deleteModalId]);
 
   const storeFilterOptions = useMemo(
-    () => buildSalesRecordStoreFilterOptions(orders, outletFilter),
-    [orders, outletFilter],
+    () => buildSalesRecordStoreFilterOptions(orders, 'all'),
+    [orders],
   );
 
   useEffect(() => {
@@ -279,18 +278,10 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
     const byWeek = orders.filter((o) =>
       orderMatchesActiveWeekdaysFromYmd(effectiveOrderDateYmd(o), activeWeekdays)
     );
-    let byOutlet = byWeek;
-    if (isSuperAdmin) {
-      if (outletFilter === 'direct') {
-        byOutlet = byWeek.filter((o) => orderSalesOutletChannel(o) === 'direct');
-      } else if (outletFilter === 'franchise') {
-        byOutlet = byWeek.filter((o) => orderSalesOutletChannel(o) === 'franchise');
-      }
-    }
     const byStore =
       isSuperAdmin && storeFilterKey !== ALL_STORE_FILTER
-        ? byOutlet.filter((o) => orderStoreFilterKey(o) === storeFilterKey)
-        : byOutlet;
+        ? byWeek.filter((o) => orderStoreFilterKey(o) === storeFilterKey)
+        : byWeek;
     const q = searchQuery.trim().toLowerCase();
     if (!q) return byStore;
     return byStore.filter((o) => {
@@ -313,13 +304,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           String(l.unitPrice).includes(q)
       );
     });
-  }, [orders, searchQuery, activeWeekdays, isSuperAdmin, outletFilter, storeFilterKey]);
+  }, [orders, searchQuery, activeWeekdays, isSuperAdmin, storeFilterKey]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / SALES_RECORD_PAGE_SIZE));
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, activeWeekdays, outletFilter, storeFilterKey]);
+  }, [searchQuery, activeWeekdays, storeFilterKey]);
 
   useEffect(() => {
     setPage((p) => Math.min(Math.max(1, p), totalPages));
@@ -540,58 +531,34 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
 
       {isSuperAdmin && (
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2.5 sm:px-4">
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500 min-w-0">
-                <Store size={16} className="text-amber-500/80 shrink-0" />
-                <span className="text-xs sm:text-sm whitespace-nowrap">門市類型</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(
-                  [
-                    { key: 'all' as const, label: '全部' },
-                    { key: 'direct' as const, label: '直營店' },
-                    { key: 'franchise' as const, label: '加盟店' },
-                  ] as const
-                ).map(({ key, label }) => {
-                  const on = outletFilter === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => {
-                        setOutletFilter(key);
-                        setStoreFilterKey(ALL_STORE_FILTER);
-                      }}
-                      aria-pressed={on}
-                      className={cn(
-                        'px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium border transition-colors',
-                        on
-                          ? 'bg-amber-600/20 border-amber-500/50 text-amber-100'
-                          : 'bg-zinc-950/50 border-zinc-700 text-zinc-500 hover:border-zinc-600'
-                      )}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <div className="flex items-center gap-1.5 text-zinc-500 min-w-0 shrink-0">
+              <Store size={16} className="text-amber-500/80 shrink-0" />
+              <span className="text-xs sm:text-sm whitespace-nowrap">門市</span>
             </div>
-            <label className="flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:gap-2">
-              <span className="whitespace-nowrap">門市</span>
-              <select
-                value={storeFilterKey}
-                onChange={(e) => setStoreFilterKey(e.target.value)}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-200 outline-none transition-colors focus:border-amber-500 sm:max-w-sm"
-              >
-                <option value={ALL_STORE_FILTER}>全部門市（{storeFilterOptions.length} 家）</option>
-                {storeFilterOptions.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.label}（{option.count} 筆）
-                  </option>
-                ))}
-              </select>
-            </label>
+            {[
+              { key: ALL_STORE_FILTER, label: '全部', count: orders.length },
+              ...storeFilterOptions,
+            ].map((option) => {
+              const on = storeFilterKey === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setStoreFilterKey(option.key)}
+                  aria-pressed={on}
+                  className={cn(
+                    'shrink-0 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium border transition-colors',
+                    on
+                      ? 'bg-amber-600/20 border-amber-500/50 text-amber-100'
+                      : 'bg-zinc-950/50 border-zinc-700 text-zinc-500 hover:border-zinc-600',
+                  )}
+                >
+                  {option.label}
+                  <span className="ml-1 text-[0.7em] opacity-70">{option.count}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -603,7 +570,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
           {orders.length === 0
             ? '尚無紀錄。'
             : isSuperAdmin
-              ? '沒有符合條件之資料。可調整「門市類型」、建單星期或搜尋關鍵字。'
+              ? '沒有符合條件之資料。可調整門市、建單星期或搜尋關鍵字。'
               : '沒有符合條件之資料。'}
         </div>
       )}
