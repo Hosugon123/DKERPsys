@@ -392,7 +392,7 @@ const IOS_PRINT_PDF_WIDTH_MM = 210;
 const IOS_PRINT_SCALE = IOS_PRINT_PDF_WIDTH_MM / THERMAL_RECEIPT_WIDTH_MM;
 
 function estimateReceiptPageHeightMm(rowCount: number, sectionCount = 1): number {
-  return Math.max(120, Math.ceil(30 + sectionCount * 18 + rowCount * 11));
+  return Math.max(55, Math.ceil(18 + sectionCount * 8 + rowCount * 8.5));
 }
 
 function estimateCombinedReceiptPageHeightMm(summaryRows: number, slips: OpenStoreOrderPrintSlip[]): number {
@@ -413,17 +413,17 @@ function buildIosPrintAppFitScript(pageHeightMm: number): string {
         '@media print {' +
         '* { overflow: visible !important; }' +
         'html, body, .receipt-page { width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; min-width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; max-width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; height: auto !important; min-height: 0 !important; }' +
-        'body { padding: 4mm 5mm 8mm !important; font-size: 48px !important; line-height: 1.18 !important; }' +
-        '.receipt-page { padding: 4mm 5mm 8mm !important; }' +
-        'h1 { margin-bottom: 12px !important; padding-bottom: 14px !important; border-bottom: 3px solid #111 !important; font-size: 84px !important; line-height: 1.08 !important; }' +
-        '.summary, .meta { margin-bottom: 14px !important; padding-bottom: 14px !important; border-bottom: 3px solid #111 !important; font-size: 48px !important; line-height: 1.35 !important; }' +
+        'body { padding: 3mm 5mm 2mm !important; font-size: 48px !important; line-height: 1.18 !important; }' +
+        '.receipt-page { padding: 3mm 5mm 2mm !important; }' +
+        'h1 { margin-bottom: 10px !important; padding-bottom: 12px !important; border-bottom: 3px solid #111 !important; font-size: 84px !important; line-height: 1.08 !important; }' +
+        '.date, .summary, .meta { margin-bottom: 12px !important; padding-bottom: 12px !important; border-bottom: 3px solid #111 !important; font-size: 54px !important; line-height: 1.25 !important; }' +
         'th { padding: 12px 0 !important; border-bottom: 3px solid #111 !important; font-size: 42px !important; }' +
         'td { padding: 16px 0 !important; border-bottom: 3px dashed #777 !important; font-size: 64px !important; line-height: 1.16 !important; }' +
         'th.item, td.item { padding-left: 2mm !important; }' +
         'th.qty, td.qty { width: 118mm !important; padding-right: 2mm !important; }' +
         '.batch-print .receipt-page { break-after: page !important; page-break-after: always !important; }' +
         '.batch-print .receipt-page:last-of-type { break-after: auto !important; page-break-after: auto !important; }' +
-        '.cut-line { margin: 24mm 0 6mm !important; border-top: 3px dashed #111 !important; font-size: 28px !important; }' +
+        '.cut-line { margin: 8mm 0 0 !important; border-top: 3px dashed #111 !important; font-size: 28px !important; }' +
         '}';
       document.head.appendChild(style);
       return true;
@@ -555,7 +555,7 @@ export function buildOrderPrintSlipHtml(
       min-width: 80mm;
       max-width: 100vw;
       margin: 0;
-      padding: 1.5mm 1.5mm 3mm;
+      padding: 1.5mm 1.5mm 1mm;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
@@ -577,7 +577,7 @@ export function buildOrderPrintSlipHtml(
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
       text-align: center;
-      font-size: 19px;
+      font-size: 25px;
       font-weight: 700;
     }
     table {
@@ -733,7 +733,7 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       min-width: 80mm;
       max-width: 100vw;
       margin: 0;
-      padding: 1.5mm 1.5mm 3mm;
+      padding: 1.5mm 1.5mm 1mm;
       color: #111;
       background: #fff;
       font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
@@ -755,8 +755,10 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 20px;
-      line-height: 1.5;
+      font-size: 19px;
+      line-height: 1.25;
+      text-align: center;
+      font-weight: 700;
     }
     table {
       width: 100%;
@@ -839,9 +841,8 @@ export function buildOpenStoreOrderSummaryPrintHtml(summary: OpenStoreOrderSumma
   </div>
   <h1>未完成訂單總和</h1>
   <div class="summary">
-    <div>出貨前對點</div>
-    <div>${escapeReceiptHtml(summary.dateLabel)}</div>
-    <div>共 ${escapeReceiptHtml(summary.storeCount)} 家店、${escapeReceiptHtml(summary.orderCount)} 筆訂單</div>
+    <span>${escapeReceiptHtml(summary.dateLabel)}</span>
+    <span> ・ ${escapeReceiptHtml(summary.storeCount)} 家店 / ${escapeReceiptHtml(summary.orderCount)} 筆</span>
   </div>
   ${
     summary.lines.length
@@ -914,7 +915,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       return `
   <section class="receipt-page slip-page">
     <h1>${escapeReceiptHtml(slip.storeLabel)}</h1>
-    <div class="meta">${escapeReceiptHtml(slip.dateLabel)} ・ 訂單 ${escapeReceiptHtml(slip.orderId)}</div>
+    <div class="meta">${escapeReceiptHtml(slip.dateLabel)}</div>
     ${
       slip.lines.length
         ? `<table>
@@ -960,7 +961,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       min-width: 80mm;
       max-width: 100vw;
       margin: 0;
-      padding: 1.5mm 1.5mm 3mm;
+      padding: 1.5mm 1.5mm 1mm;
       background: #fff;
       break-inside: avoid;
       page-break-inside: avoid;
@@ -986,8 +987,10 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       margin: 0 0 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid #111;
-      font-size: 20px;
-      line-height: 1.5;
+      font-size: 22px;
+      line-height: 1.25;
+      text-align: center;
+      font-weight: 700;
     }
     table {
       width: 100%;
@@ -1047,7 +1050,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     }
     .slip-page { margin-top: 4mm; }
     .cut-line {
-      margin: 10mm 0 2mm;
+      margin: 8mm 0 0;
       border-top: 1px dashed #111;
       color: #111;
       font-size: 11px;
@@ -1101,9 +1104,8 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
   <section class="receipt-page">
     <h1>未完成訂單總和</h1>
     <div class="summary">
-      <div>出貨前對點</div>
-      <div>${escapeReceiptHtml(summary.dateLabel)}</div>
-      <div>共 ${escapeReceiptHtml(summary.storeCount)} 家店、${escapeReceiptHtml(summary.orderCount)} 筆訂單</div>
+      <span>${escapeReceiptHtml(summary.dateLabel)}</span>
+      <span> ・ ${escapeReceiptHtml(summary.storeCount)} 家店 / ${escapeReceiptHtml(summary.orderCount)} 筆</span>
     </div>
     ${
       summary.lines.length

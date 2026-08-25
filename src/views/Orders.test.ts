@@ -138,6 +138,8 @@ describe('open store order summaries', () => {
     expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u548c');
     expect(html).toContain('2026/8/7');
     expect(html).toContain('2026/8/8');
+    expect(html).toContain('\u5bb6\u5e97 /');
+    expect(html).not.toContain('\u51fa\u8ca8\u524d\u5c0d\u9ede');
     expect(html).not.toContain('\u53eb\u8ca8\u91d1\u984d');
     expect(html).not.toContain('<th class="amount">\u91d1\u984d</th>');
     expect(html).toContain('position: sticky');
@@ -189,9 +191,11 @@ describe('open store order summaries', () => {
     const html = buildCombinedOpenStoreOrdersPrintHtml(summary, slips);
     expect(html).toContain('\u672a\u5b8c\u6210\u8a02\u55ae\u7e3d\u6210\u5217\u5370');
     expect(html).toContain('2026/8/8');
-    expect(html).toContain('open-today-a');
-    expect(html).toContain('open-today-b');
-    expect(html).toContain('2026/8/8（週六） ・ 訂單 open-today-a');
+    expect(html).not.toContain('open-today-a');
+    expect(html).not.toContain('open-today-b');
+    expect(html).toContain('<div class="meta">2026/8/8（週六）</div>');
+    expect(html).toContain('\u5bb6\u5e97 /');
+    expect(html).not.toContain('\u51fa\u8ca8\u524d\u5c0d\u9ede');
     expect(html).not.toContain('<th class="amount">\u91d1\u984d</th>');
     expect(html).not.toContain('page-break-before: always');
     expect(html).toContain('width: 80mm');
