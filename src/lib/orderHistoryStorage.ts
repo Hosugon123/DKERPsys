@@ -1428,6 +1428,8 @@ export function appendProcurementOrderEntry(params: {
       selfSuppliedCostAmount: selfSuppliedCostAmount ?? 0,
       orderDateYmd: bookYmd,
       procurementDeductionBasisOrderId,
+      procurementDeductionBasisOrderIds,
+      procurementDeductionAppliedQtyByBasisOrderId,
     });
   }
 

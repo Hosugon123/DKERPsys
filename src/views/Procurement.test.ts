@@ -1,16 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import { buildEffectiveProcurementCart } from './Procurement';
+import { buildEffectiveProcurementCart, resolveProcurementCheckoutCart } from './Procurement';
+
+const DUCK_HEAD_ID = 's20';
 
 describe('procurement effective cart', () => {
   it('uses focused input drafts when submitting before blur', () => {
-    expect(buildEffectiveProcurementCart({ duckHead: 13 }, { duckHead: '18' })).toEqual({
-      duckHead: 18,
+    expect(buildEffectiveProcurementCart({ [DUCK_HEAD_ID]: 13 }, { [DUCK_HEAD_ID]: '18' })).toEqual({
+      [DUCK_HEAD_ID]: 18,
     });
   });
 
   it('removes a cart item when the active input is cleared', () => {
-    expect(buildEffectiveProcurementCart({ duckHead: 13, rice: 5 }, { duckHead: '' })).toEqual({
-      rice: 5,
+    expect(buildEffectiveProcurementCart({ [DUCK_HEAD_ID]: 13, s02: 5 }, { [DUCK_HEAD_ID]: '' })).toEqual({
+      s02: 5,
+    });
+  });
+});
+
+describe('procurement checkout deduction guard', () => {
+  it('auto deducts a selected basis when the cart was not deducted yet', () => {
+    const resolved = resolveProcurementCheckoutCart(
+      { [DUCK_HEAD_ID]: 18 },
+      'basis-1',
+      '',
+      (cart) => ({ [DUCK_HEAD_ID]: Math.max(0, (cart[DUCK_HEAD_ID] ?? 0) - 6) }),
+    );
+
+    expect(resolved).toEqual({
+      cart: { [DUCK_HEAD_ID]: 12 },
+      autoDeducted: true,
+      basisOrderId: 'basis-1',
+    });
+  });
+
+  it('does not deduct again when the cart already matches the selected basis', () => {
+    const resolved = resolveProcurementCheckoutCart(
+      { [DUCK_HEAD_ID]: 12 },
+      'basis-1',
+      'basis-1',
+      () => ({ [DUCK_HEAD_ID]: 6 }),
+    );
+
+    expect(resolved).toEqual({
+      cart: { [DUCK_HEAD_ID]: 12 },
+      autoDeducted: false,
+      basisOrderId: 'basis-1',
     });
   });
 });

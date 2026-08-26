@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const PRODUCT_ID = 'test-sync-duck';
 const BASIS_ORDER_ID = 'basis-sync-order';
+const BASIS_ORDER_ID_2 = 'basis-sync-order-2';
 const CHILD_ORDER_ID = 'child-sync-order';
 const BASIS_YMD = '2026-08-13';
+const BASIS_YMD_2 = '2026-08-12';
 const CHILD_YMD = '2026-08-14';
 
 vi.mock('./storageMode', () => ({
@@ -119,5 +121,54 @@ describe('order deduction API stall out sync', () => {
     expect(removed.ok).toBe(true);
     expect(readMergedOrderByIdFromStores(CHILD_ORDER_ID)?.lines[0]?.qty).toBe(100);
     expect(Number(loadDay(CHILD_YMD, 'scope:hq').lines[PRODUCT_ID]?.out)).toBe(100);
+  });
+
+  it('limits append-time deductions across multiple basis orders to the submitted quantity', async () => {
+    const { orders } = await import('./apiService');
+    const { loadDay } = await import('../lib/stallInventoryStorage');
+    const { readMergedOrderByIdFromStores } = await import('../lib/orderHistoryStorage');
+
+    const basis = (id: string, ymd: string) => ({
+      id,
+      createdAt: `${ymd}T10:00:00.000Z`,
+      orderDateYmd: ymd,
+      updatedAt: `${ymd}T20:00:00.000Z`,
+      source: 'procurement',
+      status: '已完成',
+      totalAmount: 10000,
+      payableAmount: 10000,
+      itemCount: 100,
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 100, unitPrice: 100, unit: '份' }],
+      storeLabel: '直營店',
+      actorRole: 'admin',
+      scopeId: 'scope:hq',
+      stallCountBasisYmd: ymd,
+      stallCountCompletedAt: `${ymd}T20:00:00.000Z`,
+      stallCountSnapshot: {
+        lines: { [PRODUCT_ID]: { out: '100', remain: '8' } },
+        actualRevenue: '8000',
+        updatedAt: `${ymd}T20:00:00.000Z`,
+      },
+    });
+    localStorage.setItem(
+      'dongshan_franchise_mgmt_orders_v1',
+      JSON.stringify([basis(BASIS_ORDER_ID, BASIS_YMD), basis(BASIS_ORDER_ID_2, BASIS_YMD_2)]),
+    );
+
+    const orderId = await orders.appendProcurementOrderEntry({
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 10, unitPrice: 100, unit: '份' }],
+      totalAmount: 1000,
+      actorRole: 'admin',
+      orderDateYmd: CHILD_YMD,
+      procurementDeductionBasisOrderIds: [BASIS_ORDER_ID, BASIS_ORDER_ID_2],
+    });
+    const child = readMergedOrderByIdFromStores(orderId);
+
+    expect(child?.procurementDeductionAppliedQtyByBasisOrderId).toEqual({
+      [BASIS_ORDER_ID]: { [PRODUCT_ID]: 8 },
+      [BASIS_ORDER_ID_2]: { [PRODUCT_ID]: 2 },
+    });
+    expect(Number(loadDay(BASIS_YMD, 'scope:hq').lines[PRODUCT_ID]?.remain)).toBe(0);
+    expect(Number(loadDay(BASIS_YMD_2, 'scope:hq').lines[PRODUCT_ID]?.remain)).toBe(6);
   });
 });

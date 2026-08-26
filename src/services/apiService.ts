@@ -38,6 +38,7 @@ import { reportUserError } from '../lib/userErrorReport';
 import * as systemUsers from '../lib/systemUsersStorage';
 import { getStoreCode3, setStoreCode3 } from '../lib/storeCodeStorage';
 import * as dataArchive from '../lib/dataArchiveStorage';
+import { roundProcurementQty } from '../lib/stallMath';
 
 export {
   awaitRemotePushIdle,
@@ -266,15 +267,25 @@ export const orders = {
         procurementDeductionBasisOrderId: params.procurementDeductionBasisOrderId,
         procurementDeductionBasisOrderIds: params.procurementDeductionBasisOrderIds,
       });
+      const totalDeductByProductId: Record<string, number> = {};
       const appliedQtyByBasisOrderId: Record<string, Record<string, number>> = {};
       for (const basisOrderId of basisOrderIds) {
         if (!getBasisDeductionContext(basisOrderId)) continue;
+        const remainingLines = params.lines.map((l) => ({
+          ...l,
+          qty: Math.max(0, roundProcurementQty(Number(l.qty) - (totalDeductByProductId[l.productId] ?? 0))),
+        }));
         const toDeduct = stallInventory.buildProcurementRemainDeductionsFromLines(
           basisOrderId,
-          orderLinesForRemainDeduction(params.lines),
+          orderLinesForRemainDeduction(remainingLines),
         );
         if (Object.keys(toDeduct).length > 0) {
           appliedQtyByBasisOrderId[basisOrderId] = toDeduct;
+          for (const [productId, qty] of Object.entries(toDeduct)) {
+            totalDeductByProductId[productId] = roundProcurementQty(
+              (totalDeductByProductId[productId] ?? 0) + qty,
+            );
+          }
           applyBasisRemainDeduction(basisOrderId, toDeduct);
         }
       }

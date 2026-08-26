@@ -101,6 +101,24 @@ export function buildEffectiveProcurementCart(
   return merged;
 }
 
+export function resolveProcurementCheckoutCart(
+  effectiveCart: Record<string, number>,
+  basisOrderId: string,
+  cartDeductedBasisOrderId: string,
+  deductCart: (cart: Record<string, number>, basisOrderId: string) => Record<string, number>,
+): { cart: Record<string, number>; autoDeducted: boolean; basisOrderId: string } {
+  const basisId = basisOrderId.trim();
+  if (!basisId) return { cart: effectiveCart, autoDeducted: false, basisOrderId: '' };
+  if (cartDeductedBasisOrderId.trim() === basisId) {
+    return { cart: effectiveCart, autoDeducted: false, basisOrderId: basisId };
+  }
+  return {
+    cart: cartFromFavorite(deductCart(effectiveCart, basisId)),
+    autoDeducted: true,
+    basisOrderId: basisId,
+  };
+}
+
 const PROC_DOCK_SELECT_CLASS =
   'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[3.25rem] max-w-[5.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1.5 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark] lg:h-7 lg:min-w-[3.5rem] lg:max-w-[6rem] lg:text-xs';
 
@@ -130,6 +148,7 @@ type ProcurementWorkDraft = {
   cart: Record<string, number>;
   qtyInputDraft: Record<string, string>;
   stallBasisOrderId: string;
+  cartDeductedBasisOrderId?: string;
   newOrderDateYmd: string;
   referenceWeekdayIdx: number;
   referenceMode: ProcurementReferenceMode;
@@ -169,6 +188,9 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   const [stallBasisOrderId, setStallBasisOrderId] = useState(
     () => restoredProcurement?.stallBasisOrderId ?? getPreferredProcurementBasisOrderId(),
   );
+  const [cartDeductedBasisOrderId, setCartDeductedBasisOrderId] = useState(
+    () => restoredProcurement?.cartDeductedBasisOrderId ?? '',
+  );
   /** 盤點日當天售出一覽：伸縮（同歷史訂單邏輯，預設收合） */
   const [stallDaySalesOpen, setStallDaySalesOpen] = useState(false);
   /** 常用訂單區塊：預設收合節省版面 */
@@ -205,6 +227,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       cart,
       qtyInputDraft,
       stallBasisOrderId,
+      cartDeductedBasisOrderId,
       newOrderDateYmd,
       referenceWeekdayIdx,
       referenceMode,
@@ -396,6 +419,16 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     [cart, qtyInputDraft],
   );
   const buildEffectiveCart = useCallback((): Record<string, number> => effectiveCart, [effectiveCart]);
+  const resolveCheckoutCart = useCallback(
+    () =>
+      resolveProcurementCheckoutCart(
+        effectiveCart,
+        stallBasisOrderId,
+        cartDeductedBasisOrderId,
+        cartAfterDeductingStallRemainFromOrder,
+      ),
+    [effectiveCart, stallBasisOrderId, cartDeductedBasisOrderId],
+  );
 
   const effectiveCartCount = useMemo(() => {
     const values: number[] = Object.values(effectiveCart);
@@ -441,6 +474,8 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     }
     setCart(next);
     setQtyInputDraft({});
+    setCartDeductedBasisOrderId(stallBasisOrderId.trim());
+    setCheckoutSyncNotice('已依所選盤點單扣除剩餘，購物車目前顯示扣後實際叫貨量。');
   };
 
   const totalPrice = Object.entries(effectiveCart).reduce((total, [id, n]) => {
@@ -533,8 +568,8 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
           : '')
       : undefined;
 
-  const buildLinesFromCart = useCallback((): OrderHistoryLine[] => {
-    return Object.entries(effectiveCart)
+  const buildLinesFromCart = useCallback((cartForLines?: Record<string, number>): OrderHistoryLine[] => {
+    return Object.entries(cartForLines ?? effectiveCart)
       .map(([id, qty]) => {
         const item = getSupplyItem(id, supplyRetailView);
         const q = roundProcurementQty(Number(qty) || 0);
@@ -551,14 +586,33 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   }, [effectiveCart, supplyRetailView, userRole]);
 
   const openSubmitConfirm = () => {
-    if (buildLinesFromCart().length === 0) return;
+    const checkoutCart = resolveCheckoutCart();
+    if (checkoutCart.autoDeducted) {
+      if (Object.keys(checkoutCart.cart).length === 0) {
+        setSubmitError('扣除盤點剩餘後暫無需補貨，請確認數量或清空扣餘基準。');
+        return;
+      }
+      setCart(checkoutCart.cart);
+      setQtyInputDraft({});
+      setCartDeductedBasisOrderId(checkoutCart.basisOrderId);
+      setCheckoutSyncNotice('送出前已自動扣除盤點剩餘，請再次確認扣後叫貨量後送出。');
+      setSubmitError('');
+      return;
+    }
+    if (buildLinesFromCart(checkoutCart.cart).length === 0) return;
     setSubmitError('');
     setSubmitModalOpen(true);
   };
 
   const executeCheckout = useCallback(() => {
     if (checkoutBusy) return;
-    const lines = buildLinesFromCart();
+    const checkoutCart = resolveCheckoutCart();
+    if (checkoutCart.autoDeducted) {
+      setCart(checkoutCart.cart);
+      setQtyInputDraft({});
+      setCartDeductedBasisOrderId(checkoutCart.basisOrderId);
+    }
+    const lines = buildLinesFromCart(checkoutCart.cart);
     if (lines.length === 0) {
       setSubmitModalOpen(false);
       return;
@@ -603,6 +657,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
         setSubmitError('');
         setCart({});
         setQtyInputDraft({});
+        setCartDeductedBasisOrderId('');
         setNewOrderDateYmd(ymd(new Date()));
         setSyncProcurementToLedger(false);
         setTimeout(() => setOrderSuccess(false), 3000);
@@ -616,6 +671,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     buildLinesFromCart,
     checkoutBusy,
     newOrderDateYmd,
+    resolveCheckoutCart,
     stallBasisOrderId,
     supplyRetailView,
     userRole,
@@ -626,6 +682,8 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     setFavoriteError('');
     setCart(cartFromFavorite(f.quantities));
     setQtyInputDraft({});
+    setCartDeductedBasisOrderId('');
+    setCheckoutSyncNotice(null);
   };
 
   const applyFavoriteDeductStallBasisRemain = (f: FavoriteOrder) => {
@@ -649,6 +707,8 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     }
     setCart(next);
     setQtyInputDraft({});
+    setCartDeductedBasisOrderId(stallBasisOrderId.trim());
+    setCheckoutSyncNotice('已依所選盤點單扣除剩餘，購物車目前顯示扣後實際叫貨量。');
   };
 
   const onDeleteFavoriteClick = (f: FavoriteOrder) => {
@@ -841,6 +901,8 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                   const v = e.target.value;
                   setStallBasisOrderId(v);
                   setPreferredProcurementBasisOrderId(v);
+                  setCartDeductedBasisOrderId('');
+                  setCheckoutSyncNotice(null);
                 }}
                 disabled={basisOrders.length === 0}
                 className="w-full min-h-11 rounded-xl border-2 border-zinc-700 bg-zinc-900/90 px-3 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -868,6 +930,8 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
               onClick={() => {
                 setStallBasisOrderId('');
                 setPreferredProcurementBasisOrderId('');
+                setCartDeductedBasisOrderId('');
+                setCheckoutSyncNotice(null);
               }}
               disabled={basisOrders.length === 0 || !stallBasisOrderId}
               className="shrink-0 min-h-11 px-3 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-300 text-sm font-medium hover:border-amber-600/50 hover:text-amber-200 disabled:opacity-40 disabled:cursor-not-allowed"
