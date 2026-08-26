@@ -88,6 +88,19 @@ function parseQtyInput(raw: string): number {
   return roundProcurementQty(n);
 }
 
+export function buildEffectiveProcurementCart(
+  cart: Record<string, number>,
+  qtyInputDraft: Record<string, string>,
+): Record<string, number> {
+  const merged: Record<string, number> = { ...cart };
+  for (const [id, draft] of Object.entries(qtyInputDraft)) {
+    const n = parseQtyInput(draft);
+    if (n > 0) merged[id] = n;
+    else delete merged[id];
+  }
+  return merged;
+}
+
 const PROC_DOCK_SELECT_CLASS =
   'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[3.25rem] max-w-[5.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1.5 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark] lg:h-7 lg:min-w-[3.5rem] lg:max-w-[6rem] lg:text-xs';
 
@@ -377,24 +390,19 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     setItemQty(id, current + delta);
   };
 
-  /** 合併購物車與尚未 blur 的數量草稿，避免按扣餘時讀到舊 cart。 */
-  const buildEffectiveCart = useCallback((): Record<string, number> => {
-    const merged: Record<string, number> = { ...cart };
-    const drafts: Record<string, string> = qtyInputDraft;
-    for (const [id, draft] of Object.entries(drafts)) {
-      const n = parseQtyInput(draft);
-      if (n > 0) merged[id] = n;
-      else delete merged[id];
-    }
-    return merged;
-  }, [cart, qtyInputDraft]);
+  /** 合併購物車與尚未 blur 的數量草稿，避免送單或扣餘時讀到舊 cart。 */
+  const effectiveCart = useMemo(
+    () => buildEffectiveProcurementCart(cart, qtyInputDraft),
+    [cart, qtyInputDraft],
+  );
+  const buildEffectiveCart = useCallback((): Record<string, number> => effectiveCart, [effectiveCart]);
 
   const effectiveCartCount = useMemo(() => {
-    const values: number[] = Object.values(buildEffectiveCart());
+    const values: number[] = Object.values(effectiveCart);
     return roundProcurementQty(
       values.reduce((a, b) => a + Number(b || 0), 0),
     );
-  }, [buildEffectiveCart]);
+  }, [effectiveCart]);
 
   const totalCount = effectiveCartCount;
 
@@ -435,7 +443,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     setQtyInputDraft({});
   };
 
-  const totalPrice = Object.entries(cart).reduce((total, [id, n]) => {
+  const totalPrice = Object.entries(effectiveCart).reduce((total, [id, n]) => {
     const item = getSupplyItem(id, supplyRetailView);
     const q = Number(n);
     return (
@@ -444,7 +452,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     );
   }, 0);
   const totalPayablePrice = totalPrice;
-  const totalSelfSuppliedCost = Object.entries(cart).reduce((total, [id, n]) => {
+  const totalSelfSuppliedCost = Object.entries(effectiveCart).reduce((total, [id, n]) => {
     const item = getSupplyItem(id, supplyRetailView);
     const q = Number(n);
     if (!item || q <= 0) return total;
@@ -454,7 +462,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   const payableTitle = userRole === 'franchisee' ? '貨款總額' : '批貨成本';
   const selfSuppliedDeduction = Math.round(totalSelfSuppliedCost * 100) / 100;
   const franchiseeNetPayable = Math.max(0, Math.round((totalPrice - selfSuppliedDeduction) * 100) / 100);
-  const totalRetailEstimate = Object.entries(cart).reduce((total, [id, n]) => {
+  const totalRetailEstimate = Object.entries(effectiveCart).reduce((total, [id, n]) => {
     const item = getSupplyItem(id, supplyRetailView);
     const q = Number(n);
     return total + (item && q > 0 ? estimatedRetailPerPackage(item) * q : 0);
@@ -462,7 +470,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
 
   /** 售完金額：昨日剩餘＋本次叫貨，以零售單價估算（與品項卡「明日預計帶出」一致） */
   const soldOutRetailEstimate = useMemo(() => {
-    return Object.entries(cart).reduce((total, [id, n]) => {
+    return Object.entries(effectiveCart).reduce((total, [id, n]) => {
       const item = getSupplyItem(id, supplyRetailView);
       const orderQty = roundProcurementQty(Number(n) || 0);
       if (!item || orderQty <= 0) return total;
@@ -470,7 +478,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       const outQty = roundProcurementQty(remain + orderQty);
       return total + estimatedRetailPerPackage(item) * outQty;
     }, 0);
-  }, [cart, carryoverRemainByItem, supplyRetailView]);
+  }, [effectiveCart, carryoverRemainByItem, supplyRetailView]);
 
   /** 手機鍵盤／數量欄聚焦時：底部結帳列改單列精簡，並用 visualViewport 貼在鍵盤上方 */
   const checkoutDockRef = useRef<HTMLDivElement | null>(null);
@@ -526,7 +534,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       : undefined;
 
   const buildLinesFromCart = useCallback((): OrderHistoryLine[] => {
-    return Object.entries(cart)
+    return Object.entries(effectiveCart)
       .map(([id, qty]) => {
         const item = getSupplyItem(id, supplyRetailView);
         const q = roundProcurementQty(Number(qty) || 0);
@@ -540,7 +548,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
         };
       })
       .filter(Boolean) as OrderHistoryLine[];
-  }, [cart, supplyRetailView, userRole]);
+  }, [effectiveCart, supplyRetailView, userRole]);
 
   const openSubmitConfirm = () => {
     if (buildLinesFromCart().length === 0) return;
@@ -671,7 +679,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       try {
         const r = await procurementFavoritesApi.add(
           newFavoriteName || `常用 ${new Date().toLocaleDateString('zh-TW', { month: 'short', day: 'numeric' })}`,
-          cart
+          effectiveCart
         );
         if (r.ok) {
           setNewFavoriteName('');

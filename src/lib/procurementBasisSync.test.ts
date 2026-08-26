@@ -519,6 +519,62 @@ describe('procurement basis after order adjustment', () => {
     expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(FAVORITE_QTY);
   });
 
+  it('完整流程：今日叫貨盤點後，隔天輸入 18 扣除剩餘 6，訂單與帶出金額皆正確', () => {
+    const NEXT_YMD = '2026-06-15';
+    const ORIGINAL_BRING_OUT = 18;
+    const REMAIN_TO_DEDUCT = 6;
+    const EXPECTED_PROCUREMENT_QTY = 12;
+    const UNIT_PRICE = 24;
+
+    seedCompletedOrderWithSnapshot(REMAIN_TO_DEDUCT);
+    saveSalesRecord(BASIS_YMD, {
+      lines: { [PRODUCT_ID]: { out: '18', remain: String(REMAIN_TO_DEDUCT) } },
+      actualRevenue: '6000',
+      updatedAt: `${BASIS_YMD}T18:00:00.000Z`,
+    });
+
+    const cartAfterDeduction = cartAfterDeductingStallRemainFromOrder(
+      { [PRODUCT_ID]: ORIGINAL_BRING_OUT },
+      ORDER_ID,
+    );
+    expect(cartAfterDeduction[PRODUCT_ID]).toBe(EXPECTED_PROCUREMENT_QTY);
+
+    const newOrderId = simulateProcurementCheckout({
+      lines: [
+        {
+          productId: PRODUCT_ID,
+          name: '測試品項',
+          unitPrice: UNIT_PRICE,
+          qty: cartAfterDeduction[PRODUCT_ID],
+          unit: '隻',
+        },
+      ],
+      totalAmount: EXPECTED_PROCUREMENT_QTY * UNIT_PRICE,
+      orderDateYmd: NEXT_YMD,
+      procurementDeductionBasisOrderId: ORDER_ID,
+    });
+    const newOrder = readMergedOrderByIdFromStores(newOrderId);
+
+    expect(newOrder?.lines[0].qty).toBe(EXPECTED_PROCUREMENT_QTY);
+    expect(newOrder?.totalAmount).toBe(EXPECTED_PROCUREMENT_QTY * UNIT_PRICE);
+    expect(Number(loadDayForProcurementFromOrder(ORDER_ID).lines[PRODUCT_ID]?.remain)).toBe(0);
+
+    const carrySnap = loadRemainSnapshotForOrderManagementDisplay(newOrder!);
+    expect(Number(carrySnap.lines[PRODUCT_ID]?.remain)).toBe(REMAIN_TO_DEDUCT);
+
+    const breakdown = computeStallOutImportBreakdown(NEXT_YMD, newOrderId);
+    const row = breakdown?.rows.find((r) => r.productId === PRODUCT_ID);
+    expect(row?.prevRemain).toBe(REMAIN_TO_DEDUCT);
+    expect(row?.orderQty).toBe(EXPECTED_PROCUREMENT_QTY);
+    expect(row?.suggestedOut).toBe(ORIGINAL_BRING_OUT);
+
+    const implanted = recomputeStallOutForStallYmdAndOrder(NEXT_YMD, newOrderId, undefined, {
+      clearRemain: true,
+      persist: false,
+    });
+    expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(ORIGINAL_BRING_OUT);
+  });
+
   it('扣盤點剩：快照以品名為 key 時仍可扣減', () => {
     const raw = localStorage.getItem('dongshan_franchise_mgmt_orders_v1');
     const orders = raw ? (JSON.parse(raw) as { id: string }[]) : [];

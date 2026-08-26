@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCombinedOpenStoreOrdersPrintHtml,
   buildCombinedOpenStoreOrdersPrintText,
+  buildPickingDisplayLines,
+  buildPickingPersistLines,
   buildOpenStoreOrderSummaries,
   buildOpenStoreOrderSummaryPrintHtml,
   buildOpenStoreOrderSummaryPrintText,
@@ -10,6 +12,7 @@ import {
   buildOrderPrintSlipText,
   formatOrderPrintSlipQty,
   formatOrderPrintSlipTableQty,
+  orderDetailQtyColumnLabels,
 } from './Orders';
 import type { OrderHistoryEntry } from '../lib/orderHistoryStorage';
 
@@ -251,5 +254,49 @@ describe('order print slip', () => {
     expect(html).toContain('<th class="qty">數量</th>');
     expect(html).not.toContain('<th class="unit">單位</th>');
     expect(html).toContain('position: sticky');
+  });
+});
+
+describe('order detail quantity labels', () => {
+  it('clarifies deducted orders without changing normal order labels', () => {
+    expect(orderDetailQtyColumnLabels(false, false)).toEqual({
+      procurementQty: '叫貨數量',
+      carryRemain: '昨剩餘帶出',
+      bringOut: '帶出數量',
+    });
+
+    expect(orderDetailQtyColumnLabels(true, false)).toEqual({
+      procurementQty: '扣後叫貨',
+      carryRemain: '已扣剩餘',
+      bringOut: '原訂帶出量',
+    });
+
+    expect(orderDetailQtyColumnLabels(true, true).bringOut).toBe('盤點帶出量');
+  });
+});
+
+describe('deducted order picking quantity conversion', () => {
+  it('edits bring-out quantity but persists deducted procurement quantity', () => {
+    const raw = order({
+      id: 'deducted-order',
+      ymd: '2026-08-24',
+      storeLabel: '高雄三民',
+      lines: [{ productId: 'duck-head', name: '鴨頭', unitPrice: 24, qty: 12, unit: '支' }],
+    });
+    raw.procurementDeductionBasisOrderId = 'basis-order';
+    raw.procurementDeductionBasisOrderIds = ['basis-order'];
+    raw.procurementDeductionAppliedQtyByBasisOrderId = {
+      'basis-order': { 'duck-head': 6 },
+    };
+
+    const displayLines = buildPickingDisplayLines(raw, raw.lines);
+    expect(displayLines[0].qty).toBe(18);
+
+    const persistLines = buildPickingPersistLines(raw, displayLines);
+    expect(persistLines[0].qty).toBe(12);
+
+    const reducedDisplayLines = [{ ...displayLines[0], qty: 13 }];
+    const reducedPersistLines = buildPickingPersistLines(raw, reducedDisplayLines);
+    expect(reducedPersistLines[0].qty).toBe(7);
   });
 });

@@ -153,6 +153,60 @@ type OpenStoreOrderPrintSlip = {
   lines: OrderPrintSlipLine[];
 };
 
+export function orderDetailQtyColumnLabels(hasDeductionBasis: boolean, stallLocked: boolean) {
+  return {
+    procurementQty: hasDeductionBasis ? '扣後叫貨' : '叫貨數量',
+    carryRemain: hasDeductionBasis ? '已扣剩餘' : '昨剩餘帶出',
+    bringOut: stallLocked ? '盤點帶出量' : hasDeductionBasis ? '原訂帶出量' : '帶出數量',
+  };
+}
+
+function appliedCarryQtyForOrderLine(
+  raw: Pick<
+    OrderHistoryEntry,
+    'procurementDeductionBasisOrderId' | 'procurementDeductionBasisOrderIds' | 'procurementDeductionAppliedQtyByBasisOrderId'
+  >,
+  productId: string,
+): number {
+  return normalizeProcurementDeductionBasisOrderIds(raw).reduce(
+    (sum, basisId) =>
+      roundProcurementQty(
+        sum + Number(raw.procurementDeductionAppliedQtyByBasisOrderId?.[basisId]?.[productId] ?? 0),
+      ),
+    0,
+  );
+}
+
+export function buildPickingDisplayLines(
+  raw: Pick<
+    OrderHistoryEntry,
+    'procurementDeductionBasisOrderId' | 'procurementDeductionBasisOrderIds' | 'procurementDeductionAppliedQtyByBasisOrderId'
+  >,
+  lines: OrderHistoryLine[],
+): OrderHistoryLine[] {
+  const hasDeductionBasis = normalizeProcurementDeductionBasisOrderIds(raw).length > 0;
+  return lines.map((line) => {
+    if (!hasDeductionBasis) return { ...line };
+    const carry = appliedCarryQtyForOrderLine(raw, line.productId);
+    return { ...line, qty: roundProcurementQty((Number(line.qty) || 0) + carry) };
+  });
+}
+
+export function buildPickingPersistLines(
+  raw: Pick<
+    OrderHistoryEntry,
+    'procurementDeductionBasisOrderId' | 'procurementDeductionBasisOrderIds' | 'procurementDeductionAppliedQtyByBasisOrderId'
+  >,
+  displayLines: OrderHistoryLine[],
+): OrderHistoryLine[] {
+  const hasDeductionBasis = normalizeProcurementDeductionBasisOrderIds(raw).length > 0;
+  return displayLines.map((line) => {
+    if (!hasDeductionBasis) return { ...line };
+    const carry = appliedCarryQtyForOrderLine(raw, line.productId);
+    return { ...line, qty: Math.max(0, roundProcurementQty((Number(line.qty) || 0) - carry)) };
+  });
+}
+
 function toOrderRowFromMgmt(
   o: FranchiseManagementOrder,
   financials: OrderFinancialSummary
@@ -1614,6 +1668,7 @@ type OrdersLineEditDraft = {
   orderId: string;
   lines: OrderHistoryLine[];
   original?: OrderHistoryLine[];
+  pickingQtyMode?: 'bringOut';
 };
 
 const OrderStatusFilterTabs = memo(function OrderStatusFilterTabs({
@@ -1748,6 +1803,10 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   useEffect(() => {
     if (!restoredLineEdit) return;
     if (restoredLineEdit.mode === 'picking') {
+      if (restoredLineEdit.pickingQtyMode !== 'bringOut') {
+        clearWorkDraft(WORK_DRAFT_IDS.ordersLineEdit);
+        return;
+      }
       setPickingOrderId(restoredLineEdit.orderId);
       setPickingLines(restoredLineEdit.lines);
       setPickingOriginal(restoredLineEdit.original ?? restoredLineEdit.lines.map((l) => ({ ...l })));
@@ -1764,6 +1823,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       orderId: (pickingOrderId ?? priceAdjustOrderId)!,
       lines: pickingOrderId ? pickingLines : priceAdjustLines,
       original: pickingOrderId ? pickingOriginal : undefined,
+      pickingQtyMode: pickingOrderId ? 'bringOut' : undefined,
     },
     pickingOrderId !== null || priceAdjustOrderId !== null,
   );
@@ -2071,7 +2131,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       if (
         raw &&
         pickingOrderId === orderId &&
-        !orderLineQtyMapsEqual(pickingLines, raw.lines)
+        !orderLineQtyMapsEqual(buildPickingPersistLines(raw, pickingLines), raw.lines)
       ) {
         setPickingPersistStatus('saving');
         const res = await persistPickingLines(orderId, pickingLines);
@@ -2164,21 +2224,25 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       const orderId = pickingOrderId;
       const original = pickingOriginal.map((l) => ({ ...l }));
       const current = pickingLines.map((l) => ({ ...l }));
+      const raw = orderId ? rawList.find((o) => o.id === orderId) : null;
       const shouldRevert = opts?.revertToOriginal === true;
       clearPickingUi();
       if (!shouldRevert || !orderId || original.length === 0) return;
       if (orderLineQtyMapsEqual(current, original)) return;
+      const persistOriginal = raw ? buildPickingPersistLines(raw, original) : original;
       void (async () => {
-        const res = await ordersApi.updateEditableOrderLinesById(orderId, original);
+        const res = await ordersApi.updateEditableOrderLinesById(orderId, persistOriginal);
         if (res.ok) await syncOrders();
       })();
     },
-    [pickingOrderId, pickingOriginal, pickingLines, clearPickingUi, syncOrders],
+    [pickingOrderId, pickingOriginal, pickingLines, rawList, clearPickingUi, syncOrders],
   );
 
   const persistPickingLines = useCallback(
     async (orderId: string, lines: OrderHistoryLine[]): Promise<UpdateEditableOrderLinesResult> => {
-      const res = await ordersApi.updateEditableOrderLinesById(orderId, lines);
+      const raw = rawList.find((o) => o.id === orderId);
+      const linesForSave = raw ? buildPickingPersistLines(raw, lines) : lines;
+      const res = await ordersApi.updateEditableOrderLinesById(orderId, linesForSave);
       if (res.ok === false) {
         setPickingError(pickingErrorMessage(res));
         setPickingPersistStatus('error');
@@ -2186,7 +2250,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       }
       await syncOrders();
       const stored = readOrderLinesByIdFromStores(orderId);
-      if (!stored || !orderLineQtyMapsEqual(lines, stored)) {
+      if (!stored || !orderLineQtyMapsEqual(linesForSave, stored)) {
         setPickingError(
           '儲存後讀取到的數量與剛才輸入不一致。若使用雲端同步，請確認已上傳成功並重新整理；否則請再試一次。',
         );
@@ -2198,7 +2262,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       setPickingPersistStatus('saved');
       return res;
     },
-    [syncOrders],
+    [rawList, syncOrders],
   );
 
   const exitPriceAdjust = useCallback(() => {
@@ -2223,8 +2287,9 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       catalogItemsForOrderDetail,
       supplyRetailView,
     );
-    setPickingLines(lines.map((l) => ({ ...l })));
-    setPickingOriginal(lines.map((l) => ({ ...l })));
+    const displayLines = buildPickingDisplayLines(raw, lines);
+    setPickingLines(displayLines.map((l) => ({ ...l })));
+    setPickingOriginal(displayLines.map((l) => ({ ...l })));
     pickingStorageUpdatedAtRef.current = getOrderStorageRevisionMs(orderId);
     setPickingPersistStatus('saved');
   };
@@ -2258,8 +2323,9 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       catalogItemsForOrderDetail,
       supplyRetailView,
     );
-    setPickingLines(lines.map((l) => ({ ...l })));
-    setPickingOriginal(lines.map((l) => ({ ...l })));
+    const displayLines = buildPickingDisplayLines(raw, lines);
+    setPickingLines(displayLines.map((l) => ({ ...l })));
+    setPickingOriginal(displayLines.map((l) => ({ ...l })));
     setPickingPersistStatus('saved');
     setPickingError(null);
   }, [
@@ -2287,7 +2353,8 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       return;
     }
 
-    if (orderLineQtyMapsEqual(pickingLines, raw.lines)) {
+    const linesForSave = buildPickingPersistLines(raw, pickingLines);
+    if (orderLineQtyMapsEqual(linesForSave, raw.lines)) {
       setPickingPersistStatus((s) => (s === 'saving' ? s : 'saved'));
       return;
     }
@@ -2430,9 +2497,12 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const pickingDockSummary = useMemo(() => {
     if (!pickingOrderId) return null;
     const pickKept = pickingLines.filter((l) => l.qty > 0);
+    const raw = rawList.find((o) => o.id === pickingOrderId);
+    const procurementLines = raw ? buildPickingPersistLines(raw, pickingLines) : pickingLines;
+    const procurementKept = procurementLines.filter((l) => l.qty > 0);
     const procurementTotal =
       Math.round(
-        pickKept.reduce((s, l) => s + (Number(l.unitPrice) || 0) * l.qty, 0) * 100,
+        procurementKept.reduce((s, l) => s + (Number(l.unitPrice) || 0) * l.qty, 0) * 100,
       ) / 100;
     const retailEstimateTotal =
       Math.round(
@@ -2446,7 +2516,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       procurementTotal,
       retailEstimateTotal,
     };
-  }, [pickingOrderId, pickingLines, supplyRetailView]);
+  }, [pickingOrderId, pickingLines, rawList, supplyRetailView]);
 
   const priceAdjustDockSummary = useMemo(() => {
     if (!priceAdjustOrderId) return null;
@@ -2633,13 +2703,17 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
             expandedDetailLinesForTable && !isPickingThis && !isPriceAdjustThis
               ? buildOrderPrintSlipLines(expandedDetailLinesForTable)
               : [];
+          const pickPersistLines =
+            isPickingThis && raw ? buildPickingPersistLines(raw, pickingLines) : pickingLines;
           const pickKept = isPickingThis ? pickingLines.filter((l) => l.qty > 0) : [];
           const pickTotal = isPickingThis
             ? Math.round(
-                pickKept.reduce(
-                  (s, l) => s + pickingLineUnitForDisplay(l, userRole, supplyRetailView) * l.qty,
-                  0,
-                ) * 100,
+                pickingLines.reduce((s, l, idx) => {
+                  if (l.qty <= 0) return s;
+                  const qtyForAmount =
+                    userRole === 'employee' ? l.qty : (pickPersistLines[idx]?.qty ?? l.qty);
+                  return s + pickingLineUnitForDisplay(l, userRole, supplyRetailView) * qtyForAmount;
+                }, 0) * 100,
               ) / 100
             : 0;
           const priceAdjKept = isPriceAdjustThis ? priceAdjustLines.filter((l) => l.qty > 0) : [];
@@ -2652,6 +2726,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
           const orderEditLocked = isPickingThis || isPriceAdjustThis;
           const stallLocked = raw ? orderHasStallCountCompleted(raw) : false;
           const deductionBasisIds = raw ? normalizeProcurementDeductionBasisOrderIds(raw) : [];
+          const qtyColumnLabels = orderDetailQtyColumnLabels(deductionBasisIds.length > 0, stallLocked);
           const canApplyPostDeduct =
             Boolean(raw) &&
             canEdit &&
@@ -2852,6 +2927,9 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                     <p className="mb-1 text-xs font-medium text-emerald-300/90">
                                       已扣前次剩餘：{deductionBasisIds.length} 張
                                     </p>
+                                    <p className="mb-2 text-[0.6875rem] leading-snug text-emerald-200/75">
+                                      扣後叫貨＝實際需補貨量；原訂帶出量＝扣後叫貨＋已扣剩餘。
+                                    </p>
                                     <div className="flex flex-wrap gap-1.5">
                                       {deductionBasisIds.map((basisId) => (
                                         <button
@@ -3008,8 +3086,13 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                     'py-2 sm:py-3 px-2 sm:px-4 font-medium text-center whitespace-nowrap min-w-[11rem] w-[1%]',
                                     ORDER_DETAIL_TH_TOP,
                                   )}
+                                  title={
+                                    deductionBasisIds.length > 0
+                                      ? '請輸入實際要帶出的總量；儲存時系統會自動扣掉已扣剩餘後寫回叫貨量'
+                                      : undefined
+                                  }
                                 >
-                                  實出數量
+                                  {deductionBasisIds.length > 0 ? '帶出總量' : '實出數量'}
                                 </th>
                                 <th
                                   className={cn(
@@ -3070,24 +3153,39 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                     'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap',
                                     ORDER_DETAIL_TH_TOP,
                                   )}
+                                  title={
+                                    deductionBasisIds.length > 0
+                                      ? '扣後叫貨＝原訂帶出量扣除前次剩餘後，工廠實際需要補貨的數量'
+                                      : undefined
+                                  }
                                 >
-                                  叫貨數量
+                                  {qtyColumnLabels.procurementQty}
                                 </th>
                                 <th
                                   className={cn(
                                     'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap',
                                     ORDER_DETAIL_TH_TOP,
                                   )}
+                                  title={
+                                    deductionBasisIds.length > 0
+                                      ? '已扣剩餘＝本訂單已從前次盤點剩餘扣掉並帶出的數量'
+                                      : undefined
+                                  }
                                 >
-                                  昨剩餘帶出
+                                  {qtyColumnLabels.carryRemain}
                                 </th>
                                 <th
                                   className={cn(
                                     'py-2 sm:py-2.5 px-1.5 sm:px-2 font-medium text-center whitespace-nowrap',
                                     ORDER_DETAIL_TH_TOP,
                                   )}
+                                  title={
+                                    deductionBasisIds.length > 0 && !stallLocked
+                                      ? '原訂帶出量＝加盟主原本輸入要帶出的總量'
+                                      : undefined
+                                  }
                                 >
-                                  {stallLocked ? '盤點帶出量' : '帶出數量'}
+                                  {qtyColumnLabels.bringOut}
                                 </th>
                                 <th
                                   className={cn(
@@ -3130,14 +3228,17 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                           {isPickingThis
                             ? pickingLines.map((line, idx) => {
                                 const origQ = pickingOriginal[idx]?.qty ?? line.qty;
+                                const persistLine = pickPersistLines[idx] ?? line;
                                 const unitForRow = pickingLineUnitForDisplay(line, userRole, supplyRetailView);
-                                const sub = Math.round(unitForRow * line.qty * 100) / 100;
+                                const qtyForSubtotal =
+                                  hideOrderBatchPriceFromEmployee ? line.qty : persistLine.qty;
+                                const sub = Math.round(unitForRow * qtyForSubtotal * 100) / 100;
                                 return (
                                   <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/20">
                                     <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
                                       <div className="font-medium text-[#f5f2ed]">{line.name}</div>
                                       <div className="text-[1.14075rem] text-zinc-500">
-                                        下單 {origQ} {line.unit}
+                                        {deductionBasisIds.length > 0 ? '原訂帶出' : '下單'} {origQ} {line.unit}
                                         <LiangJinQtyHint liangQty={origQ} pieceUnit={line.unit} className="text-[15.21px]" />
                                         {hideOrderBatchPriceFromEmployee ? (
                                           <>
@@ -3176,7 +3277,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                           onClick={(e) => e.stopPropagation()}
                                           onFocus={(e) => e.target.select()}
                                           className="min-w-[4.25rem] w-16 max-w-[7rem] shrink-0 text-center text-[1.521rem] font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
-                                          aria-label={`${line.name} 實出數量，0～${PICK_MAX_Q.toLocaleString()}`}
+                                          aria-label={`${line.name} ${deductionBasisIds.length > 0 ? '帶出總量' : '實出數量'}，0～${PICK_MAX_Q.toLocaleString()}`}
                                         />
                                         <button
                                           type="button"
