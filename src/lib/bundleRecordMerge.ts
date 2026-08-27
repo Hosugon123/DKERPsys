@@ -22,6 +22,9 @@ export type OrderLikeForMerge = {
   stallCountSnapshot?: unknown;
   stallCountCompletedByName?: string;
   stallCountCompletedByUserId?: string;
+  procurementDeductionBasisOrderId?: string;
+  procurementDeductionBasisOrderIds?: string[];
+  procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
 };
 
 export const MULTI_DEVICE_RECORD_MERGE_KEYS = [
@@ -178,6 +181,61 @@ function pickNewerStallCountSnapshot(a: OrderLikeForMerge, b: OrderLikeForMerge)
   return stallSnapshotUpdatedAtMs(b) >= stallSnapshotUpdatedAtMs(a) ? bSnap : aSnap;
 }
 
+function orderHasExplicitDeductionFields(o: OrderLikeForMerge): boolean {
+  return (
+    o.procurementDeductionBasisOrderId !== undefined ||
+    o.procurementDeductionBasisOrderIds !== undefined ||
+    o.procurementDeductionAppliedQtyByBasisOrderId !== undefined
+  );
+}
+
+function normalizeDeductionBasisIdsForMerge(o: OrderLikeForMerge): string[] {
+  const ids: string[] = [];
+  const add = (raw: string | undefined) => {
+    const id = raw?.trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  add(o.procurementDeductionBasisOrderId);
+  for (const id of o.procurementDeductionBasisOrderIds ?? []) add(id);
+  return ids;
+}
+
+function pickDeductionFieldSource(a: OrderLikeForMerge, b: OrderLikeForMerge): OrderLikeForMerge | null {
+  const aExplicit = orderHasExplicitDeductionFields(a);
+  const bExplicit = orderHasExplicitDeductionFields(b);
+  if (!aExplicit && !bExplicit) return null;
+  if (aExplicit && !bExplicit) return a;
+  if (!aExplicit && bExplicit) return b;
+  return recordUpdatedAtMs(b) >= recordUpdatedAtMs(a) ? b : a;
+}
+
+function mergedDeductionFields(
+  a: OrderLikeForMerge,
+  b: OrderLikeForMerge,
+): Pick<
+  OrderLikeForMerge,
+  'procurementDeductionBasisOrderId' | 'procurementDeductionBasisOrderIds' | 'procurementDeductionAppliedQtyByBasisOrderId'
+> {
+  const source = pickDeductionFieldSource(a, b);
+  if (!source) return {};
+  const basisIds = normalizeDeductionBasisIdsForMerge(source);
+  const applied: Record<string, Record<string, number>> = {};
+  const candidates = recordUpdatedAtMs(b) >= recordUpdatedAtMs(a) ? [a, b] : [b, a];
+  for (const basisId of basisIds) {
+    for (const candidate of candidates) {
+      const qtyByProduct = candidate.procurementDeductionAppliedQtyByBasisOrderId?.[basisId];
+      if (qtyByProduct && Object.keys(qtyByProduct).length > 0) {
+        applied[basisId] = { ...qtyByProduct };
+      }
+    }
+  }
+  return {
+    procurementDeductionBasisOrderId: basisIds[0] ?? '',
+    procurementDeductionBasisOrderIds: basisIds,
+    procurementDeductionAppliedQtyByBasisOrderId: applied,
+  };
+}
+
 function orderLineUpdatedAtMs(line: OrderHistoryLine, order: OrderLikeForMerge): number {
   return recordUpdatedAtMs({
     updatedAt: line.updatedAt ?? order.updatedAt,
@@ -282,6 +340,7 @@ export function mergeOrderLikeRecord<T extends OrderLikeForMerge>(a: T, b: T): T
     status: status ?? lineSource.status,
     statusUpdatedAt: pickMergedStatusUpdatedAt(a, b),
     lines,
+    ...mergedDeductionFields(a, b),
     ...(lineTotals
       ? {
           itemCount: lineTotals.itemCount,

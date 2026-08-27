@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mergeStorageKeyRecords } from './bundleRecordMerge';
 import { scopedStallDateKey } from './scopedStallDateKey';
+import { updateEditableOrderLinesById } from './orderHistoryStorage';
 import { loadDay, recomputeStallOutForStallYmdAndOrder, syncStallOutAfterOrderLinesChanged } from './stallInventoryStorage';
 
 const HQ_SCOPE = 'scope:hq';
@@ -12,6 +13,7 @@ const PRODUCT_ID = 'duck-sync-1';
 const FRANCHISE_SCOPE = 'scope:franchisee:fr-sync';
 const ORDER_ID = 'order-qty-sync-1';
 const STALL_YMD = '2026-06-14';
+const BASIS_ORDER_ID = 'basis-qty-sync-1';
 
 vi.mock('./supplyCatalog', () => ({
   getAllSupplyItems: () => [
@@ -33,11 +35,13 @@ vi.mock('./supplyCatalog', () => ({
           pricePerPiece: 100,
         }
       : undefined,
+  isFranchiseeSelfSuppliedItem: () => false,
   isConsumableItem: () => false,
 }));
 
 vi.mock('./dataScope', () => ({
   getDataScopeContext: () => ({ role: 'admin', userId: 'admin-1', scopeId: 'scope:hq', isAdmin: true }),
+  resolveFranchiseeRetailOwnerUserId: (userId?: string | null) => userId ?? null,
   HQ_SCOPE_ID: 'scope:hq',
 }));
 
@@ -93,6 +97,72 @@ describe('stall qty sync across order → inventory', () => {
     syncStallOutAfterOrderLinesChanged(ORDER_ID);
     expect(Number(loadDay(STALL_YMD, FRANCHISE_SCOPE).lines[PRODUCT_ID]?.out)).toBe(8);
     expect(loadDay(STALL_YMD, HQ_SCOPE).lines[PRODUCT_ID]?.out ?? '').toBe('');
+  });
+
+  it('已扣前次剩餘的訂單調整叫貨量後，盤點帶出量以叫貨量加回已扣剩餘', () => {
+    const basisYmd = '2026-06-13';
+    const orderYmd = '2026-06-14';
+    localStorage.setItem(
+      'dongshan_order_history_v1',
+      JSON.stringify([
+        {
+          id: BASIS_ORDER_ID,
+          createdAt: `${basisYmd}T08:00:00.000Z`,
+          orderDateYmd: basisYmd,
+          updatedAt: `${basisYmd}T20:00:00.000Z`,
+          source: 'procurement',
+          status: '已完成',
+          totalAmount: 1800,
+          payableAmount: 1800,
+          itemCount: 18,
+          lines: [{ productId: PRODUCT_ID, name: '同步測試品', unitPrice: 100, qty: 18, unit: '隻' }],
+          storeLabel: '加盟測試店',
+          scopeId: FRANCHISE_SCOPE,
+          actorRole: 'franchisee',
+          actorUserId: 'fr-sync',
+          stallCountBasisYmd: basisYmd,
+          stallCountCompletedAt: `${basisYmd}T20:00:00.000Z`,
+          stallCountSnapshot: {
+            lines: { [PRODUCT_ID]: { out: '18', remain: '6' } },
+            actualRevenue: '1200',
+            updatedAt: `${basisYmd}T20:00:00.000Z`,
+          },
+        },
+        {
+          id: ORDER_ID,
+          createdAt: `${orderYmd}T08:00:00.000Z`,
+          orderDateYmd: orderYmd,
+          updatedAt: `${orderYmd}T08:00:00.000Z`,
+          source: 'procurement',
+          status: '待出貨',
+          totalAmount: 1200,
+          payableAmount: 1200,
+          itemCount: 12,
+          lines: [{ productId: PRODUCT_ID, name: '同步測試品', unitPrice: 100, qty: 12, unit: '隻' }],
+          storeLabel: '加盟測試店',
+          scopeId: FRANCHISE_SCOPE,
+          actorRole: 'franchisee',
+          actorUserId: 'fr-sync',
+          procurementDeductionBasisOrderId: BASIS_ORDER_ID,
+          procurementDeductionBasisOrderIds: [BASIS_ORDER_ID],
+          procurementDeductionAppliedQtyByBasisOrderId: {
+            [BASIS_ORDER_ID]: { [PRODUCT_ID]: 6 },
+          },
+        },
+      ]),
+    );
+
+    recomputeStallOutForStallYmdAndOrder(orderYmd, ORDER_ID, undefined, { clearRemain: true });
+    expect(Number(loadDay(orderYmd, FRANCHISE_SCOPE).lines[PRODUCT_ID]?.out)).toBe(18);
+
+    const updated = updateEditableOrderLinesById(ORDER_ID, [
+      { productId: PRODUCT_ID, name: '同步測試品', unitPrice: 100, qty: 13, unit: '隻' },
+    ]);
+    expect(updated.ok).toBe(true);
+    syncStallOutAfterOrderLinesChanged(ORDER_ID);
+
+    expect(Number(loadDay(orderYmd, FRANCHISE_SCOPE).lines[PRODUCT_ID]?.out)).toBe(19);
+    expect(loadDay(orderYmd, HQ_SCOPE).lines[PRODUCT_ID]?.out ?? '').toBe('');
   });
 
   it('雲端合併：裸鍵 YYYY-MM-DD 與 scoped 鍵合併為單一桶', () => {

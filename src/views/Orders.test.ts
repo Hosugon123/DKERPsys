@@ -275,8 +275,8 @@ describe('order detail quantity labels', () => {
   });
 });
 
-describe('deducted order picking quantity conversion', () => {
-  it('edits bring-out quantity but persists deducted procurement quantity', () => {
+describe('deducted order picking quantity edit', () => {
+  it('edits and persists procurement quantity without adding deducted carry', () => {
     const raw = order({
       id: 'deducted-order',
       ymd: '2026-08-24',
@@ -290,13 +290,13 @@ describe('deducted order picking quantity conversion', () => {
     };
 
     const displayLines = buildPickingDisplayLines(raw, raw.lines);
-    expect(displayLines[0].qty).toBe(18);
+    expect(displayLines[0].qty).toBe(12);
 
     const persistLines = buildPickingPersistLines(raw, displayLines);
     expect(persistLines[0].qty).toBe(12);
 
-    const reducedDisplayLines = [{ ...displayLines[0], qty: 13 }];
-    const reducedPersistLines = buildPickingPersistLines(raw, reducedDisplayLines);
-    expect(reducedPersistLines[0].qty).toBe(7);
+    const adjustedDisplayLines = [{ ...displayLines[0], qty: 13 }];
+    const adjustedPersistLines = buildPickingPersistLines(raw, adjustedDisplayLines);
+    expect(adjustedPersistLines[0].qty).toBe(13);
   });
 });

@@ -161,50 +161,24 @@ export function orderDetailQtyColumnLabels(hasDeductionBasis: boolean, stallLock
   };
 }
 
-function appliedCarryQtyForOrderLine(
-  raw: Pick<
-    OrderHistoryEntry,
-    'procurementDeductionBasisOrderId' | 'procurementDeductionBasisOrderIds' | 'procurementDeductionAppliedQtyByBasisOrderId'
-  >,
-  productId: string,
-): number {
-  return normalizeProcurementDeductionBasisOrderIds(raw).reduce(
-    (sum, basisId) =>
-      roundProcurementQty(
-        sum + Number(raw.procurementDeductionAppliedQtyByBasisOrderId?.[basisId]?.[productId] ?? 0),
-      ),
-    0,
-  );
-}
-
 export function buildPickingDisplayLines(
-  raw: Pick<
+  _raw: Pick<
     OrderHistoryEntry,
     'procurementDeductionBasisOrderId' | 'procurementDeductionBasisOrderIds' | 'procurementDeductionAppliedQtyByBasisOrderId'
   >,
   lines: OrderHistoryLine[],
 ): OrderHistoryLine[] {
-  const hasDeductionBasis = normalizeProcurementDeductionBasisOrderIds(raw).length > 0;
-  return lines.map((line) => {
-    if (!hasDeductionBasis) return { ...line };
-    const carry = appliedCarryQtyForOrderLine(raw, line.productId);
-    return { ...line, qty: roundProcurementQty((Number(line.qty) || 0) + carry) };
-  });
+  return lines.map((line) => ({ ...line }));
 }
 
 export function buildPickingPersistLines(
-  raw: Pick<
+  _raw: Pick<
     OrderHistoryEntry,
     'procurementDeductionBasisOrderId' | 'procurementDeductionBasisOrderIds' | 'procurementDeductionAppliedQtyByBasisOrderId'
   >,
   displayLines: OrderHistoryLine[],
 ): OrderHistoryLine[] {
-  const hasDeductionBasis = normalizeProcurementDeductionBasisOrderIds(raw).length > 0;
-  return displayLines.map((line) => {
-    if (!hasDeductionBasis) return { ...line };
-    const carry = appliedCarryQtyForOrderLine(raw, line.productId);
-    return { ...line, qty: Math.max(0, roundProcurementQty((Number(line.qty) || 0) - carry)) };
-  });
+  return displayLines.map((line) => ({ ...line }));
 }
 
 function toOrderRowFromMgmt(
@@ -1636,7 +1610,7 @@ function orderStatusDisplayLabel(
 }
 
 const PICK_MAX_Q = 99_999;
-/** 調整實出後自動寫入訂單（免按「儲存貨量」） */
+  /** 調整叫貨量後自動寫入訂單（免按「儲存貨量」） */
 function pickingErrorMessage(
   res: Extract<UpdateEditableOrderLinesResult, { ok: false }>,
 ): string {
@@ -1757,7 +1731,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const [postDeductError, setPostDeductError] = useState<string | null>(null);
   const [postDeductSaving, setPostDeductSaving] = useState(false);
   const [basisOrdersList, setBasisOrdersList] = useState<OrderHistoryEntry[]>([]);
-  /** 調整貨量：一次僅編輯一單的實出數量（可增可減） */
+  /** 調整貨量：一次僅編輯一單的叫貨數量（可增可減） */
   const [pickingOrderId, setPickingOrderId] = useState<string | null>(null);
   const [pickingLines, setPickingLines] = useState<OrderHistoryLine[]>([]);
   const [pickingOriginal, setPickingOriginal] = useState<OrderHistoryLine[]>([]);
@@ -2342,7 +2316,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
     return () => window.removeEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, onImported);
   }, [syncOrders]);
 
-  /** 調整實出後自動寫入訂單，避免未按「儲存貨量」就離開導致回溯 */
+  /** 調整叫貨量後自動寫入訂單，避免未按「儲存貨量」就離開導致回溯 */
   useEffect(() => {
     if (!pickingOrderId) return;
     const raw = rawList.find((o) => o.id === pickingOrderId);
@@ -3088,11 +3062,11 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                   )}
                                   title={
                                     deductionBasisIds.length > 0
-                                      ? '請輸入實際要帶出的總量；儲存時系統會自動扣掉已扣剩餘後寫回叫貨量'
+                                      ? '請輸入工廠實際需要補貨的叫貨量；盤點帶出量會由叫貨量加上已扣剩餘重新計算'
                                       : undefined
                                   }
                                 >
-                                  {deductionBasisIds.length > 0 ? '帶出總量' : '實出數量'}
+                                  叫貨數量
                                 </th>
                                 <th
                                   className={cn(
@@ -3238,7 +3212,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                     <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
                                       <div className="font-medium text-[#f5f2ed]">{line.name}</div>
                                       <div className="text-[1.14075rem] text-zinc-500">
-                                        {deductionBasisIds.length > 0 ? '原訂帶出' : '下單'} {origQ} {line.unit}
+                                        原叫貨 {origQ} {line.unit}
                                         <LiangJinQtyHint liangQty={origQ} pieceUnit={line.unit} className="text-[15.21px]" />
                                         {hideOrderBatchPriceFromEmployee ? (
                                           <>
@@ -3277,7 +3251,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                           onClick={(e) => e.stopPropagation()}
                                           onFocus={(e) => e.target.select()}
                                           className="min-w-[4.25rem] w-16 max-w-[7rem] shrink-0 text-center text-[1.521rem] font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
-                                          aria-label={`${line.name} ${deductionBasisIds.length > 0 ? '帶出總量' : '實出數量'}，0～${PICK_MAX_Q.toLocaleString()}`}
+                                          aria-label={`${line.name} 叫貨數量，0～${PICK_MAX_Q.toLocaleString()}`}
                                         />
                                         <button
                                           type="button"

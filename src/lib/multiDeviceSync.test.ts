@@ -3,6 +3,7 @@ import {
   mergeArraysById,
   mergeOrderLikeRecord,
   mergeStorageKeyRecords,
+  type OrderLikeForMerge,
   recordUpdatedAtMs,
 } from './bundleRecordMerge';
 import {
@@ -160,6 +161,54 @@ describe('mergeArraysById', () => {
     expect(merged.lines.find((l) => l.productId === 'p2')?.qty).toBe(4);
     expect(merged.itemCount).toBe(11);
     expect(merged.totalAmount).toBe(1500);
+  });
+
+  it('同單同步合併時保留較完整的扣餘資訊，避免帶出重算失去依據', () => {
+    const withDeduction: OrderLikeForMerge = {
+      ...orderRow('0012026060301', 12, '2026-06-03T10:00:00.000Z'),
+      procurementDeductionBasisOrderId: 'basis-1',
+      procurementDeductionBasisOrderIds: ['basis-1'],
+      procurementDeductionAppliedQtyByBasisOrderId: {
+        'basis-1': { p1: 6 },
+      },
+    };
+    const newerStatusCopy: OrderLikeForMerge = {
+      ...orderRow('0012026060301', 12, '2026-06-03T10:05:00.000Z'),
+      status: '已完成' as const,
+      statusUpdatedAt: '2026-06-03T10:05:00.000Z',
+    };
+
+    const merged = mergeOrderLikeRecord(withDeduction, newerStatusCopy);
+
+    expect(merged.status).toBe('已完成');
+    expect(merged.procurementDeductionBasisOrderIds).toEqual(['basis-1']);
+    expect(merged.procurementDeductionAppliedQtyByBasisOrderId).toEqual({
+      'basis-1': { p1: 6 },
+    });
+  });
+
+  it('同單同步合併尊重較新的扣餘抽離，不讓舊扣餘資料復活', () => {
+    const oldWithDeduction: OrderLikeForMerge = {
+      ...orderRow('0012026060301', 12, '2026-06-03T10:00:00.000Z'),
+      procurementDeductionBasisOrderId: 'basis-1',
+      procurementDeductionBasisOrderIds: ['basis-1'],
+      procurementDeductionAppliedQtyByBasisOrderId: {
+        'basis-1': { p1: 6 },
+      },
+    };
+    const newerDetached: OrderLikeForMerge = {
+      ...orderRow('0012026060301', 18, '2026-06-03T10:10:00.000Z'),
+      procurementDeductionBasisOrderId: '',
+      procurementDeductionBasisOrderIds: [],
+      procurementDeductionAppliedQtyByBasisOrderId: {},
+    };
+
+    const merged = mergeOrderLikeRecord(oldWithDeduction, newerDetached);
+
+    expect(merged.lines[0]?.qty).toBe(18);
+    expect(merged.procurementDeductionBasisOrderId).toBe('');
+    expect(merged.procurementDeductionBasisOrderIds).toEqual([]);
+    expect(merged.procurementDeductionAppliedQtyByBasisOrderId).toEqual({});
   });
 
   it('同單號以較新 updatedAt 為準（揀貨調整不會被舊雲端蓋回）', () => {
