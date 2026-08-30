@@ -462,7 +462,7 @@ function buildIosPrintAppFitScript(pageHeightMm: number): string {
         'th.qty, td.qty { width: 118mm !important; padding-right: 2mm !important; }' +
         '.batch-print .receipt-page { break-after: page !important; page-break-after: always !important; }' +
         '.batch-print .receipt-page:last-of-type { break-after: auto !important; page-break-after: auto !important; }' +
-        '.cut-line { margin: 8mm 0 0 !important; border-top: 3px dashed #111 !important; font-size: 28px !important; }' +
+        '.cut-line { margin: 2mm 0 0 !important; border-top: 3px dashed #111 !important; font-size: 24px !important; line-height: 1.2 !important; }' +
         '}';
       return true;
     }`;
@@ -1111,11 +1111,11 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     }
     .slip-page { margin-top: 4mm; }
     .cut-line {
-      margin: 8mm 0 0;
+      margin: 2mm 0 0;
       border-top: 1px dashed #111;
       color: #111;
       font-size: 11px;
-      line-height: 2;
+      line-height: 1.4;
       text-align: center;
       letter-spacing: 0;
     }
