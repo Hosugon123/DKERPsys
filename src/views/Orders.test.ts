@@ -203,7 +203,7 @@ describe('open store order summaries', () => {
     expect(html).not.toContain('page-break-before: always');
     expect(html).toContain('width: 80mm');
     expect(html).toContain('page-break-inside: avoid');
-    expect(html).toContain('<body class="batch-print">');
+    expect(html).toContain('<body class="batch-print continuous-cut">');
     expect(html).toContain('.batch-print .receipt-page');
     expect(html).toContain('break-after: page');
     expect(html).toContain('page-break-after: always');
@@ -211,8 +211,9 @@ describe('open store order summaries', () => {
     expect(html).toContain('\u526a\u88c1\u7dda');
     expect(html).toContain('onclick="closeSlip()"');
     expect(html).toContain('連續列印');
-    expect(html).toContain('逐張列印');
-    expect(html).toContain('建議使用「逐張列印」');
+    expect(html).toContain('單張測試');
+    expect(html).toContain('100mm × 4 頁切割補位');
+    expect(html).toContain('.batch-print.continuous-cut .receipt-page');
     expect(html).toContain('function printCurrentReceipt()');
     expect(html).toContain('data-page-height-mm=');
     expect(html).toContain('setCurrentPrintPageHeightMm(receiptPages[currentReceiptIndex].getAttribute');

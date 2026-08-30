@@ -416,6 +416,9 @@ function escapeReceiptHtml(v: string | number): string {
 }
 
 const THERMAL_RECEIPT_WIDTH_MM = 80;
+const THERMAL_APP_PAGE_HEIGHT_MM = 100;
+const THERMAL_APP_CUT_PAGE_COUNT = 4;
+const THERMAL_APP_CUT_BLOCK_HEIGHT_MM = THERMAL_APP_PAGE_HEIGHT_MM * THERMAL_APP_CUT_PAGE_COUNT;
 const IOS_PRINT_PDF_WIDTH_MM = 210;
 const IOS_PRINT_SCALE = IOS_PRINT_PDF_WIDTH_MM / THERMAL_RECEIPT_WIDTH_MM;
 
@@ -426,7 +429,8 @@ function estimateReceiptPageHeightMm(rowCount: number, sectionCount = 1): number
 function estimateCombinedReceiptPageHeightMm(summaryRows: number, slips: OpenStoreOrderPrintSlip[]): number {
   const summaryHeight = estimateReceiptPageHeightMm(summaryRows, 2);
   const slipHeights = slips.map((slip) => estimateReceiptPageHeightMm(slip.lines.length, 2));
-  return Math.max(160, summaryHeight, ...slipHeights);
+  const maxReceiptHeight = Math.max(summaryHeight, ...slipHeights);
+  return Math.ceil(maxReceiptHeight / THERMAL_APP_CUT_BLOCK_HEIGHT_MM) * THERMAL_APP_CUT_BLOCK_HEIGHT_MM;
 }
 
 function buildIosPrintAppFitScript(pageHeightMm: number): string {
@@ -1017,6 +1021,14 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       break-after: auto;
       page-break-after: auto;
     }
+    .batch-print.continuous-cut .receipt-page {
+      min-height: ${pageHeightMm}mm;
+      display: flex;
+      flex-direction: column;
+    }
+    .batch-print.continuous-cut .cut-line {
+      margin-top: auto;
+    }
     h1 {
       margin: 0 0 6px;
       padding-bottom: 8px;
@@ -1142,10 +1154,19 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
         break-after: auto;
         page-break-after: auto;
       }
+      .batch-print.continuous-cut .receipt-page {
+        min-height: ${pageHeightMm}mm !important;
+        display: flex !important;
+        flex-direction: column !important;
+      }
+      .batch-print.continuous-cut .cut-line {
+        margin-top: auto !important;
+      }
       .batch-print.sequential-printing .receipt-page {
         display: none !important;
         break-after: auto !important;
         page-break-after: auto !important;
+        min-height: 0 !important;
       }
       .batch-print.sequential-printing .receipt-page.is-print-current {
         display: block !important;
@@ -1153,16 +1174,16 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     }
   </style>
 </head>
-<body class="batch-print">
+<body class="batch-print continuous-cut">
   <div class="toolbar">
-    <button class="primary" type="button" onclick="printCurrentReceipt()">逐張列印 <span id="sequentialPrintLabel">1 / 1</span></button>
-    <button type="button" onclick="printNextReceipt()">下一張</button>
-    <button class="secondary" type="button" onclick="resetSequentialPrint(); printSlip()">連續列印</button>
+    <button class="primary" type="button" onclick="resetSequentialPrint(); printSlip()">連續列印</button>
+    <button class="secondary" type="button" onclick="printCurrentReceipt()">單張測試 <span id="sequentialPrintLabel">1 / 1</span></button>
+    <button class="secondary" type="button" onclick="printNextReceipt()">下一張測試</button>
     <button type="button" onclick="shareSlip()">分享</button>
     <button type="button" onclick="copySlip()">複製</button>
     <button class="close" type="button" onclick="closeSlip()">關閉</button>
   </div>
-  <div class="print-note">建議使用「逐張列印」：一張單據送一次列印，才不會被打印 APP 固定頁數切到別家店。連續列印只適合全部單據長度剛好一致時使用。</div>
+  <div class="print-note">連續列印已依 100mm × 4 頁切割補位：每張總和／店單會對齊固定切割點，短單尾端留白屬於補位，避免切到下一家。</div>
   <section class="receipt-page" data-page-height-mm="${estimateReceiptPageHeightMm(summary.lines.length, 2)}">
     <h1>未完成訂單總和</h1>
     <div class="summary">
