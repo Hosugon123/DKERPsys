@@ -210,9 +210,12 @@ describe('open store order summaries', () => {
     expect(html).toContain('.batch-print .receipt-page:last-of-type');
     expect(html).toContain('\u526a\u88c1\u7dda');
     expect(html).toContain('onclick="closeSlip()"');
-    expect(html).toContain('列印全部');
+    expect(html).toContain('連續列印');
     expect(html).toContain('逐張列印');
+    expect(html).toContain('建議使用「逐張列印」');
     expect(html).toContain('function printCurrentReceipt()');
+    expect(html).toContain('data-page-height-mm=');
+    expect(html).toContain('setCurrentPrintPageHeightMm(receiptPages[currentReceiptIndex].getAttribute');
     expect(html).toContain('.batch-print.sequential-printing .receipt-page');
     expect(html).toContain('if (false) {');
   });

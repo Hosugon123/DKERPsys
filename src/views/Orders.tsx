@@ -430,14 +430,25 @@ function estimateCombinedReceiptPageHeightMm(summaryRows: number, slips: OpenSto
 }
 
 function buildIosPrintAppFitScript(pageHeightMm: number): string {
-  const iosPageHeightMm = Math.ceil(pageHeightMm * IOS_PRINT_SCALE);
   return `
+    var defaultPrintPageHeightMm = ${pageHeightMm};
+    var currentPrintPageHeightMm = ${pageHeightMm};
+    function setCurrentPrintPageHeightMm(heightMm) {
+      var parsed = Number(heightMm);
+      currentPrintPageHeightMm = Number.isFinite(parsed) && parsed > 0 ? parsed : defaultPrintPageHeightMm;
+    }
     function installIosPrintAppFit() {
       var isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       if (!isiOS) return false;
       document.documentElement.classList.add('ios-print-app');
-      var style = document.createElement('style');
-      style.textContent = '@page { size: ${IOS_PRINT_PDF_WIDTH_MM}mm ${iosPageHeightMm}mm; margin: 0; }' +
+      var iosPageHeightMm = Math.ceil(currentPrintPageHeightMm * ${IOS_PRINT_SCALE});
+      var style = document.getElementById('ios-print-app-fit-style');
+      if (!style) {
+        style = document.createElement('style');
+        style.id = 'ios-print-app-fit-style';
+        document.head.appendChild(style);
+      }
+      style.textContent = '@page { size: ${IOS_PRINT_PDF_WIDTH_MM}mm ' + iosPageHeightMm + 'mm; margin: 0; }' +
         '@media print {' +
         '* { overflow: visible !important; }' +
         'html, body, .receipt-page { width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; min-width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; max-width: ${IOS_PRINT_PDF_WIDTH_MM}mm !important; height: auto !important; min-height: 0 !important; }' +
@@ -453,7 +464,6 @@ function buildIosPrintAppFitScript(pageHeightMm: number): string {
         '.batch-print .receipt-page:last-of-type { break-after: auto !important; page-break-after: auto !important; }' +
         '.cut-line { margin: 8mm 0 0 !important; border-top: 3px dashed #111 !important; font-size: 28px !important; }' +
         '}';
-      document.head.appendChild(style);
       return true;
     }`;
 }
@@ -483,6 +493,9 @@ function buildReceiptWindowScript(opts: {
     function printCurrentReceipt() {
       refreshReceiptPages();
       if (!receiptPages.length) return;
+      if (typeof setCurrentPrintPageHeightMm === 'function') {
+        setCurrentPrintPageHeightMm(receiptPages[currentReceiptIndex].getAttribute('data-page-height-mm'));
+      }
       document.body.classList.add('sequential-printing');
       printSlip();
     }
@@ -495,6 +508,7 @@ function buildReceiptWindowScript(opts: {
     function resetSequentialPrint() {
       document.body.classList.remove('sequential-printing');
       currentReceiptIndex = 0;
+      if (typeof setCurrentPrintPageHeightMm === 'function') setCurrentPrintPageHeightMm(null);
       refreshReceiptPages();
     }
     window.addEventListener('afterprint', function () {
@@ -931,6 +945,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     .join('');
   const slipSections = slips
     .map((slip) => {
+      const slipPageHeightMm = estimateReceiptPageHeightMm(slip.lines.length, 2);
       const rows = slip.lines
         .map(
           (line) => `
@@ -941,7 +956,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
         )
         .join('');
       return `
-  <section class="receipt-page slip-page">
+  <section class="receipt-page slip-page" data-page-height-mm="${slipPageHeightMm}">
     <h1>${escapeReceiptHtml(slip.storeLabel)}</h1>
     <div class="meta">${escapeReceiptHtml(slip.dateLabel)}</div>
     ${
@@ -1055,6 +1070,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       top: 0;
       z-index: 10;
       display: flex;
+      flex-wrap: wrap;
       gap: 6px;
       width: 100%;
       min-width: 80mm;
@@ -1072,9 +1088,26 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
       font-size: 13px;
       font-weight: 700;
     }
+    .toolbar .primary {
+      border-width: 2px;
+      border-color: #111;
+    }
+    .toolbar .secondary {
+      color: #555;
+      border-color: #aaa;
+    }
     .toolbar .close {
       background: #111;
       color: #fff;
+    }
+    .print-note {
+      width: 100%;
+      margin: 0 0 8px;
+      padding: 5px 6px;
+      border: 1px solid #111;
+      font-size: 11px;
+      line-height: 1.35;
+      font-weight: 700;
     }
     .slip-page { margin-top: 4mm; }
     .cut-line {
@@ -1088,7 +1121,7 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
     }
     @media print {
       * { overflow: visible !important; }
-      .toolbar { display: none; }
+      .toolbar, .print-note { display: none; }
       html, body, .receipt-page {
         width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
         min-width: ${THERMAL_RECEIPT_WIDTH_MM}mm;
@@ -1122,14 +1155,15 @@ export function buildCombinedOpenStoreOrdersPrintHtml(
 </head>
 <body class="batch-print">
   <div class="toolbar">
-    <button type="button" onclick="resetSequentialPrint(); printSlip()">列印全部</button>
-    <button type="button" onclick="printCurrentReceipt()">逐張列印 <span id="sequentialPrintLabel">1 / 1</span></button>
+    <button class="primary" type="button" onclick="printCurrentReceipt()">逐張列印 <span id="sequentialPrintLabel">1 / 1</span></button>
     <button type="button" onclick="printNextReceipt()">下一張</button>
+    <button class="secondary" type="button" onclick="resetSequentialPrint(); printSlip()">連續列印</button>
     <button type="button" onclick="shareSlip()">分享</button>
     <button type="button" onclick="copySlip()">複製</button>
     <button class="close" type="button" onclick="closeSlip()">關閉</button>
   </div>
-  <section class="receipt-page">
+  <div class="print-note">建議使用「逐張列印」：一張單據送一次列印，才不會被打印 APP 固定頁數切到別家店。連續列印只適合全部單據長度剛好一致時使用。</div>
+  <section class="receipt-page" data-page-height-mm="${estimateReceiptPageHeightMm(summary.lines.length, 2)}">
     <h1>未完成訂單總和</h1>
     <div class="summary">
       <span>${escapeReceiptHtml(summary.dateLabel)}</span>
