@@ -119,6 +119,24 @@ export function resolveProcurementCheckoutCart(
   };
 }
 
+export function buildAppliedDeductionQtyByBasisOrderId(
+  baseCart: Record<string, number>,
+  deductedCart: Record<string, number>,
+  basisOrderId: string,
+): Record<string, Record<string, number>> {
+  const basisId = basisOrderId.trim();
+  if (!basisId) return {};
+  const productIds = new Set([...Object.keys(baseCart), ...Object.keys(deductedCart)]);
+  const byProduct: Record<string, number> = {};
+  for (const productId of productIds) {
+    const baseQty = roundProcurementQty(Number(baseCart[productId] ?? 0));
+    const deductedQty = roundProcurementQty(Number(deductedCart[productId] ?? 0));
+    const appliedQty = roundProcurementQty(Math.max(0, baseQty - deductedQty));
+    if (appliedQty > 0) byProduct[productId] = appliedQty;
+  }
+  return Object.keys(byProduct).length > 0 ? { [basisId]: byProduct } : {};
+}
+
 const PROC_DOCK_SELECT_CLASS =
   'procurement-dock-weekday-select box-border h-6 min-h-0 flex-1 min-w-[3.25rem] max-w-[5.5rem] rounded-md border border-zinc-700/80 bg-zinc-950/90 px-1.5 py-0 text-[10px] leading-none text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-600/50 [color-scheme:dark] lg:h-7 lg:min-w-[3.5rem] lg:max-w-[6rem] lg:text-xs';
 
@@ -149,6 +167,7 @@ type ProcurementWorkDraft = {
   qtyInputDraft: Record<string, string>;
   stallBasisOrderId: string;
   cartDeductedBasisOrderId?: string;
+  cartDeductedAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
   newOrderDateYmd: string;
   referenceWeekdayIdx: number;
   referenceMode: ProcurementReferenceMode;
@@ -191,6 +210,9 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
   const [cartDeductedBasisOrderId, setCartDeductedBasisOrderId] = useState(
     () => restoredProcurement?.cartDeductedBasisOrderId ?? '',
   );
+  const [cartDeductedAppliedQtyByBasisOrderId, setCartDeductedAppliedQtyByBasisOrderId] = useState<
+    Record<string, Record<string, number>>
+  >(() => restoredProcurement?.cartDeductedAppliedQtyByBasisOrderId ?? {});
   /** 盤點日當天售出一覽：伸縮（同歷史訂單邏輯，預設收合） */
   const [stallDaySalesOpen, setStallDaySalesOpen] = useState(false);
   /** 常用訂單區塊：預設收合節省版面 */
@@ -228,6 +250,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       qtyInputDraft,
       stallBasisOrderId,
       cartDeductedBasisOrderId,
+      cartDeductedAppliedQtyByBasisOrderId,
       newOrderDateYmd,
       referenceWeekdayIdx,
       referenceMode,
@@ -595,6 +618,9 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       setCart(checkoutCart.cart);
       setQtyInputDraft({});
       setCartDeductedBasisOrderId(checkoutCart.basisOrderId);
+      setCartDeductedAppliedQtyByBasisOrderId(
+        buildAppliedDeductionQtyByBasisOrderId(effectiveCart, checkoutCart.cart, checkoutCart.basisOrderId),
+      );
       setCheckoutSyncNotice('送出前已自動扣除盤點剩餘，請再次確認扣後叫貨量後送出。');
       setSubmitError('');
       return;
@@ -611,6 +637,9 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
       setCart(checkoutCart.cart);
       setQtyInputDraft({});
       setCartDeductedBasisOrderId(checkoutCart.basisOrderId);
+      setCartDeductedAppliedQtyByBasisOrderId(
+        buildAppliedDeductionQtyByBasisOrderId(effectiveCart, checkoutCart.cart, checkoutCart.basisOrderId),
+      );
     }
     const lines = buildLinesFromCart(checkoutCart.cart);
     if (lines.length === 0) {
@@ -641,6 +670,18 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
           ...(stallBasisOrderId.trim()
             ? { procurementDeductionBasisOrderId: stallBasisOrderId.trim() }
             : {}),
+          ...(cartDeductedBasisOrderId.trim() === stallBasisOrderId.trim() &&
+          Object.keys(cartDeductedAppliedQtyByBasisOrderId).length > 0
+            ? { procurementDeductionAppliedQtyByBasisOrderId: cartDeductedAppliedQtyByBasisOrderId }
+            : checkoutCart.autoDeducted
+              ? {
+                  procurementDeductionAppliedQtyByBasisOrderId: buildAppliedDeductionQtyByBasisOrderId(
+                    effectiveCart,
+                    checkoutCart.cart,
+                    checkoutCart.basisOrderId,
+                  ),
+                }
+              : {}),
         });
         createdOrderId = orderId;
         if (syncProcurementToLedger && (userRole === 'admin' || userRole === 'employee')) {
@@ -658,6 +699,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
         setCart({});
         setQtyInputDraft({});
         setCartDeductedBasisOrderId('');
+        setCartDeductedAppliedQtyByBasisOrderId({});
         setNewOrderDateYmd(ymd(new Date()));
         setSyncProcurementToLedger(false);
         setTimeout(() => setOrderSuccess(false), 3000);
@@ -673,6 +715,9 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     newOrderDateYmd,
     resolveCheckoutCart,
     stallBasisOrderId,
+    cartDeductedBasisOrderId,
+    cartDeductedAppliedQtyByBasisOrderId,
+    effectiveCart,
     supplyRetailView,
     userRole,
     syncProcurementToLedger,
@@ -683,6 +728,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     setCart(cartFromFavorite(f.quantities));
     setQtyInputDraft({});
     setCartDeductedBasisOrderId('');
+    setCartDeductedAppliedQtyByBasisOrderId({});
     setCheckoutSyncNotice(null);
   };
 
@@ -708,6 +754,9 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
     setCart(next);
     setQtyInputDraft({});
     setCartDeductedBasisOrderId(stallBasisOrderId.trim());
+    setCartDeductedAppliedQtyByBasisOrderId(
+      buildAppliedDeductionQtyByBasisOrderId(base, next, stallBasisOrderId),
+    );
     setCheckoutSyncNotice('已依所選盤點單扣除剩餘，購物車目前顯示扣後實際叫貨量。');
   };
 
@@ -902,6 +951,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                   setStallBasisOrderId(v);
                   setPreferredProcurementBasisOrderId(v);
                   setCartDeductedBasisOrderId('');
+                  setCartDeductedAppliedQtyByBasisOrderId({});
                   setCheckoutSyncNotice(null);
                 }}
                 disabled={basisOrders.length === 0}
@@ -931,6 +981,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                 setStallBasisOrderId('');
                 setPreferredProcurementBasisOrderId('');
                 setCartDeductedBasisOrderId('');
+                setCartDeductedAppliedQtyByBasisOrderId({});
                 setCheckoutSyncNotice(null);
               }}
               disabled={basisOrders.length === 0 || !stallBasisOrderId}

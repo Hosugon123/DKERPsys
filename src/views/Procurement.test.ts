@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildEffectiveProcurementCart, resolveProcurementCheckoutCart } from './Procurement';
+import {
+  buildAppliedDeductionQtyByBasisOrderId,
+  buildEffectiveProcurementCart,
+  resolveProcurementCheckoutCart,
+} from './Procurement';
 
 const DUCK_HEAD_ID = 's20';
 
@@ -45,6 +49,20 @@ describe('procurement checkout deduction guard', () => {
       cart: { [DUCK_HEAD_ID]: 12 },
       autoDeducted: false,
       basisOrderId: 'basis-1',
+    });
+  });
+});
+
+describe('procurement deduction cart helpers', () => {
+  it('records deducted carry from the original cart even when carry is greater than final order quantity', () => {
+    expect(
+      buildAppliedDeductionQtyByBasisOrderId(
+        { p1: 10, p2: 5 },
+        { p1: 4, p2: 5 },
+        'basis-1',
+      ),
+    ).toEqual({
+      'basis-1': { p1: 6 },
     });
   });
 });

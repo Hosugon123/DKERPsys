@@ -790,8 +790,6 @@ function prevRemainForBringOut(
   if (!procurementOrderChainsPriorStallRemain(order)) {
     return roundProcurementQty(Math.max(0, num(prevDay.lines[productId]?.remain)));
   }
-  const live = roundProcurementQty(Math.max(0, num(prevDay.lines[productId]?.remain)));
-  if (live > 0) return live;
   const basisIds = normalizeProcurementDeductionBasisOrderIds(order);
   const applied = basisIds.reduce(
     (s, bid) =>
@@ -801,6 +799,12 @@ function prevRemainForBringOut(
     0,
   );
   if (applied > 0) return applied;
+  const hasExplicitAppliedBasis = basisIds.some(
+    (bid) => order.procurementDeductionAppliedQtyByBasisOrderId?.[bid] !== undefined,
+  );
+  if (hasExplicitAppliedBasis) return 0;
+  const live = roundProcurementQty(Math.max(0, num(prevDay.lines[productId]?.remain)));
+  if (live > 0) return live;
   const poolAtOrder = basisIds.reduce((s, bid) => {
     const frozen = loadStallSalesDisplayFromBasisOrder(bid);
     const frozenR = frozenRemainQtyForItem(frozen, productId);
@@ -936,8 +940,6 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
     const orderQty = roundProcurementQty(Number(line.qty) || 0);
     if (!productId || orderQty <= 0) continue;
     const liveLine = live.lines[productId] ?? { out: '', remain: '' };
-    const liveRemain = roundProcurementQty(Math.max(0, num(liveLine.remain)));
-    if (liveRemain > 0) continue;
     const appliedCarry = basisIds.reduce(
       (s, bid) =>
         roundProcurementQty(
@@ -945,6 +947,18 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
         ),
       0,
     );
+    const hasExplicitAppliedBasis = basisIds.some(
+      (bid) => o.procurementDeductionAppliedQtyByBasisOrderId?.[bid] !== undefined,
+    );
+    if (appliedCarry > 0 || hasExplicitAppliedBasis) {
+      lines[productId] = {
+        ...liveLine,
+        remain: String(appliedCarry),
+      };
+      continue;
+    }
+    const liveRemain = roundProcurementQty(Math.max(0, num(liveLine.remain)));
+    if (liveRemain > 0) continue;
     const fallbackCarry = basisIds.reduce((s, bid) => {
       const frozen = loadStallSalesDisplayFromBasisOrder(bid);
       const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, orderId);

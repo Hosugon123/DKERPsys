@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCombinedOpenStoreOrdersPrintHtml,
   buildCombinedOpenStoreOrdersPrintText,
+  computeOrderDetailLineMetrics,
   buildPickingDisplayLines,
   buildPickingPersistLines,
   buildOpenStoreOrderSummaries,
@@ -242,6 +243,30 @@ describe('order print slip', () => {
     );
   });
 
+  it('prints deducted procurement quantity, not bring-out quantity with deducted carry', () => {
+    const raw = order({
+      id: 'deducted-print',
+      ymd: '2026-09-05',
+      storeLabel: '高雄三民',
+      lines: [
+        { productId: 's05', name: '樓梯', unitPrice: 8.13, qty: 56, unit: '兩' },
+      ],
+    });
+    raw.procurementDeductionBasisOrderId = 'basis-print';
+    raw.procurementDeductionBasisOrderIds = ['basis-print'];
+    raw.procurementDeductionAppliedQtyByBasisOrderId = {
+      'basis-print': { s05: 4 },
+    };
+
+    const lines = buildOrderPrintSlipLines(raw.lines);
+
+    expect(lines).toEqual([
+      { productId: 's05', name: '樓梯', unit: '兩', qty: 56 },
+    ]);
+    expect(buildOrderPrintSlipText('高雄三民', lines)).toContain('樓梯 56 兩（3.5 斤）');
+    expect(buildOrderPrintSlipText('高雄三民', lines)).not.toContain('60 兩');
+  });
+
   it('includes a mobile-friendly close action in the print window', () => {
     const html = buildOrderPrintSlipHtml(
       '直營店',
@@ -276,6 +301,28 @@ describe('order detail quantity labels', () => {
     });
 
     expect(orderDetailQtyColumnLabels(true, true).bringOut).toBe('盤點帶出量');
+  });
+});
+
+describe('order detail quantity metrics', () => {
+  it('deducted and counted orders show deducted carry instead of end-of-day remain', () => {
+    const metrics = computeOrderDetailLineMetrics(
+      { productId: 's05', name: '樓梯', unitPrice: 8.13, qty: 56, unit: '兩' },
+      {
+        lines: { s05: { out: '60', remain: '0' } },
+        frozenRetailUnitPriceByItem: { s05: 23.3 },
+      } as never,
+      {
+        lines: { s05: { out: '', remain: '4' } },
+      } as never,
+      'franchisee',
+      true,
+    );
+
+    expect(metrics.orderQtyRounded).toBe(56);
+    expect(metrics.carryRemainQty).toBe(4);
+    expect(metrics.displayedBringOut).toBe(60);
+    expect(metrics.orderSub).toBe(455.28);
   });
 });
 

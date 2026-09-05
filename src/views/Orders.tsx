@@ -299,11 +299,12 @@ type MergedStallSnapForOrderDetail = ReturnType<typeof mergeSalesRecordWithCatal
 type CarrySnapForOrderDetail = ReturnType<typeof loadRemainSnapshotForOrderManagementDisplay> | null;
 
 /** 訂單明細表列：批價、叫貨小計、帶出量若全以零售售完之預估金額。 */
-function computeOrderDetailLineMetrics(
+export function computeOrderDetailLineMetrics(
   line: OrderHistoryLine,
   stallSnap: MergedStallSnapForOrderDetail | null,
   carrySnapForDisplay: CarrySnapForOrderDetail,
   supplyRetailView: SupplyRetailView,
+  hasDeductionBasis = false,
 ) {
   const rowSnap = stallSnap?.lines[line.productId];
   const hasRowSnap = Boolean(stallSnap && rowSnap);
@@ -324,15 +325,18 @@ function computeOrderDetailLineMetrics(
       soldRevenue: c.sold * frozenR,
     };
   }
-  const carryRemainQty =
-    hasRowSnap && c
+  const deductionCarryQty =
+    carrySnapForDisplay && !legacyPid
+      ? Math.max(
+          0,
+          roundProcurementQty(num(carrySnapForDisplay.lines[line.productId]?.remain)),
+        )
+      : null;
+  const carryRemainQty = hasDeductionBasis
+    ? (deductionCarryQty ?? 0)
+    : hasRowSnap && c
       ? c.remain
-      : carrySnapForDisplay && !legacyPid
-        ? Math.max(
-            0,
-            roundProcurementQty(num(carrySnapForDisplay.lines[line.productId]?.remain)),
-          )
-        : null;
+      : deductionCarryQty;
   const plannedBringOutQty =
     carryRemainQty !== null
       ? roundProcurementQty(carryRemainQty + orderQtyRounded)
@@ -1252,7 +1256,13 @@ function plannedEstimatedRetailFromOrder(
     const item = getSupplyItem(line.productId, retailView);
     if (!item || isConsumableItem(item)) continue;
     any = true;
-    total += computeOrderDetailLineMetrics(line, stallSnap, carrySnap, retailView).retailEstSub;
+    total += computeOrderDetailLineMetrics(
+      line,
+      stallSnap,
+      carrySnap,
+      retailView,
+      normalizeProcurementDeductionBasisOrderIds(raw).length > 0,
+    ).retailEstSub;
   }
   return any ? Math.round(total * 100) / 100 : null;
 }
@@ -1671,7 +1681,7 @@ function pickingErrorMessage(
 ): string {
   switch (res.reason) {
     case 'empty':
-      return '實出數全為 0 時，請改為【取消訂單】或至少保留 1 項。';
+      return '叫貨數量全為 0 時，請改為【取消訂單】或至少保留 1 項。';
     case 'canceled':
       return '此單已取消，無法調整貨量。';
     case 'stall_count_locked':
@@ -2696,6 +2706,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
             isExpanded && !isPickingThis && !isPriceAdjustThis
               ? buildOrderExpandedDetailLines(order, raw, catalogItemsForOrderDetail, supplyRetailView)
               : null;
+          const deductionBasisIds = raw ? normalizeProcurementDeductionBasisOrderIds(raw) : [];
           const orderRetailEstFooterTotal =
             showOrderProcurementSubtotalCol && expandedDetailLinesForTable
               ? Math.round(
@@ -2707,6 +2718,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                         stallSnap,
                         carrySnapForDisplay,
                         supplyRetailView,
+                        deductionBasisIds.length > 0,
                       ).retailEstSub,
                     0,
                   ) * 100,
@@ -2723,6 +2735,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                         stallSnap,
                         carrySnapForDisplay,
                         supplyRetailView,
+                        deductionBasisIds.length > 0,
                       ).retailEstSub,
                     0,
                   ) * 100,
@@ -2754,7 +2767,6 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
           const orderLineCount = order.itemLines.reduce((s, l) => s + l.qty, 0);
           const orderEditLocked = isPickingThis || isPriceAdjustThis;
           const stallLocked = raw ? orderHasStallCountCompleted(raw) : false;
-          const deductionBasisIds = raw ? normalizeProcurementDeductionBasisOrderIds(raw) : [];
           const qtyColumnLabels = orderDetailQtyColumnLabels(deductionBasisIds.length > 0, stallLocked);
           const canApplyPostDeduct =
             Boolean(raw) &&
@@ -3404,6 +3416,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                     stallSnap,
                                     carrySnapForDisplay,
                                     supplyRetailView,
+                                    deductionBasisIds.length > 0,
                                   );
                                   return (
                                     <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">

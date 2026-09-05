@@ -185,7 +185,7 @@ function restoreBasisRemainDeduction(
   return true;
 }
 
-function orderLinesForRemainDeduction(lines: orderHistory.OrderHistoryLine[]) {
+function orderLinesForRemainDeduction(lines: Array<Pick<orderHistory.OrderHistoryLine, 'productId' | 'qty'> & { name?: string }>) {
   return lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty }));
 }
 
@@ -261,6 +261,7 @@ export const orders = {
     orderDateYmd: string;
     procurementDeductionBasisOrderId?: string;
     procurementDeductionBasisOrderIds?: string[];
+    procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
   }): Promise<string> {
     return withUiRemoteStorageWrite(() => {
       const basisOrderIds = orderHistory.normalizeProcurementDeductionBasisOrderIds({
@@ -269,12 +270,19 @@ export const orders = {
       });
       const totalDeductByProductId: Record<string, number> = {};
       const appliedQtyByBasisOrderId: Record<string, Record<string, number>> = {};
+      const explicitApplied = params.procurementDeductionAppliedQtyByBasisOrderId ?? {};
       for (const basisOrderId of basisOrderIds) {
         if (!getBasisDeductionContext(basisOrderId)) continue;
-        const remainingLines = params.lines.map((l) => ({
-          ...l,
-          qty: Math.max(0, roundProcurementQty(Number(l.qty) - (totalDeductByProductId[l.productId] ?? 0))),
-        }));
+        const explicitForBasis = explicitApplied[basisOrderId];
+        const remainingLines = explicitForBasis
+          ? Object.entries(explicitForBasis).map(([productId, qty]) => ({
+              productId,
+              qty,
+            }))
+          : params.lines.map((l) => ({
+              ...l,
+              qty: Math.max(0, roundProcurementQty(Number(l.qty) - (totalDeductByProductId[l.productId] ?? 0))),
+            }));
         const toDeduct = stallInventory.buildProcurementRemainDeductionsFromLines(
           basisOrderId,
           orderLinesForRemainDeduction(remainingLines),

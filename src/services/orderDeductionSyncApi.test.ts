@@ -171,4 +171,39 @@ describe('order deduction API stall out sync', () => {
     expect(Number(loadDay(BASIS_YMD, 'scope:hq').lines[PRODUCT_ID]?.remain)).toBe(0);
     expect(Number(loadDay(BASIS_YMD_2, 'scope:hq').lines[PRODUCT_ID]?.remain)).toBe(6);
   });
+
+  it('append-time deduction can persist carry greater than the deducted order quantity when frontend supplies it', async () => {
+    const { orders } = await import('./apiService');
+    const {
+      loadDay,
+      loadRemainSnapshotForOrderManagementDisplay,
+      recomputeStallOutForStallYmdAndOrder,
+    } = await import('../lib/stallInventoryStorage');
+    const { readMergedOrderByIdFromStores } = await import('../lib/orderHistoryStorage');
+
+    const orderId = await orders.appendProcurementOrderEntry({
+      lines: [{ productId: PRODUCT_ID, name: '測試品項', qty: 4, unitPrice: 100, unit: '份' }],
+      totalAmount: 400,
+      actorRole: 'admin',
+      orderDateYmd: CHILD_YMD,
+      procurementDeductionBasisOrderId: BASIS_ORDER_ID,
+      procurementDeductionAppliedQtyByBasisOrderId: {
+        [BASIS_ORDER_ID]: { [PRODUCT_ID]: 6 },
+      },
+    });
+    const child = readMergedOrderByIdFromStores(orderId);
+
+    expect(child?.lines[0]?.qty).toBe(4);
+    expect(child?.procurementDeductionAppliedQtyByBasisOrderId).toEqual({
+      [BASIS_ORDER_ID]: { [PRODUCT_ID]: 6 },
+    });
+    expect(Number(loadDay(BASIS_YMD, 'scope:hq').lines[PRODUCT_ID]?.remain)).toBe(14);
+    expect(Number(loadRemainSnapshotForOrderManagementDisplay(child!).lines[PRODUCT_ID]?.remain)).toBe(6);
+
+    const implanted = recomputeStallOutForStallYmdAndOrder(CHILD_YMD, orderId, undefined, {
+      clearRemain: true,
+      persist: false,
+    });
+    expect(Number(implanted.lines[PRODUCT_ID]?.out)).toBe(10);
+  });
 });
