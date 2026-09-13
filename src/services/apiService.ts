@@ -44,6 +44,7 @@ export {
   awaitRemotePushIdle,
   initRemoteSyncOnAppLoad,
   pushRemoteIfLocalBundleChangedSince,
+  refreshRemoteBundleNow,
   refreshRemoteBundleVersionIfStale,
   syncRemoteAfterDirectLocalMutation,
   withRemoteStorageRead,
@@ -263,7 +264,7 @@ export const orders = {
     procurementDeductionBasisOrderIds?: string[];
     procurementDeductionAppliedQtyByBasisOrderId?: Record<string, Record<string, number>>;
   }): Promise<string> {
-    return withUiRemoteStorageWrite(() => {
+    return withUiRemoteStorageWriteNow(() => {
       const basisOrderIds = orderHistory.normalizeProcurementDeductionBasisOrderIds({
         procurementDeductionBasisOrderId: params.procurementDeductionBasisOrderId,
         procurementDeductionBasisOrderIds: params.procurementDeductionBasisOrderIds,
@@ -304,7 +305,7 @@ export const orders = {
         procurementDeductionAppliedQtyByBasisOrderId:
           Object.keys(appliedQtyByBasisOrderId).length > 0 ? appliedQtyByBasisOrderId : undefined,
       });
-    }, '更新盤點快照');
+    }, '送出叫貨訂單');
   },
   async applyProcurementDeductionBasisAfterSubmit(params: {
     orderId: string;

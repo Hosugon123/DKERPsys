@@ -444,6 +444,38 @@ export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
   }
 }
 
+/**
+ * 需要即時跨裝置一致性的頁面可呼叫此函式強制拉取雲端。
+ * 若本機有未儲存表單或尚未推送的寫入，會略過以避免覆寫使用者正在編輯的資料。
+ */
+export async function refreshRemoteBundleNow(action = '讀取最新雲端資料'): Promise<boolean> {
+  if (getStorageMode() !== 'remote') return false;
+  if (hasUnsavedWork() || hasPendingRemotePush()) return false;
+
+  try {
+    const cloud = await fetchRemoteBundle();
+    if (isRemoteBundleEffectivelyEmpty(cloud)) {
+      dispatchStatus('ok');
+      return true;
+    }
+    const local = timeSync('remote.force-refresh.build-local-bundle', () => buildDongshanDataBundle());
+    const merged = timeSync('remote.force-refresh.merge-bundle', () =>
+      mergeDongshanBundlesLocalWinsDirty(local, cloud, []),
+    );
+    const result = timeSync('remote.force-refresh.import-bundle', () => importDongshanDataBundle(merged));
+    if (result.ok === false) {
+      reportRemoteImportFailure(result.error, action);
+      throw new Error(result.error);
+    }
+    noteRemoteBundleUpdatedAt(cloud);
+    dispatchStatus('ok');
+    return true;
+  } catch (e) {
+    applySyncFailureFromUnknown(e);
+    return false;
+  }
+}
+
 export async function initRemoteSyncOnAppLoad(): Promise<void> {
   if (getStorageMode() !== 'remote') {
     dispatchStatus('idle');

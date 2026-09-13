@@ -126,6 +126,37 @@ describe('remote sync write flushing', () => {
     expect(Object.keys(body.bundle?.keys ?? {}).length).toBeGreaterThan(1);
   });
 
+  it('refreshRemoteBundleNow imports the latest cloud bundle without waiting for the visibility throttle', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          bundle: {
+            ...emptyCloudBundle(),
+            updatedAt: 123,
+            keys: {
+              dongshan_store_code_v1: JSON.stringify('cloud-store'),
+            },
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    const { refreshRemoteBundleNow } = await import('./remoteSyncHub');
+
+    localStorage.setItem('dongshan_store_code_v1', JSON.stringify('stale-local'));
+    const refreshed = await refreshRemoteBundleNow('測試讀取最新雲端資料');
+
+    expect(refreshed).toBe(true);
+    expect(localStorage.getItem('dongshan_store_code_v1')).toBe(JSON.stringify('cloud-store'));
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('GET');
+  });
+
   it('fetches and merges the cloud bundle only after a version conflict', async () => {
     globalThis.fetch = vi
       .fn()

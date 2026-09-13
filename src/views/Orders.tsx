@@ -30,7 +30,7 @@ import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
 import { mergeOrderLikeRecord } from '../lib/bundleRecordMerge';
 import { getOrderStorageRevisionMs } from '../lib/orderHistoryStorage';
 import { DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT } from '../lib/appDataBundle';
-import { orders as ordersApi } from '../services/apiService';
+import { orders as ordersApi, refreshRemoteBundleNow } from '../services/apiService';
 import { resolveOrderStoreLabel } from '../lib/orderStoreLabel';
 import {
   displayOrderCreatedByLabel,
@@ -1809,6 +1809,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   /** 開始調整貨量時訂單的 updatedAt；雲端拉回較新資料時勿用舊 UI 覆寫 */
   const pickingStorageUpdatedAtRef = useRef(0);
   const enrichmentPausedRef = useRef(false);
+  const lastOrdersCloudRefreshAtRef = useRef(0);
 
   useEffect(() => {
     const pause = () => {
@@ -1868,6 +1869,11 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   );
 
   const syncOrders = useCallback(async () => {
+    const now = Date.now();
+    if (now - lastOrdersCloudRefreshAtRef.current > 10_000) {
+      lastOrdersCloudRefreshAtRef.current = now;
+      await refreshRemoteBundleNow('訂單管理讀取最新訂單');
+    }
     const [mgmt, hist, basisOrders] = await Promise.all([
       loadMgmtSliceForRole(userRole),
       loadHistorySliceForRole(userRole),
