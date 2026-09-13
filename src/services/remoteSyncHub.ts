@@ -319,6 +319,13 @@ async function pushBundleTextWithAutoMerge(
   }
 }
 
+export async function pushRemoteBundleWithAutoMerge(
+  bundleText: string,
+  dirtyKeys: readonly DongshanStorageKey[],
+): Promise<void> {
+  await pushBundleTextWithAutoMerge(bundleText, dirtyKeys);
+}
+
 function scheduleDebouncedPush(beforeText: string, afterText: string): void {
   for (const k of storageKeysChangedBetweenBundleTexts(beforeText, afterText)) {
     pendingDirtyKeys.add(k);

@@ -8,7 +8,7 @@
 import { getStorageMode, type StorageMode } from './storageMode';
 import {
   awaitRemotePushIdle,
-  pushRemoteBundle,
+  pushRemoteBundleWithAutoMerge,
   withRemoteStorageRead,
   withRemoteStorageWrite,
   withRemoteStorageWriteDeferPush,
@@ -25,6 +25,7 @@ import {
   buildDongshanDataBundle,
   importDongshanDataBundle,
   serializeDongshanDataBundle,
+  storageKeysChangedBetweenBundleTexts,
   type DongshanDataBundleV1,
   type DongshanStorageKey,
   type ImportBundleResult,
@@ -92,11 +93,15 @@ async function withUiRemoteStorageWriteNow<T>(
       return await withRemoteStorageWrite(fn);
     }
 
+    await awaitRemotePushIdle();
     const before = serializeDongshanDataBundle();
     const out = await Promise.resolve(fn());
     const after = serializeDongshanDataBundle();
     if (after !== before) {
-      await pushRemoteBundle(after, dirtyKeys);
+      await pushRemoteBundleWithAutoMerge(
+        after,
+        dirtyKeys ?? storageKeysChangedBetweenBundleTexts(before, after),
+      );
     }
     return out;
   } catch (error) {
