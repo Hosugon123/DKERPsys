@@ -250,13 +250,14 @@ export default async function handler(req, res) {
       return forbidden(res);
     }
 
-    const redis = await perf.time('redis_ready', () => getRedis(perf));
     const expected = String(process.env.API_SYNC_TOKEN || '').trim();
     const got = readBearer(req);
     if (!expected || !got || got !== expected) {
       statusCode = 401;
       return unauthorized(res);
     }
+
+    const redis = await perf.time('redis_ready', () => getRedis(perf));
 
     if (req.method === 'GET') {
       const raw = await perf.time('redis_get', () => redis.get(KV_KEY));
