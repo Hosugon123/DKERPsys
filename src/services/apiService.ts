@@ -457,8 +457,8 @@ export const salesRecords = {
   async listMeta(scopeId?: string) {
     return withRemoteStorageRead(() => salesRecord.listSalesRecordMeta(scopeId));
   },
-  async listSnapshots(scopeId?: string) {
-    return withRemoteStorageRead(() => salesRecord.listSalesRecordSnapshots(scopeId));
+  async listSnapshots(scopeId?: string, ranges?: readonly salesRecord.SalesRecordDateRange[]) {
+    return withRemoteStorageRead(() => salesRecord.listSalesRecordSnapshots(scopeId, ranges));
   },
   async save(ymd: string, snapshot: salesRecord.SalesRecordDaySnapshot, scopeId?: string): Promise<void> {
     return withUiRemoteStorageWrite(() => salesRecord.saveSalesRecord(ymd, snapshot, scopeId), '儲存銷售紀錄');

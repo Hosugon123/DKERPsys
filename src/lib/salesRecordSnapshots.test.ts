@@ -40,4 +40,34 @@ describe('listSalesRecordSnapshots', () => {
     expect(rows[0]?.snapshot.actualRevenue).toBe('200');
     expect(rows[0]?.snapshot.lines.duck.out).toBe('20');
   });
+
+  it('limits snapshots to the requested dashboard date ranges before catalog merging', () => {
+    localStorage.setItem(
+      SALES_KEY,
+      JSON.stringify({
+        version: 1,
+        byDate: {
+          [scopedStallDateKey('scope:franchisee:dk002', '2026-07-01')]: {
+            completedAt: '2026-07-01T12:00:00.000Z',
+            snapshot: { lines: { duck: { out: '10', remain: '2' } }, actualRevenue: '100', updatedAt: '' },
+          },
+          [scopedStallDateKey('scope:franchisee:dk002', '2026-08-01')]: {
+            completedAt: '2026-08-01T12:00:00.000Z',
+            snapshot: { lines: { duck: { out: '20', remain: '5' } }, actualRevenue: '200', updatedAt: '' },
+          },
+          [scopedStallDateKey('scope:franchisee:dk002', '2026-09-01')]: {
+            completedAt: '2026-09-01T12:00:00.000Z',
+            snapshot: { lines: { duck: { out: '30', remain: '8' } }, actualRevenue: '300', updatedAt: '' },
+          },
+        },
+      }),
+    );
+
+    const rows = listSalesRecordSnapshots('scope:franchisee:dk002', [
+      { startYmd: '2026-08-01', endYmd: '2026-08-31' },
+    ]);
+
+    expect(rows.map((row) => row.ymd)).toEqual(['2026-08-01']);
+    expect(rows[0]?.snapshot.actualRevenue).toBe('200');
+  });
 });

@@ -1810,6 +1810,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const pickingStorageUpdatedAtRef = useRef(0);
   const enrichmentPausedRef = useRef(false);
   const lastOrdersCloudRefreshAtRef = useRef(0);
+  const ordersCloudRefreshInFlightRef = useRef(false);
 
   useEffect(() => {
     const pause = () => {
@@ -1868,12 +1869,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
     pickingOrderId !== null || priceAdjustOrderId !== null,
   );
 
-  const syncOrders = useCallback(async () => {
-    const now = Date.now();
-    if (now - lastOrdersCloudRefreshAtRef.current > 10_000) {
-      lastOrdersCloudRefreshAtRef.current = now;
-      await refreshRemoteBundleNow('訂單管理讀取最新訂單');
-    }
+  const reloadOrdersFromLocal = useCallback(async () => {
     const [mgmt, hist, basisOrders] = await Promise.all([
       loadMgmtSliceForRole(userRole),
       loadHistorySliceForRole(userRole),
@@ -1883,6 +1879,23 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
     setHistoryOrders(hist);
     setBasisOrdersList(basisOrders.filter((o) => orderMatchesProcurementSoldReferenceScope(o)));
   }, [userRole]);
+
+  const syncOrders = useCallback(async () => {
+    await reloadOrdersFromLocal();
+    const now = Date.now();
+    if (now - lastOrdersCloudRefreshAtRef.current <= 10_000) return;
+    if (ordersCloudRefreshInFlightRef.current) return;
+    lastOrdersCloudRefreshAtRef.current = now;
+    ordersCloudRefreshInFlightRef.current = true;
+    void (async () => {
+      try {
+        const refreshed = await refreshRemoteBundleNow('訂單管理讀取最新訂單');
+        if (refreshed) await reloadOrdersFromLocal();
+      } finally {
+        ordersCloudRefreshInFlightRef.current = false;
+      }
+    })();
+  }, [reloadOrdersFromLocal]);
 
   useEffect(() => {
     syncOrders();

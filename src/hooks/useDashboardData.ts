@@ -133,8 +133,8 @@ export function useDashboardData(
     const scopeFilter = viewAsFranchiseeUserId ? `scope:franchisee:${viewAsFranchiseeUserId}` : undefined;
     const entries = await timeAsync(
       'dashboard.reload-sales-records.snapshots',
-      () => salesRecords.listSnapshots(scopeFilter),
-      { scopeFilter },
+      () => salesRecords.listSnapshots(scopeFilter, orderDateRanges),
+      { scopeFilter, rangeCount: orderDateRanges?.length ?? 0 },
     );
     const next: Record<string, SalesRecordDaySnapshot> = {};
     for (const row of entries) {
@@ -146,7 +146,7 @@ export function useDashboardData(
     });
     setSalesRecordMap(next);
     setSalesRecordsReady(true);
-  }, [viewAsFranchiseeUserId]);
+  }, [viewAsFranchiseeUserId, orderDateRanges]);
 
   const reloadPrimary = useCallback(async () => {
     await timeAsync('dashboard.reload-primary', () => Promise.all([reloadOrders(), reloadLedger()]).then(() => undefined));

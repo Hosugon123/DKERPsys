@@ -38,6 +38,8 @@ type StoreV1 = {
   byDate: Record<string, Row>;
 };
 
+export type SalesRecordDateRange = { startYmd: string; endYmd: string };
+
 let cachedStoreRaw: string | null | undefined;
 let cachedStore: StoreV1 | null = null;
 
@@ -127,6 +129,11 @@ function writeRow(s: StoreV1, ymd: string, row: Row, scopeId?: string): void {
   if (isLegacyBareStallDateKey(ymd) && key !== ymd) {
     delete s.byDate[ymd];
   }
+}
+
+function ymdMatchesRanges(ymd: string, ranges?: readonly SalesRecordDateRange[]): boolean {
+  if (!ranges || ranges.length === 0) return true;
+  return ranges.some((range) => ymd >= range.startYmd && ymd <= range.endYmd);
 }
 
 function lineUpdatedMs(line: SalesRecordDayLine | undefined): number {
@@ -353,7 +360,7 @@ export function listSalesRecordMeta(scopeId?: string): {
   return out.sort((a, b) => b.ymd.localeCompare(a.ymd));
 }
 
-export function listSalesRecordSnapshots(scopeId?: string): {
+export function listSalesRecordSnapshots(scopeId?: string, ranges?: readonly SalesRecordDateRange[]): {
   ymd: string;
   completedAt: string;
   completedByName?: string;
@@ -383,6 +390,7 @@ export function listSalesRecordSnapshots(scopeId?: string): {
       continue;
     }
     if (scopeFilter && sid !== scopeFilter) continue;
+    if (!ymdMatchesRanges(ymd, ranges)) continue;
     out.push({
       ymd,
       completedAt: row.completedAt,
