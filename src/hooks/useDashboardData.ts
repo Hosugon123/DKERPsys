@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ledger, orders, salesRecords } from '../services/apiService';
 import {
   ACCOUNTING_LEDGER_UPDATED_EVENT,
@@ -97,6 +97,33 @@ export function useDashboardData(
   const [ledgerEntries, setLedgerEntries] = useState<AccountingLedgerEntry[]>([]);
   const [salesRecordMap, setSalesRecordMap] = useState<Record<string, SalesRecordDaySnapshot>>({});
   const [salesRecordsReady, setSalesRecordsReady] = useState(false);
+  const orderTickFrameRef = useRef<number | null>(null);
+  const financeTickFrameRef = useRef<number | null>(null);
+  const salesRecordTickFrameRef = useRef<number | null>(null);
+
+  const bumpOrderTick = useCallback(() => {
+    if (orderTickFrameRef.current != null) return;
+    orderTickFrameRef.current = window.requestAnimationFrame(() => {
+      orderTickFrameRef.current = null;
+      setOrderTick((t) => t + 1);
+    });
+  }, []);
+
+  const bumpFinanceTick = useCallback(() => {
+    if (financeTickFrameRef.current != null) return;
+    financeTickFrameRef.current = window.requestAnimationFrame(() => {
+      financeTickFrameRef.current = null;
+      setFinanceTick((t) => t + 1);
+    });
+  }, []);
+
+  const bumpSalesRecordTick = useCallback(() => {
+    if (salesRecordTickFrameRef.current != null) return;
+    salesRecordTickFrameRef.current = window.requestAnimationFrame(() => {
+      salesRecordTickFrameRef.current = null;
+      setSalesRecordTick((t) => t + 1);
+    });
+  }, []);
 
   const reloadOrders = useCallback(async () => {
     const [mgmt, history] = await timeAsync('dashboard.reload-orders.read', () =>
@@ -176,23 +203,25 @@ export function useDashboardData(
   }, [reloadSalesRecords, orderTick, salesRecordTick]);
 
   useEffect(() => {
-    const bumpOrders = () => setOrderTick((t) => t + 1);
-    const bumpSalesRecords = () => setSalesRecordTick((t) => t + 1);
-    window.addEventListener('orderHistoryUpdated', bumpOrders);
-    window.addEventListener('franchiseManagementOrdersUpdated', bumpOrders);
-    window.addEventListener('salesRecordUpdated', bumpSalesRecords);
+    window.addEventListener('orderHistoryUpdated', bumpOrderTick);
+    window.addEventListener('franchiseManagementOrdersUpdated', bumpOrderTick);
+    window.addEventListener('salesRecordUpdated', bumpSalesRecordTick);
     return () => {
-      window.removeEventListener('orderHistoryUpdated', bumpOrders);
-      window.removeEventListener('franchiseManagementOrdersUpdated', bumpOrders);
-      window.removeEventListener('salesRecordUpdated', bumpSalesRecords);
+      window.removeEventListener('orderHistoryUpdated', bumpOrderTick);
+      window.removeEventListener('franchiseManagementOrdersUpdated', bumpOrderTick);
+      window.removeEventListener('salesRecordUpdated', bumpSalesRecordTick);
+      if (orderTickFrameRef.current != null) window.cancelAnimationFrame(orderTickFrameRef.current);
+      if (salesRecordTickFrameRef.current != null) window.cancelAnimationFrame(salesRecordTickFrameRef.current);
     };
-  }, []);
+  }, [bumpOrderTick, bumpSalesRecordTick]);
 
   useEffect(() => {
-    const bumpFinance = () => setFinanceTick((t) => t + 1);
-    window.addEventListener(ACCOUNTING_LEDGER_UPDATED_EVENT, bumpFinance);
-    return () => window.removeEventListener(ACCOUNTING_LEDGER_UPDATED_EVENT, bumpFinance);
-  }, []);
+    window.addEventListener(ACCOUNTING_LEDGER_UPDATED_EVENT, bumpFinanceTick);
+    return () => {
+      window.removeEventListener(ACCOUNTING_LEDGER_UPDATED_EVENT, bumpFinanceTick);
+      if (financeTickFrameRef.current != null) window.cancelAnimationFrame(financeTickFrameRef.current);
+    };
+  }, [bumpFinanceTick]);
 
   const getSalesRecordCached = useCallback(
     (ymd: string, scopeId: string = HQ_SCOPE_ID): SalesRecordDaySnapshot | null => {
