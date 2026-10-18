@@ -529,10 +529,12 @@ function cloneFranchiseManagementOrder(m: FranchiseManagementOrder): FranchiseMa
   };
 }
 
-function readOrderHistoryAllCached(): OrderHistoryEntry[] {
+function readOrderHistoryAllCached(cloneEntries = true): OrderHistoryEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (cachedHistoryAll && raw === cachedHistoryRaw) return cachedHistoryAll.map(cloneHistoryEntry);
+    if (cachedHistoryAll && raw === cachedHistoryRaw) {
+      return cloneEntries ? cachedHistoryAll.map(cloneHistoryEntry) : cachedHistoryAll;
+    }
     if (!raw) {
       cachedHistoryRaw = raw;
       cachedHistoryAll = [];
@@ -546,7 +548,7 @@ function readOrderHistoryAllCached(): OrderHistoryEntry[] {
       : [];
     cachedHistoryRaw = raw;
     cachedHistoryAll = list.map(cloneHistoryEntry);
-    return list.map(cloneHistoryEntry);
+    return cloneEntries ? list.map(cloneHistoryEntry) : cachedHistoryAll;
   } catch {
     cachedHistoryRaw = undefined;
     cachedHistoryAll = null;
@@ -554,11 +556,11 @@ function readOrderHistoryAllCached(): OrderHistoryEntry[] {
   }
 }
 
-function readFranchiseManagementOrdersAllCached(): FranchiseManagementOrder[] {
+function readFranchiseManagementOrdersAllCached(cloneEntries = true): FranchiseManagementOrder[] {
   try {
     const raw = localStorage.getItem(FRANCHISE_MGMT_KEY);
     if (cachedFranchiseMgmtAll && raw === cachedFranchiseMgmtRaw) {
-      return cachedFranchiseMgmtAll.map(cloneFranchiseManagementOrder);
+      return cloneEntries ? cachedFranchiseMgmtAll.map(cloneFranchiseManagementOrder) : cachedFranchiseMgmtAll;
     }
     if (!raw) {
       cachedFranchiseMgmtRaw = raw;
@@ -569,7 +571,7 @@ function readFranchiseManagementOrdersAllCached(): FranchiseManagementOrder[] {
     const list = Array.isArray(parsed) ? parsed.map(normalizeFranchiseManagementOrder) : [];
     cachedFranchiseMgmtRaw = raw;
     cachedFranchiseMgmtAll = list.map(cloneFranchiseManagementOrder);
-    return list.map(cloneFranchiseManagementOrder);
+    return cloneEntries ? list.map(cloneFranchiseManagementOrder) : cachedFranchiseMgmtAll;
   } catch {
     cachedFranchiseMgmtRaw = undefined;
     cachedFranchiseMgmtAll = null;
@@ -1113,8 +1115,11 @@ export function orderLineQtyMapsEqual(a: OrderHistoryLine[], b: OrderHistoryLine
 export function readMergedOrderByIdFromStores(
   id: string,
 ): OrderHistoryEntry | FranchiseManagementOrder | null {
-  const mgmt = loadFranchiseManagementOrdersAll().find((o) => o.id === id);
-  const hist = loadOrderHistoryAllEntries().find((o) => o.id === id);
+  // Single-order reads must not clone every historical order on each keystroke.
+  const mgmtHit = readFranchiseManagementOrdersAllCached(false).find((o) => o.id === id);
+  const histHit = readOrderHistoryAllCached(false).find((o) => o.id === id);
+  const mgmt = mgmtHit ? cloneFranchiseManagementOrder(mgmtHit) : undefined;
+  const hist = histHit ? cloneHistoryEntry(histHit) : undefined;
   if (mgmt && hist) {
     return mergeOrderLikeRecord(
       franchiseMgmtToHistoryEntry(mgmt),

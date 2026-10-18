@@ -150,13 +150,14 @@ function chooseCatalogLine(
   lines: Record<string, SalesRecordDayLine>,
   productId: string,
   productName: string,
+  namesById: ReadonlyMap<string, string>,
 ): SalesRecordDayLine {
   const candidates: SalesRecordDayLine[] = [];
   const direct = lines[productId];
   if (direct) candidates.push(direct);
   for (const [key, line] of Object.entries(lines)) {
     if (key === productId) continue;
-    if (key === productName || getSupplyItem(key)?.name === productName) {
+    if (key === productName || namesById.get(key) === productName) {
       candidates.push(line);
     }
   }
@@ -187,8 +188,10 @@ function catalogLineKeysForProduct(
 
 function mergeSnapshotWithCatalog(snap: SalesRecordDaySnapshot): SalesRecordDaySnapshot {
   const lines: Record<string, SalesRecordDayLine> = { ...snap.lines };
-  for (const it of getAllSupplyItems()) {
-    lines[it.id] = chooseCatalogLine(lines, it.id, it.name);
+  const items = getAllSupplyItems();
+  const namesById = new Map(items.map(item => [item.id, item.name]));
+  for (const it of items) {
+    lines[it.id] = chooseCatalogLine(lines, it.id, it.name, namesById);
   }
   return { ...snap, lines };
 }

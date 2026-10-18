@@ -188,13 +188,14 @@ function chooseCatalogDayLine(
   lines: DaySnapshot['lines'],
   productId: string,
   productName: string,
+  namesById: ReadonlyMap<string, string>,
 ): DayLine {
   const candidates: DayLine[] = [];
   const direct = lines[productId];
   if (direct) candidates.push(direct);
   for (const [key, line] of Object.entries(lines)) {
     if (key === productId) continue;
-    if (key === productName || getSupplyItem(key)?.name === productName) {
+    if (key === productName || namesById.get(key) === productName) {
       candidates.push(line);
     }
   }
@@ -255,8 +256,10 @@ function stampChangedDayFields(
  */
 function mergeDayWithCurrentCatalog(snap: DaySnapshot): DaySnapshot {
   const lines: DaySnapshot['lines'] = { ...snap.lines };
-  for (const it of getAllSupplyItems()) {
-    lines[it.id] = chooseCatalogDayLine(lines, it.id, it.name);
+  const items = getAllSupplyItems();
+  const namesById = new Map(items.map(item => [item.id, item.name]));
+  for (const it of items) {
+    lines[it.id] = chooseCatalogDayLine(lines, it.id, it.name, namesById);
   }
   const gapAmt = (snap.revenueGapAmount ?? '').trim();
   return {
@@ -926,6 +929,21 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
     return mergeDayWithCurrentCatalog(emptyDay());
   }
   const basisIds = normalizeProcurementDeductionBasisOrderIds(o);
+  // Modern orders already own their carry quantities; no historical lookup is needed.
+  if (basisIds.every((id) => o.procurementDeductionAppliedQtyByBasisOrderId?.[id] !== undefined)) {
+    const lines: DaySnapshot['lines'] = {};
+    const productIds = new Set([
+      ...(o.lines ?? []).map((line) => resolveOrderLineProductId(line)),
+      ...basisIds.flatMap((id) => Object.keys(o.procurementDeductionAppliedQtyByBasisOrderId![id])),
+    ]);
+    for (const productId of productIds) {
+      const remain = basisIds.reduce((sum, id) => roundProcurementQty(
+        sum + (o.procurementDeductionAppliedQtyByBasisOrderId![id][productId] ?? 0),
+      ), 0);
+      lines[productId] = { out: '', remain: String(remain) };
+    }
+    return mergeDayWithCurrentCatalog({ ...emptyDay(), lines });
+  }
   let live = mergeDayWithCurrentCatalog(emptyDay());
   for (const bid of basisIds) {
     live = addSnapshots(live, loadDayForProcurementFromOrder(bid));
@@ -935,6 +953,7 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
   if (!orderId || orderLines.length === 0) return live;
 
   const lines: DaySnapshot['lines'] = { ...live.lines };
+  const legacyBasis = new Map<string, { frozen: DaySnapshot; deducted: Record<string, number> }>();
   for (const line of orderLines) {
     const productId = resolveOrderLineProductId(line);
     const orderQty = roundProcurementQty(Number(line.qty) || 0);
@@ -960,8 +979,15 @@ export function loadRemainSnapshotForOrderManagementDisplay(o: {
     const liveRemain = roundProcurementQty(Math.max(0, num(liveLine.remain)));
     if (liveRemain > 0) continue;
     const fallbackCarry = basisIds.reduce((s, bid) => {
-      const frozen = loadStallSalesDisplayFromBasisOrder(bid);
-      const deductedBefore = totalRemainDeductedAgainstBasisOrder(bid, orderId);
+      let basis = legacyBasis.get(bid);
+      if (!basis) {
+        basis = {
+          frozen: loadStallSalesDisplayFromBasisOrder(bid),
+          deducted: totalRemainDeductedAgainstBasisOrder(bid, orderId),
+        };
+        legacyBasis.set(bid, basis);
+      }
+      const { frozen, deducted: deductedBefore } = basis;
       const frozenRemain = frozenRemainQtyForItem(frozen, productId);
       const poolAtOrder = roundProcurementQty(
         Math.max(0, frozenRemain - (deductedBefore[productId] ?? 0)),

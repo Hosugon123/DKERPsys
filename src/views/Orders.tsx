@@ -1760,6 +1760,95 @@ const OrderStatusFilterTabs = memo(function OrderStatusFilterTabs({
   );
 });
 
+const PickingOrderLineRow = memo(function PickingOrderLineRow({
+  line, origQ, unitForRow, sub, idx, hideOrderBatchPriceFromEmployee, bumpPickingQty, setPickingQtyInput,
+}: {
+  line: OrderHistoryLine; origQ: number; unitForRow: number; sub: number; idx: number;
+  hideOrderBatchPriceFromEmployee: boolean;
+  bumpPickingQty: (index: number, delta: number) => void;
+  setPickingQtyInput: (index: number, raw: string) => void;
+}) {
+  return (
+    <tr className="hover:bg-zinc-800/20">
+      <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
+        <div className="font-medium text-[#f5f2ed]">{line.name}</div>
+        <div className="text-[1.14075rem] text-zinc-500">
+          原叫貨 {origQ} {line.unit}
+          <LiangJinQtyHint liangQty={origQ} pieceUnit={line.unit} className="text-[15.21px]" />
+          {hideOrderBatchPriceFromEmployee ? (
+            <>
+              ・預估零售單價 ${unitForRow.toLocaleString('zh-TW')}／{line.unit}
+            </>
+          ) : (
+            <>
+              ・單價 $ {line.unitPrice}
+            </>
+          )}
+        </div>
+      </td>
+      <td className="py-2 px-2 sm:px-4 align-top whitespace-nowrap">
+        <div className="flex flex-col items-center gap-0.5 min-w-[10.5rem] w-full max-w-[14rem] mx-auto">
+          <div className="flex items-center justify-center gap-1 w-full">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                bumpPickingQty(idx, -1);
+              }}
+              disabled={line.qty <= 0}
+              className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="減一"
+            >
+              <Minus size={24} />
+            </button>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={String(line.qty)}
+              onChange={(e) => {
+                e.stopPropagation();
+                setPickingQtyInput(idx, e.target.value);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => e.target.select()}
+              className="min-w-[4.25rem] w-16 max-w-[7rem] shrink-0 text-center text-[1.521rem] font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
+              aria-label={`${line.name} 叫貨數量，0～${PICK_MAX_Q.toLocaleString()}`}
+            />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                bumpPickingQty(idx, 1);
+              }}
+              disabled={line.qty >= PICK_MAX_Q}
+              className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="加一"
+            >
+              <Plus size={24} />
+            </button>
+          </div>
+          <LiangJinQtyHint
+            liangQty={line.qty}
+            pieceUnit={line.unit}
+            className="text-[15.21px] text-zinc-500"
+          />
+        </div>
+      </td>
+      <td
+        className={cn(
+          'py-2.5 sm:py-3 px-3 sm:px-4 text-right tabular-nums align-top',
+          hideOrderBatchPriceFromEmployee
+            ? 'text-emerald-400/95'
+            : 'text-zinc-200',
+        )}
+      >
+        $ {Math.round(sub * 100) / 100}
+      </td>
+    </tr>
+  );
+});
+
+
 export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const restoredLineEdit = useRestoreWorkDraft<OrdersLineEditDraft>(WORK_DRAFT_IDS.ordersLineEdit);
   const isHeadquarters = userRole === 'admin';
@@ -1875,9 +1964,11 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       loadHistorySliceForRole(userRole),
       ordersApi.listOrdersWithStallCountCompleted(),
     ]);
-    setMgmtOrders(mgmt);
-    setHistoryOrders(hist);
-    setBasisOrdersList(basisOrders.filter((o) => orderMatchesProcurementSoldReferenceScope(o)));
+    startTransition(() => {
+      setMgmtOrders(mgmt);
+      setHistoryOrders(hist);
+      setBasisOrdersList(basisOrders.filter((o) => orderMatchesProcurementSoldReferenceScope(o)));
+    });
   }, [userRole]);
 
   const syncOrders = useCallback(async () => {
@@ -1902,16 +1993,36 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   }, [userRole, syncOrders]);
 
   useEffect(() => {
-    const h = () => syncOrders();
+    let timer: number | undefined;
+    const relevantKeys = new Set([
+      'dongshan_order_history_v1', 'dongshan_franchise_mgmt_orders_v1',
+      'dongshan_sales_records_v1', 'dongshan_stall_inventory_v1',
+      'dongshan_user_catalog_v2', 'dongshan_system_users_v1',
+    ]);
+    const h = (event: Event) => {
+      if (event instanceof StorageEvent && event.key !== null && !relevantKeys.has(event.key)) return;
+      // A bundle import emits several events; reload once after the batch settles.
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void reloadOrdersFromLocal(), 80);
+    };
     window.addEventListener('franchiseManagementOrdersUpdated', h);
     window.addEventListener('orderHistoryUpdated', h);
+    window.addEventListener('salesRecordUpdated', h);
+    window.addEventListener('stallInventoryUpdated', h);
+    window.addEventListener('supplyCatalogUpdated', h);
+    window.addEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, h);
     window.addEventListener('storage', h);
     return () => {
+      window.clearTimeout(timer);
       window.removeEventListener('franchiseManagementOrdersUpdated', h);
       window.removeEventListener('orderHistoryUpdated', h);
+      window.removeEventListener('salesRecordUpdated', h);
+      window.removeEventListener('stallInventoryUpdated', h);
+      window.removeEventListener('supplyCatalogUpdated', h);
+      window.removeEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, h);
       window.removeEventListener('storage', h);
     };
-  }, [syncOrders]);
+  }, [reloadOrdersFromLocal]);
 
   const rawList: RawOrder[] = useMemo(
     () => mergeRawOrdersForDisplay(mgmtOrders, historyOrders),
@@ -2107,6 +2218,27 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
       }),
     [paginatedOrders, pageFinancialsById],
   );
+
+  // Keep expensive snapshot/legacy-carry work out of input and modal renders.
+  const expandedOrderDetail = useMemo(() => {
+    if (!expandedOrderId) return null;
+    const raw = rawById.get(expandedOrderId);
+    const order = ordersData.find(row => row.id === expandedOrderId);
+    if (!order) return null;
+    const stallSnap = raw ? mergeOrderStallSnapshot(raw) : null;
+    const carrySnap = raw ? loadRemainSnapshotForOrderManagementDisplay(raw) : null;
+    const lines = buildOrderExpandedDetailLines(order, raw, catalogItemsForOrderDetail, supplyRetailView);
+    const hasDeduction = raw ? normalizeProcurementDeductionBasisOrderIds(raw).length > 0 : false;
+    const metrics = lines.map(line => computeOrderDetailLineMetrics(
+      line, stallSnap, carrySnap, supplyRetailView, hasDeduction,
+    ));
+    return {
+      lines,
+      metrics,
+      retailTotal: Math.round(metrics.reduce((sum, row) => sum + row.retailEstSub, 0) * 100) / 100,
+      printLines: buildOrderPrintSlipLines(lines),
+    };
+  }, [expandedOrderId, rawById, ordersData, catalogItemsForOrderDetail, supplyRetailView]);
 
   useEffect(() => {
     if (expandedOrderId && !filteredOrders.some((o) => o.id === expandedOrderId)) {
@@ -2394,12 +2526,6 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
     supplyRetailView,
   ]);
 
-  useEffect(() => {
-    const onImported = () => void syncOrders();
-    window.addEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, onImported);
-    return () => window.removeEventListener(DONGSHAN_DATA_BUNDLE_IMPORTED_EVENT, onImported);
-  }, [syncOrders]);
-
   /** 調整叫貨量後自動寫入訂單，避免未按「儲存貨量」就離開導致回溯 */
   useEffect(() => {
     if (!pickingOrderId) return;
@@ -2459,7 +2585,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
     })();
   };
 
-  const bumpPickingQty = (index: number, delta: number) => {
+  const bumpPickingQty = useCallback((index: number, delta: number) => {
     setPickingLines((prev) =>
       prev.map((l, i) => {
         if (i !== index) return l;
@@ -2467,12 +2593,12 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         return { ...l, qty: next };
       })
     );
-  };
+  }, []);
 
-  const setPickingQtyInput = (index: number, rawStr: string) => {
+  const setPickingQtyInput = useCallback((index: number, rawStr: string) => {
     const n = parsePickQty(rawStr);
     setPickingLines((prev) => prev.map((l, i) => (i === index ? { ...l, qty: n } : l)));
-  };
+  }, []);
 
   const applyDeleteOrder = () => {
     if (!deleteModal) return;
@@ -2711,9 +2837,6 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         {displayOrders.map((order) => {
           const raw = rawById.get(order.id);
           const isExpanded = expandedOrderId === order.id;
-          const stallSnap = isExpanded && raw ? mergeOrderStallSnapshot(raw) : null;
-          const carrySnapForDisplay =
-            isExpanded && raw ? loadRemainSnapshotForOrderManagementDisplay(raw) : null;
           const canEdit = canEditOrderInList(raw, userRole);
           const isPickingThis =
             canEdit && pickingOrderId === order.id && order.status !== '已取消';
@@ -2723,46 +2846,20 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
             (order.status === '待出貨' || order.status === '已完成');
           const expandedDetailLinesForTable =
             isExpanded && !isPickingThis && !isPriceAdjustThis
-              ? buildOrderExpandedDetailLines(order, raw, catalogItemsForOrderDetail, supplyRetailView)
+              ? expandedOrderDetail?.lines ?? null
               : null;
           const deductionBasisIds = raw ? normalizeProcurementDeductionBasisOrderIds(raw) : [];
           const orderRetailEstFooterTotal =
             showOrderProcurementSubtotalCol && expandedDetailLinesForTable
-              ? Math.round(
-                  expandedDetailLinesForTable.reduce(
-                    (s, line) =>
-                      s +
-                      computeOrderDetailLineMetrics(
-                        line,
-                        stallSnap,
-                        carrySnapForDisplay,
-                        supplyRetailView,
-                        deductionBasisIds.length > 0,
-                      ).retailEstSub,
-                    0,
-                  ) * 100,
-                ) / 100
+              ? expandedOrderDetail!.retailTotal
               : null;
           const orderDetailRetailEstFooterEmployee =
             hideOrderBatchPriceFromEmployee && expandedDetailLinesForTable
-              ? Math.round(
-                  expandedDetailLinesForTable.reduce(
-                    (s, line) =>
-                      s +
-                      computeOrderDetailLineMetrics(
-                        line,
-                        stallSnap,
-                        carrySnapForDisplay,
-                        supplyRetailView,
-                        deductionBasisIds.length > 0,
-                      ).retailEstSub,
-                    0,
-                  ) * 100,
-                ) / 100
+              ? expandedOrderDetail!.retailTotal
               : null;
           const printSlipLines =
             expandedDetailLinesForTable && !isPickingThis && !isPriceAdjustThis
-              ? buildOrderPrintSlipLines(expandedDetailLinesForTable)
+              ? expandedOrderDetail!.printLines
               : [];
           const pickPersistLines =
             isPickingThis && raw ? buildPickingPersistLines(raw, pickingLines) : pickingLines;
@@ -3294,82 +3391,11 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                   hideOrderBatchPriceFromEmployee ? line.qty : persistLine.qty;
                                 const sub = Math.round(unitForRow * qtyForSubtotal * 100) / 100;
                                 return (
-                                  <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/20">
-                                    <td className="py-2.5 sm:py-3 px-3 sm:px-4 align-top">
-                                      <div className="font-medium text-[#f5f2ed]">{line.name}</div>
-                                      <div className="text-[1.14075rem] text-zinc-500">
-                                        原叫貨 {origQ} {line.unit}
-                                        <LiangJinQtyHint liangQty={origQ} pieceUnit={line.unit} className="text-[15.21px]" />
-                                        {hideOrderBatchPriceFromEmployee ? (
-                                          <>
-                                            ・預估零售單價 ${unitForRow.toLocaleString('zh-TW')}／{line.unit}
-                                          </>
-                                        ) : (
-                                          <>
-                                            ・單價 $ {line.unitPrice}
-                                          </>
-                                        )}
-                                      </div>
-                                    </td>
-                                    <td className="py-2 px-2 sm:px-4 align-top whitespace-nowrap">
-                                      <div className="flex flex-col items-center gap-0.5 min-w-[10.5rem] w-full max-w-[14rem] mx-auto">
-                                        <div className="flex items-center justify-center gap-1 w-full">
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            bumpPickingQty(idx, -1);
-                                          }}
-                                          disabled={line.qty <= 0}
-                                          className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                          aria-label="減一"
-                                        >
-                                          <Minus size={24} />
-                                        </button>
-                                        <input
-                                          type="text"
-                                          inputMode="numeric"
-                                          value={String(line.qty)}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setPickingQtyInput(idx, e.target.value);
-                                          }}
-                                          onClick={(e) => e.stopPropagation()}
-                                          onFocus={(e) => e.target.select()}
-                                          className="min-w-[4.25rem] w-16 max-w-[7rem] shrink-0 text-center text-[1.521rem] font-bold tabular-nums text-amber-200 bg-zinc-900/80 border border-zinc-600 rounded py-1.5 px-1 box-border"
-                                          aria-label={`${line.name} 叫貨數量，0～${PICK_MAX_Q.toLocaleString()}`}
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            bumpPickingQty(idx, 1);
-                                          }}
-                                          disabled={line.qty >= PICK_MAX_Q}
-                                          className="shrink-0 p-1.5 rounded border border-zinc-600 text-amber-500 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                          aria-label="加一"
-                                        >
-                                          <Plus size={24} />
-                                        </button>
-                                        </div>
-                                        <LiangJinQtyHint
-                                          liangQty={line.qty}
-                                          pieceUnit={line.unit}
-                                          className="text-[15.21px] text-zinc-500"
-                                        />
-                                      </div>
-                                    </td>
-                                    <td
-                                      className={cn(
-                                        'py-2.5 sm:py-3 px-3 sm:px-4 text-right tabular-nums align-top',
-                                        hideOrderBatchPriceFromEmployee
-                                          ? 'text-emerald-400/95'
-                                          : 'text-zinc-200',
-                                      )}
-                                    >
-                                      $ {Math.round(sub * 100) / 100}
-                                    </td>
-                                  </tr>
+                                  <PickingOrderLineRow key={line.productId + String(idx)}
+                                    line={line} origQ={origQ} unitForRow={unitForRow} sub={sub} idx={idx}
+                                    hideOrderBatchPriceFromEmployee={hideOrderBatchPriceFromEmployee}
+                                    bumpPickingQty={bumpPickingQty} setPickingQtyInput={setPickingQtyInput}
+                                  />
                                 );
                               })
                             : isPriceAdjustThis
@@ -3430,13 +3456,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
                                 })
                             : expandedDetailLinesForTable
                               ? expandedDetailLinesForTable.map((line, idx) => {
-                                  const d = computeOrderDetailLineMetrics(
-                                    line,
-                                    stallSnap,
-                                    carrySnapForDisplay,
-                                    supplyRetailView,
-                                    deductionBasisIds.length > 0,
-                                  );
+                                  const d = expandedOrderDetail!.metrics[idx];
                                   return (
                                     <tr key={line.productId + String(idx)} className="hover:bg-zinc-800/30">
                                       <td className="py-2 sm:py-2.5 px-1.5 sm:px-2 align-top max-md:relative max-md:left-auto max-md:z-0 max-md:shadow-none md:sticky md:left-0 md:z-[2] bg-zinc-900 md:shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)] w-[14%] sm:w-[15.4%] md:w-[16.8%] md:min-w-[4.725rem]">
