@@ -264,6 +264,7 @@ export default async function handler(req, res) {
   perf.attach(res);
   let statusCode = 500;
   let writeAudit;
+  let stage = 'authorization';
   try {
     res.setHeader('Cache-Control', 'no-store');
     if (!originAllowed(req)) {
@@ -278,9 +279,11 @@ export default async function handler(req, res) {
       return unauthorized(res);
     }
 
+    stage = 'redis_connect';
     const redis = await perf.time('redis_ready', () => getRedis(perf));
 
     if (req.method === 'GET') {
+      stage = 'redis_read';
       const raw = await perf.time('redis_get', () => redis.get(KV_KEY));
       perf.mark('redis_get_bytes', 0, { chars: typeof raw === 'string' ? raw.length : 0 });
       const stored = await perf.time('json_parse', async () => parseJsonBodyMaybe(raw));
@@ -292,6 +295,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
+      stage = 'body_decode';
       let body;
       try {
         body = await perf.time('body_parse', async () => decodeSyncRequest(parseJsonBodyMaybe(req.body)), {
@@ -320,6 +324,7 @@ export default async function handler(req, res) {
           ? body.syncedFromUpdatedAt
           : incomingUpdatedAt;
 
+      stage = 'redis_read_before_write';
       const rawCloud = await perf.time('redis_get_before_put', () => redis.get(KV_KEY));
       perf.mark('redis_get_before_put_bytes', 0, { chars: typeof rawCloud === 'string' ? rawCloud.length : 0 });
       const cloudBundle = await perf.time('json_parse_cloud', async () => parseJsonBodyMaybe(rawCloud));
@@ -356,12 +361,14 @@ export default async function handler(req, res) {
         storedBundle.keys.dongshan_data_archives_v1 = cloudBundle.keys.dongshan_data_archives_v1;
       }
 
+      stage = 'serialize_write';
       const storedText = stringifyJsonMeasured(perf, 'json_stringify_store', storedBundle);
       perf.mark('redis_set_bytes', 0, {
         chars: storedText.length,
         partial: Array.isArray(partialKeys),
         partialKeyCount: partialKeys?.length ?? 0,
       });
+      stage = 'redis_compare_and_set';
       const saved = await perf.time('redis_compare_and_set', () => redis.eval(COMPARE_AND_SET_BUNDLE, {
         keys: [KV_KEY],
         arguments: [rawCloud == null ? '0' : '1', rawCloud ?? '', storedText],
@@ -376,6 +383,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'method not allowed' });
   } catch (e) {
     statusCode = 500;
+    const message = (e instanceof Error ? e.message : String(e))
+      .replace(/rediss?:\/\/\S+/gi, '[redacted-redis-url]').slice(0, 600);
+    console.error('[sync-failure]', { requestId, method: req.method, stage, name: e?.name, message });
     return internalError(res, e);
   } finally {
     if (writeAudit) console.info('[sync-write]', { ...writeAudit, statusCode: res.statusCode || statusCode });
