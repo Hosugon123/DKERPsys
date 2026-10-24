@@ -53,6 +53,7 @@ let lastStatus: RemoteSyncStatus = 'idle';
 /** 本機最後一次成功套用之雲端 bundle.updatedAt（用於 PUT 防撞） */
 let lastRemoteUpdatedAt = 0;
 let remoteSyncLocked = false;
+let activePushes = 0;
 
 let pushChain: Promise<void> = Promise.resolve();
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -88,13 +89,21 @@ export function isRemoteSyncLocked(): boolean {
 
 /** 是否有已排程但尚未推送的雲端變更（含去抖動計時中）。 */
 export function hasPendingRemotePush(): boolean {
-  return pendingAfterText != null || debounceTimer != null || readPersistedPendingKeys().length > 0;
+  return activePushes > 0 || pendingAfterText != null || debounceTimer != null || readPersistedPendingKeys().length > 0;
+}
+
+export function isRemoteBundleStale(bundle: DongshanDataBundleV1): boolean {
+  return (bundle.updatedAt ?? 0) < lastRemoteUpdatedAt;
+}
+
+export function acknowledgeAppliedRemoteBundle(bundle: DongshanDataBundleV1): void {
+  noteRemoteBundleUpdatedAt(bundle);
 }
 
 function noteRemoteBundleUpdatedAt(bundle: DongshanDataBundleV1 | null | undefined): void {
   const ts = bundle?.updatedAt;
   if (typeof ts === 'number' && Number.isFinite(ts) && ts >= 0) {
-    lastRemoteUpdatedAt = ts;
+    lastRemoteUpdatedAt = Math.max(lastRemoteUpdatedAt, ts);
   }
 }
 
@@ -238,7 +247,6 @@ export async function fetchRemoteBundle(): Promise<DongshanDataBundleV1> {
       serverTiming: res.headers.get('server-timing'),
     },
   });
-  noteRemoteBundleUpdatedAt(body.bundle);
   return body.bundle;
 }
 
@@ -288,22 +296,25 @@ export async function pushRemoteBundle(
   }
 
   if (!res.ok) {
-    throw Object.assign(new Error(`PUT ${res.status}`), { syncStatus: statusFromResponse(res) });
+    const requestId = res.headers.get('x-dongshan-sync-id');
+    throw Object.assign(new Error(`PUT ${res.status}${requestId ? `（同步編號 ${requestId}）` : ''}`), { syncStatus: statusFromResponse(res) });
   }
 
-  noteRemoteBundleUpdatedAt(fullBundle);
+  const receipt = await res.json().catch(() => null) as { updatedAt?: number } | null;
+  noteRemoteBundleUpdatedAt({ ...fullBundle, updatedAt: receipt?.updatedAt ?? fullBundle.updatedAt });
 }
 
 async function mergeCloudWithLocalDirty(
-  localBundleText: string,
   dirtyKeys: readonly DongshanStorageKey[],
 ): Promise<string> {
   const cloud = await fetchRemoteBundle();
+  if (isRemoteBundleStale(cloud)) throw new RemoteVersionConflictError();
   const local = timeSync('remote.merge.parse-local-bundle', () =>
-    parseBundleJson(localBundleText) as DongshanDataBundleV1,
+    buildDongshanDataBundle(),
   );
+  const allDirty = [...new Set([...dirtyKeys, ...pendingDirtyKeys, ...readPersistedPendingKeys()])];
   const merged = timeSync('remote.merge.local-wins-dirty', () =>
-    mergeDongshanBundlesLocalWinsDirty(local, cloud, dirtyKeys),
+    mergeDongshanBundlesLocalWinsDirty(local, cloud, allDirty),
   );
   const result = timeSync('remote.merge.import-bundle', () => importDongshanDataBundle(merged));
   if (result.ok === false) {
@@ -314,6 +325,18 @@ async function mergeCloudWithLocalDirty(
 }
 
 async function pushBundleTextWithAutoMerge(
+  bundleText: string,
+  dirtyKeys: readonly DongshanStorageKey[],
+): Promise<void> {
+  activePushes++;
+  try {
+    await pushBundleTextWithAutoMergeImpl(bundleText, dirtyKeys);
+  } finally {
+    activePushes--;
+  }
+}
+
+async function pushBundleTextWithAutoMergeImpl(
   bundleText: string,
   dirtyKeys: readonly DongshanStorageKey[],
 ): Promise<void> {
@@ -341,7 +364,7 @@ async function pushBundleTextWithAutoMerge(
       if (attempt >= MAX_CONFLICT_MERGE_RETRIES) {
         throw e;
       }
-      text = await mergeCloudWithLocalDirty(text, dirty);
+      text = await mergeCloudWithLocalDirty(dirty);
     }
   }
 }
@@ -371,6 +394,7 @@ function scheduleDebouncedPushWithDirty(
   dirtyKeys?: readonly DongshanStorageKey[],
 ): void {
   for (const k of dirtyKeys ?? []) pendingDirtyKeys.add(k);
+  persistPendingKeys([...pendingDirtyKeys]);
   pendingAfterText = afterText;
 
   if (debounceTimer != null) {
@@ -396,7 +420,8 @@ function enqueuePendingPushNow(): void {
 
 async function flushDebouncedPush(bundleText: string, dirtyKeys: DongshanStorageKey[]): Promise<void> {
   try {
-    await pushBundleTextWithAutoMerge(bundleText, dirtyKeys);
+    // Queued snapshots can predate a conflict merge or a newer local order.
+    await pushBundleTextWithAutoMerge(serializeDongshanDataBundle(), dirtyKeys);
   } catch (e) {
     requeueFailedPush(bundleText, dirtyKeys, e);
     applySyncFailureFromUnknown(e);
@@ -469,6 +494,7 @@ export async function refreshRemoteBundleVersionIfStale(): Promise<void> {
   lastVisibilityRefreshMs = now;
   try {
     const cloud = await fetchRemoteBundle();
+    if (hasUnsavedWork() || hasPendingRemotePush() || isRemoteBundleStale(cloud)) return;
     if (isRemoteBundleEffectivelyEmpty(cloud)) {
       dispatchStatus('ok');
       return;
@@ -499,6 +525,7 @@ export async function refreshRemoteBundleNow(action = '讀取最新雲端資料'
 
   try {
     const cloud = await fetchRemoteBundle();
+    if (hasUnsavedWork() || hasPendingRemotePush() || isRemoteBundleStale(cloud)) return false;
     if (isRemoteBundleEffectivelyEmpty(cloud)) {
       dispatchStatus('ok');
       return true;

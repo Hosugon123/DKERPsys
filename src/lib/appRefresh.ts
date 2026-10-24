@@ -6,6 +6,8 @@ import { getStorageMode } from '../services/storageMode';
 import {
   fetchRemoteBundle,
   hasPendingRemotePush,
+  isRemoteBundleStale,
+  acknowledgeAppliedRemoteBundle,
 } from '../services/remoteSyncHub';
 import {
   buildDongshanDataBundle,
@@ -41,6 +43,7 @@ export function reloadAppShell(): void {
 export async function refreshAppPageData(options?: RefreshAppPageOptions): Promise<void> {
   if (getStorageMode() === 'remote') {
     const cloud = await fetchRemoteBundle();
+    if (isRemoteBundleStale(cloud)) return;
     const local = buildDongshanDataBundle();
     const dirty =
       hasUnsavedWork() || hasPendingRemotePush() ? [...DONGSHAN_EXPORT_STORAGE_KEYS] : [];
@@ -49,6 +52,7 @@ export async function refreshAppPageData(options?: RefreshAppPageOptions): Promi
     if (result.ok === false) {
       throw new Error(result.error);
     }
+    acknowledgeAppliedRemoteBundle(cloud);
   } else {
     dispatchDongshanStorageSyncEvents();
   }

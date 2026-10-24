@@ -418,14 +418,10 @@ export const orders = {
     stallDaySnap: stallInventory.DaySnapshot;
     scopeId?: string;
   }): Promise<stallInventory.CommitStallInventoryCompleteResult> {
-    const res = await withUiRemoteStorageWrite(() =>
+    return withUiRemoteStorageWriteNow(() =>
       stallInventory.commitStallInventoryComplete(params),
       '完成攤上盤點',
     );
-    if (res.ok && getStorageMode() === 'remote') {
-      void awaitRemotePushIdle();
-    }
-    return res;
   },
   async updateStallCountSnapshotByOrderId(
     orderId: string,

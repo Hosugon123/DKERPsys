@@ -1215,21 +1215,41 @@ export function commitStallInventoryComplete(params: {
   if (!readMergedOrderByIdFromStores(orderId)) {
     return { ok: false, reason: 'order_not_found' };
   }
-  const okStamp = setOrderStallCountStamp(orderId, {
-    basisYmd,
-    completedAt,
-    snapshot: recordSnap,
-  });
-  if (!okStamp) return { ok: false, reason: 'stamp_failed' };
+  const keys = ['dongshan_order_history_v1', 'dongshan_franchise_mgmt_orders_v1', KEY, 'dongshan_sales_records_v1'];
+  const before = new Map(keys.map((key) => [key, localStorage.getItem(key)]));
+  const rollback = () => {
+    const changed = keys.filter((key) => localStorage.getItem(key) !== before.get(key));
+    // Free the partial writes first so restoring the earlier values also works near quota.
+    for (const key of changed) localStorage.removeItem(key);
+    for (const key of changed) {
+      const value = before.get(key);
+      if (value != null) localStorage.setItem(key, value);
+    }
+    for (const event of ['orderHistoryUpdated', 'franchiseManagementOrdersUpdated', 'stallInventoryUpdated', 'salesRecordUpdated']) {
+      window.dispatchEvent(new Event(event));
+    }
+  };
+  try {
+    const okStamp = setOrderStallCountStamp(orderId, { basisYmd, completedAt, snapshot: recordSnap });
+    if (!okStamp) {
+      rollback();
+      return { ok: false, reason: 'stamp_failed' };
+    }
+    saveDay(basisYmd, stallDaySnap, scopeId);
+    saveSalesRecord(basisYmd, recordSnap, scopeId);
 
-  saveDay(basisYmd, stallDaySnap, scopeId);
-  saveSalesRecord(basisYmd, recordSnap, scopeId);
-
-  const merged = readMergedOrderByIdFromStores(orderId);
-  if (!stallCountSnapshotPersistedMatches(merged?.stallCountSnapshot, recordSnap)) {
-    return { ok: false, reason: 'persist_mismatch' };
+    const merged = readMergedOrderByIdFromStores(orderId);
+    if (!stallCountSnapshotPersistedMatches(merged?.stallCountSnapshot, recordSnap) ||
+        !stallCountSnapshotPersistedMatches(getSalesRecord(basisYmd, scopeId), recordSnap) ||
+        !stallCountSnapshotPersistedMatches(readStallDay(loadAll(), basisYmd, scopeId), stallDaySnap)) {
+      rollback();
+      return { ok: false, reason: 'persist_mismatch' };
+    }
+    return { ok: true };
+  } catch (error) {
+    rollback();
+    throw error;
   }
-  return { ok: true };
 }
 
 export type StallOrderForDateRow = {

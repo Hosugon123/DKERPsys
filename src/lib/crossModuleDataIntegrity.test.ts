@@ -147,6 +147,31 @@ describe('跨模組資料一致性', () => {
       expect(stallCountSnapshotPersistedMatches(orderSnap, snap)).toBe(true);
       expect(getSalesRecord(BASIS_YMD)?.actualRevenue).toBe(snap.actualRevenue);
     });
+
+    it.each(['dongshan_stall_inventory_v1', 'dongshan_sales_records_v1'])(
+      '盤點寫入 %s 失敗時不留下只有押記的半套資料', (failedKey) => {
+        appendProcurementOrderEntry({ lines: ORDER_LINES, totalAmount: 1000, actorRole: 'admin', orderDateYmd: BASIS_YMD });
+        updateOrderStatusInEitherStore('ORD-20260603-001', '已完成');
+        const keys = ['dongshan_order_history_v1', 'dongshan_franchise_mgmt_orders_v1', 'dongshan_stall_inventory_v1', 'dongshan_sales_records_v1'];
+        const before = keys.map((key) => localStorage.getItem(key));
+        const original = Storage.prototype.setItem;
+        let failed = false;
+        const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+          if (key === failedKey && !failed) { failed = true; throw new Error('forced storage failure'); }
+          original.call(this, key, value);
+        });
+        const snapshot = makeSnapshot();
+        try {
+          expect(() => commitStallInventoryComplete({
+            orderId: 'ORD-20260603-001', basisYmd: BASIS_YMD, completedAt: snapshot.updatedAt,
+            recordSnap: snapshot, stallDaySnap: snapshot,
+          })).toThrow('forced storage failure');
+        } finally { write.mockRestore(); }
+        expect(keys.map((key) => localStorage.getItem(key))).toEqual(before);
+        expect(readMergedOrderByIdFromStores('ORD-20260603-001')?.stallCountCompletedAt).toBeFalsy();
+        expect(getSalesRecord(BASIS_YMD)).toBeNull();
+      },
+    );
   });
 
   describe('叫貨與流水帳脫鉤', () => {

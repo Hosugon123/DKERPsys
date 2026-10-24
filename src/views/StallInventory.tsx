@@ -48,6 +48,7 @@ import type { SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { buildStallGapLedgerDraftInput } from '../lib/procurementLedgerDraft';
 import { resolveOrderStallStorageScopeId } from '../lib/scopedStallDateKey';
 import { cn } from '../lib/utils';
+import { RemoteWritePendingError } from '../lib/remoteWritePendingError';
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import {
@@ -374,6 +375,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     setStallCountSubmitting(true);
     void (async () => {
       try {
+        let pendingSync = false;
         const res = await ordersApi.commitStallInventoryComplete({
           orderId: viewOrderId,
           basisYmd: stampBasisYmd,
@@ -381,13 +383,20 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           recordSnap: recordSnapAligned,
           stallDaySnap: dayToSave,
           scopeId: stallScopeId,
+        }).catch((error: unknown) => {
+          if (error instanceof RemoteWritePendingError && error.localResult &&
+              typeof error.localResult === 'object' && 'ok' in error.localResult && error.localResult.ok === true) {
+            pendingSync = true;
+            return error.localResult as { ok: true };
+          }
+          throw error;
         });
         if (res.ok === false) {
           const msg =
             res.reason === 'order_not_found'
               ? '找不到訂單，可能已被刪除或同步覆蓋。請重新選擇訂單後再試。'
               : res.reason === 'persist_mismatch'
-                ? '盤點已寫入但驗證不一致，請重新整理後確認銷售紀錄是否已出現。'
+                ? '盤點資料驗證不一致，已還原此次寫入。請保留輸入內容並聯絡管理員確認。'
                 : '寫入訂單押記失敗（無權限或訂單不存在）。請確認訂單仍在本機。';
           setRecomputeMsg(msg);
           setTimeout(() => setRecomputeMsg(null), 8000);
@@ -405,10 +414,14 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         setStallListTick((n) => n + 1);
         stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
         clearWorkDraft(WORK_DRAFT_IDS.stallInventory);
-        setSaveFlash(true);
-        setTimeout(() => setSaveFlash(false), 2500);
+        if (!pendingSync) {
+          setSaveFlash(true);
+          setTimeout(() => setSaveFlash(false), 2500);
+        }
         setStallCountConfirmOpen(false);
-        if (ledgerSyncFailed) {
+        if (pendingSync) {
+          setRecomputeMsg(`盤點已儲存在此裝置，但尚未完成雲端同步，系統會重試。請勿重複盤點或清除網站資料。${ledgerSyncFailed ? '落差流水帳未寫入，請確認後補登。' : ''}`);
+        } else if (ledgerSyncFailed) {
           setRecomputeMsg('盤點已完成，但落差同步至流水帳失敗；請稍後手動補登流水帳。');
           setTimeout(() => setRecomputeMsg(null), 8000);
         }

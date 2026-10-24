@@ -12,6 +12,13 @@ vi.mock('redis', () => ({
     connect: vi.fn(),
     get: async () => db.value,
     set: async (_key: string, value: string) => { db.value = value; db.writes++; },
+    eval: async (_script: string, options: { arguments: string[] }) => {
+      const [exists, expected, value] = options.arguments;
+      if ((db.value !== null) !== (exists === '1') || (db.value !== null && db.value !== expected)) return 0;
+      db.value = value;
+      db.writes++;
+      return 1;
+    },
   }),
 }));
 
@@ -52,7 +59,9 @@ describe('compressed sync API compatibility and data integrity', () => {
     const wire = await encodeSyncRequest(raw);
     expect(JSON.parse(wire).encoding).toBe(SYNC_ENCODING);
     expect(Buffer.byteLength(wire)).toBeLessThan(4_000_000);
-    expect((await request('PUT', wire)).statusCode).toBe(200);
+    const receipt = await request('PUT', wire);
+    expect(receipt.statusCode).toBe(200);
+    value.updatedAt = (receipt.body as { updatedAt: number }).updatedAt;
     expect(JSON.parse(db.value!)).toEqual(value);
     const response = await request('GET', undefined, { 'x-dongshan-sync-encoding': SYNC_ENCODING });
     expect((response.body as { encoding: string }).encoding).toBe(SYNC_ENCODING);
@@ -61,8 +70,39 @@ describe('compressed sync API compatibility and data integrity', () => {
 
   it('still accepts legacy uncompressed requests and returns legacy responses', async () => {
     const value = bundle({ orders: '[]' });
-    expect((await request('PUT', { bundle: value })).statusCode).toBe(200);
+    const receipt = await request('PUT', { bundle: value });
+    expect(receipt.statusCode).toBe(200);
+    value.updatedAt = (receipt.body as { updatedAt: number }).updatedAt;
     expect((await request('GET')).body).toEqual({ ok: true, bundle: value });
+  });
+
+  it('allows only one concurrent writer and preserves both stores after the conflict retry', async () => {
+    db.value = JSON.stringify(bundle({ orders: '[]', sales: '{}' }, 20));
+    const a = { bundle: bundle({ orders: '["三民新訂單"]' }, 30), partialKeys: ['orders'], syncedFromUpdatedAt: 20 };
+    const b = { bundle: bundle({ sales: '{"三民":"已盤點"}' }, 30), partialKeys: ['sales'], syncedFromUpdatedAt: 20 };
+    const results = await Promise.all([request('PUT', a), request('PUT', b)]);
+    expect(results.map((res) => res.statusCode).sort()).toEqual([200, 409]);
+    const loser = results[0].statusCode === 409 ? a : b;
+    loser.syncedFromUpdatedAt = JSON.parse(db.value!).updatedAt;
+    expect((await request('PUT', loser)).statusCode).toBe(200);
+    expect(JSON.parse(db.value!).keys).toEqual({ ...a.bundle.keys, ...b.bundle.keys });
+  });
+
+  it('rejects a sequential stale write even if two clients use the exact same millisecond timestamp', async () => {
+    db.value = JSON.stringify(bundle({ orders: '[]' }, 20));
+    const a = { bundle: bundle({ orders: '["第一張"]' }, 20), syncedFromUpdatedAt: 20 };
+    expect((await request('PUT', a)).statusCode).toBe(200);
+    const b = { bundle: bundle({ orders: '["另一台的舊資料"]' }, 20), syncedFromUpdatedAt: 20 };
+    expect((await request('PUT', b)).statusCode).toBe(409);
+    expect(JSON.parse(db.value!).keys.orders).toBe(a.bundle.keys.orders);
+  });
+
+  it('does not treat a future client clock as proof it read the current cloud revision', async () => {
+    db.value = JSON.stringify(bundle({ orders: '["三民已盤點訂單"]' }, 20));
+    expect((await request('PUT', {
+      bundle: bundle({ orders: '[]' }, 9999999999999), syncedFromUpdatedAt: 9999999999999,
+    })).statusCode).toBe(409);
+    expect(db.writes).toBe(0);
   });
 
   it('preserves partial keys, null values and version conflict protection', async () => {

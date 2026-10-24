@@ -1,8 +1,20 @@
 import { createClient } from 'redis';
+import { randomUUID } from 'node:crypto';
 import { decodeSyncRequest, encodeSyncResponse, SYNC_ENCODING } from '../server/syncTransport.js';
 
 const KV_KEY = 'dongshan:data-bundle:v1';
 const REDIS_ENV_KEY = 'REDIS_URL';
+// Compare the exact value read and replace it in one atomic Redis operation.
+const COMPARE_AND_SET_BUNDLE = `
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == '0' then
+  if current then return 0 end
+elseif current ~= ARGV[2] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1
+`;
 
 /** @type {import('redis').RedisClientType | null} */
 let redisClient = null;
@@ -241,9 +253,12 @@ function buildStoredBundle({ bundle, cloudBundle, partialKeys, updatedAt }) {
 }
 
 export default async function handler(req, res) {
+  const requestId = randomUUID();
+  res.setHeader('X-Dongshan-Sync-Id', requestId);
   const perf = makePerfTrace(req);
   perf.attach(res);
   let statusCode = 500;
+  let writeAudit;
   try {
     res.setHeader('Cache-Control', 'no-store');
     if (!originAllowed(req)) {
@@ -306,13 +321,19 @@ export default async function handler(req, res) {
         cloudBundle && typeof cloudBundle === 'object' && !isCloudBundleEmpty(cloudBundle)
           ? readUpdatedAt(cloudBundle)
           : 0;
+      writeAudit = {
+        requestId,
+        keys: (partialKeys ?? Object.keys(bundle.keys ?? {})).slice(0, 32).map((key) => key.slice(0, 96)),
+        baseRevision: syncedFromUpdatedAt,
+        cloudRevision: cloudUpdatedAt,
+      };
 
       if (!partialKeys && !isCloudBundleEmpty(cloudBundle) && isCloudBundleEmpty(bundle)) {
         return versionConflict(res);
       }
 
       if (cloudUpdatedAt > 0) {
-        if (syncedFromUpdatedAt < cloudUpdatedAt || incomingUpdatedAt < cloudUpdatedAt) {
+        if (syncedFromUpdatedAt !== cloudUpdatedAt) {
           return versionConflict(res);
         }
       }
@@ -321,7 +342,7 @@ export default async function handler(req, res) {
         bundle,
         cloudBundle,
         partialKeys,
-        updatedAt: incomingUpdatedAt > 0 ? incomingUpdatedAt : Date.now(),
+        updatedAt: Math.max(Date.now(), cloudUpdatedAt + 1),
       });
 
       const storedText = stringifyJsonMeasured(perf, 'json_stringify_store', storedBundle);
@@ -330,9 +351,14 @@ export default async function handler(req, res) {
         partial: Array.isArray(partialKeys),
         partialKeyCount: partialKeys?.length ?? 0,
       });
-      await perf.time('redis_set', () => redis.set(KV_KEY, storedText));
+      const saved = await perf.time('redis_compare_and_set', () => redis.eval(COMPARE_AND_SET_BUNDLE, {
+        keys: [KV_KEY],
+        arguments: [rawCloud == null ? '0' : '1', rawCloud ?? '', storedText],
+      }));
+      if (saved !== 1) return versionConflict(res);
+      writeAudit.savedRevision = storedBundle.updatedAt;
       statusCode = 200;
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, updatedAt: storedBundle.updatedAt, requestId });
     }
 
     statusCode = 405;
@@ -341,6 +367,7 @@ export default async function handler(req, res) {
     statusCode = 500;
     return internalError(res, e);
   } finally {
+    if (writeAudit) console.info('[sync-write]', { ...writeAudit, statusCode: res.statusCode || statusCode });
     if (!res.headersSent) perf.finish(res, statusCode);
   }
 }
