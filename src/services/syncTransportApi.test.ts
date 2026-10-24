@@ -4,20 +4,39 @@ import { gzipSync } from 'node:zlib';
 import { encodeSyncRequest, decodeSyncResponse, SYNC_ENCODING } from '../lib/syncTransport';
 import handler from '../../api/sync-bundle.js';
 
-const db = vi.hoisted(() => ({ value: null as string | null, writes: 0 }));
-vi.mock('redis', () => ({
+const db = vi.hoisted(() => ({ value: null as string | null, writes: 0, writeError: null as Error | null, evalCalls: 0, connections: 0, closed: 0 }));
+vi.mock('redis', async (importOriginal) => ({
+  ...await importOriginal<typeof import('redis')>(),
   createClient: () => ({
     isOpen: true,
     on: vi.fn(),
     connect: vi.fn(),
     get: async () => db.value,
     set: async (_key: string, value: string) => { db.value = value; db.writes++; },
-    eval: async (_script: string, options: { arguments: string[] }) => {
-      const [exists, expected, value] = options.arguments;
-      if ((db.value !== null) !== (exists === '1') || (db.value !== null && db.value !== expected)) return 0;
-      db.value = value;
-      db.writes++;
-      return 1;
+    eval: async () => {
+      db.evalCalls++;
+      throw new Error('ERR keys and arguments would exceed Lua memory limit');
+    },
+    duplicate: () => {
+      let watched: string | null;
+      let version: number;
+      const connection = {
+        isOpen: false, on: vi.fn(),
+        connect: async () => { connection.isOpen = true; db.connections++; },
+        watch: async () => { watched = db.value; version = db.writes; },
+        get: async () => db.value,
+        multi: () => ({
+          set: (_key: string, value: string) => ({
+            exec: async () => {
+              if (db.writeError) throw db.writeError;
+              if (db.value !== watched || db.writes !== version) return null;
+              db.value = value; db.writes++; return ['OK'];
+            },
+          }),
+        }),
+        destroy: () => { connection.isOpen = false; db.closed++; },
+      };
+      return connection;
     },
   }),
 }));
@@ -41,6 +60,8 @@ describe('compressed sync API compatibility and data integrity', () => {
   beforeEach(() => {
     db.value = null;
     db.writes = 0;
+    db.writeError = null;
+    db.evalCalls = 0; db.connections = 0; db.closed = 0;
     vi.stubEnv('API_SYNC_TOKEN', 'test-token');
     vi.stubEnv('REDIS_URL', 'redis://test');
   });
@@ -66,6 +87,8 @@ describe('compressed sync API compatibility and data integrity', () => {
     const response = await request('GET', undefined, { 'x-dongshan-sync-encoding': SYNC_ENCODING });
     expect((response.body as { encoding: string }).encoding).toBe(SYNC_ENCODING);
     expect(await decodeSyncResponse(response.body)).toEqual({ ok: true, bundle: value });
+    expect(db.evalCalls).toBe(0);
+    expect(db.closed).toBe(db.connections);
   }, 15000);
 
   it('still accepts legacy uncompressed requests and returns legacy responses', async () => {
@@ -103,6 +126,23 @@ describe('compressed sync API compatibility and data integrity', () => {
       bundle: bundle({ orders: '[]' }, 9999999999999), syncedFromUpdatedAt: 9999999999999,
     })).statusCode).toBe(409);
     expect(db.writes).toBe(0);
+  });
+
+  it('logs the exact failed database stage and retains the original data when atomic write fails', async () => {
+    db.value = JSON.stringify(bundle({ orders: '["original"]' }, 20));
+    const before = db.value;
+    db.writeError = new Error('ERR database rejected atomic operation');
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await request('PUT', { bundle: bundle({ orders: '["new"]' }, 30), syncedFromUpdatedAt: 20 });
+      expect(res.statusCode).toBe(500);
+      expect(db.value).toBe(before);
+      expect(db.writes).toBe(0);
+      expect(db.closed).toBe(db.connections);
+      expect(errorLog).toHaveBeenCalledWith('[sync-failure]', expect.objectContaining({
+        requestId: expect.any(String), stage: 'redis_compare_and_set', message: 'ERR database rejected atomic operation',
+      }));
+    } finally { errorLog.mockRestore(); }
   });
 
   it.each([undefined, ['dongshan_data_archives_v1']])('preserves cloud archives when a device sends a missing local copy: %s', async (partialKeys) => {

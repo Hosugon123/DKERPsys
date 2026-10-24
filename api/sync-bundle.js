@@ -1,20 +1,10 @@
 import { createClient } from 'redis';
 import { randomUUID } from 'node:crypto';
 import { decodeSyncRequest, encodeSyncResponse, SYNC_ENCODING } from '../server/syncTransport.js';
+import { compareAndSetBundle } from '../server/redisBundleStore.js';
 
 const KV_KEY = 'dongshan:data-bundle:v1';
 const REDIS_ENV_KEY = 'REDIS_URL';
-// Compare the exact value read and replace it in one atomic Redis operation.
-const COMPARE_AND_SET_BUNDLE = `
-local current = redis.call('GET', KEYS[1])
-if ARGV[1] == '0' then
-  if current then return 0 end
-elseif current ~= ARGV[2] then
-  return 0
-end
-redis.call('SET', KEYS[1], ARGV[3])
-return 1
-`;
 
 /** @type {import('redis').RedisClientType | null} */
 let redisClient = null;
@@ -369,11 +359,8 @@ export default async function handler(req, res) {
         partialKeyCount: partialKeys?.length ?? 0,
       });
       stage = 'redis_compare_and_set';
-      const saved = await perf.time('redis_compare_and_set', () => redis.eval(COMPARE_AND_SET_BUNDLE, {
-        keys: [KV_KEY],
-        arguments: [rawCloud == null ? '0' : '1', rawCloud ?? '', storedText],
-      }));
-      if (saved !== 1) return versionConflict(res);
+      const saved = await perf.time('redis_compare_and_set', () => compareAndSetBundle(redis, KV_KEY, rawCloud, storedText));
+      if (!saved) return versionConflict(res);
       writeAudit.savedRevision = storedBundle.updatedAt;
       statusCode = 200;
       return res.status(200).json({ ok: true, updatedAt: storedBundle.updatedAt, requestId });
