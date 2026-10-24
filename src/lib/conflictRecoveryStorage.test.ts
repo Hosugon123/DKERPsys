@@ -3,6 +3,7 @@ import {
   applyConflictRecoveryAfterRemoteImport,
   hasConflictRecoveryBundle,
   stashLocalBundleForConflictRecovery,
+  clearConflictRecoveryBundle,
 } from './conflictRecoveryStorage';
 
 describe('conflict recovery storage', () => {
@@ -20,7 +21,9 @@ describe('conflict recovery storage', () => {
 
     expect(hasConflictRecoveryBundle()).toBe(true);
     expect(applyConflictRecoveryAfterRemoteImport()).toBe(true);
-    expect(localStorage.getItem('dongshan_store_code_v1')).toBe('"009"');
+    expect(localStorage.getItem('dongshan_store_code_v1')).toBe('"001"');
+    expect(hasConflictRecoveryBundle()).toBe(true);
+    clearConflictRecoveryBundle();
     expect(hasConflictRecoveryBundle()).toBe(false);
   });
 });

@@ -49,15 +49,13 @@ describe('localStorage quota guard', () => {
     const removed = setLocalStorageItemWithQuotaRecovery('dongshan_order_history_v1', '[{"id":"new"}]');
 
     expect(removed).toEqual([
-      'dongshan_conflict_recovery_bundle_v1',
       'dongshan_pwa_icon_v1',
-      'dongshan_data_archives_v1',
       'dongshan_user_avatar_v1:admin',
     ]);
     expect(localStorage.getItem('dongshan_order_history_v1')).toBe('[{"id":"new"}]');
-    expect(localStorage.getItem('dongshan_conflict_recovery_bundle_v1')).toBeNull();
+    expect(localStorage.getItem('dongshan_conflict_recovery_bundle_v1')).toBe('temporary-conflict-backup');
     expect(localStorage.getItem('dongshan_pwa_icon_v1')).toBeNull();
-    expect(localStorage.getItem('dongshan_data_archives_v1')).toBeNull();
+    expect(localStorage.getItem('dongshan_data_archives_v1')).toBe('temporary-archives');
     expect(localStorage.getItem('dongshan_user_avatar_v1:admin')).toBeNull();
   });
 

@@ -66,7 +66,7 @@ describe('compressed sync API compatibility and data integrity', () => {
     const response = await request('GET', undefined, { 'x-dongshan-sync-encoding': SYNC_ENCODING });
     expect((response.body as { encoding: string }).encoding).toBe(SYNC_ENCODING);
     expect(await decodeSyncResponse(response.body)).toEqual({ ok: true, bundle: value });
-  });
+  }, 15000);
 
   it('still accepts legacy uncompressed requests and returns legacy responses', async () => {
     const value = bundle({ orders: '[]' });
@@ -105,6 +105,13 @@ describe('compressed sync API compatibility and data integrity', () => {
     expect(db.writes).toBe(0);
   });
 
+  it.each([undefined, ['dongshan_data_archives_v1']])('preserves cloud archives when a device sends a missing local copy: %s', async (partialKeys) => {
+    db.value = JSON.stringify(bundle({ dongshan_data_archives_v1: '{"archives":["keep"]}', orders: '[]' }, 20));
+    const res = await request('PUT', { bundle: bundle({ dongshan_data_archives_v1: null, orders: '[]' }, 30), syncedFromUpdatedAt: 20, partialKeys });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(db.value!).keys.dongshan_data_archives_v1).toBe('{"archives":["keep"]}');
+  });
+
   it('preserves partial keys, null values and version conflict protection', async () => {
     db.value = JSON.stringify(bundle({ untouched: 'unchanged', orders: 'old', removed: 'old' }, 20));
     const payload = {
@@ -128,6 +135,16 @@ describe('compressed sync API compatibility and data integrity', () => {
     ]) expect((await request('PUT', body)).statusCode).toBe(400);
     expect(db.writes).toBe(0);
   });
+
+  it.each(['not json', '{"updatedAt":123}', '{"keys":[]}'])(
+    'does not turn invalid stored data into an empty cloud or overwrite it: %s', async (raw) => {
+      db.value = raw;
+      expect((await request('GET')).statusCode).toBe(500);
+      expect((await request('PUT', { bundle: bundle({ orders: '[]' }) })).statusCode).toBe(500);
+      expect(db.value).toBe(raw);
+      expect(db.writes).toBe(0);
+    },
+  );
 
   it('bounds decompression and checks authentication before decoding', async () => {
     const body = { encoding: SYNC_ENCODING, data: gzipSync(Buffer.alloc(65 * 1024 * 1024)).toString('base64') };

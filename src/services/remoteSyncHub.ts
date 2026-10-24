@@ -1,7 +1,7 @@
 /**
  * 雲端 bundle 同步（VITE_STORAGE_MODE=remote）：啟動拉取、寫入後推送、狀態廣播。
  *
- * 多裝置策略：推送前／拉回時依單號 union 合併訂單等紀錄；去抖動推送 + 409 自動合併重試；不彈同步警報。
+ * 多裝置策略：依單號合併紀錄；去抖動推送、409 重試，並保留待同步紀錄與狀態。
  */
 import {
   DONGSHAN_EXPORT_STORAGE_KEYS,
@@ -15,7 +15,7 @@ import {
   type DongshanDataBundleV1,
   type DongshanStorageKey,
 } from '../lib/appDataBundle';
-import { applyConflictRecoveryAfterRemoteImport } from '../lib/conflictRecoveryStorage';
+import { applyConflictRecoveryAfterRemoteImport, clearConflictRecoveryBundle } from '../lib/conflictRecoveryStorage';
 import { reportPerfMetric, timeAsync, timeSync } from '../lib/performanceDebug';
 import { reportUserError } from '../lib/userErrorReport';
 import { hasUnsavedWork } from '../lib/unsavedWorkGuard';
@@ -61,19 +61,27 @@ let pendingAfterText: string | null = null;
 const pendingDirtyKeys = new Set<DongshanStorageKey>();
 const PENDING_KEYS_STORAGE = 'dongshan_pending_sync_keys_v1';
 
-function readPersistedPendingKeys(): DongshanStorageKey[] {
+function readPendingVersions(): Partial<Record<DongshanStorageKey, string>> {
   try {
-    const keys: unknown = JSON.parse(localStorage.getItem(PENDING_KEYS_STORAGE) ?? '[]');
-    return Array.isArray(keys)
-      ? DONGSHAN_EXPORT_STORAGE_KEYS.filter((key) => keys.includes(key)) : [];
-  } catch { return []; }
+    const raw: unknown = JSON.parse(localStorage.getItem(PENDING_KEYS_STORAGE) ?? '{}');
+    return Object.fromEntries(DONGSHAN_EXPORT_STORAGE_KEYS.flatMap((key) => {
+      if (Array.isArray(raw)) return raw.includes(key) ? [[key, 'legacy']] : [];
+      const value = raw && typeof raw === 'object' ? (raw as Record<string, unknown>)[key] : undefined;
+      return typeof value === 'string' ? [[key, value]] : [];
+    }));
+  } catch { return {}; }
+}
+
+function readPersistedPendingKeys(): DongshanStorageKey[] {
+  return Object.keys(readPendingVersions()) as DongshanStorageKey[];
 }
 
 function persistPendingKeys(keys: readonly DongshanStorageKey[]): void {
   try {
-    localStorage.setItem(PENDING_KEYS_STORAGE, JSON.stringify([
-      ...new Set([...readPersistedPendingKeys(), ...keys]),
-    ]));
+    const next = readPendingVersions();
+    const revision = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    for (const key of keys) next[key] = revision;
+    localStorage.setItem(PENDING_KEYS_STORAGE, JSON.stringify(next));
   } catch { /* Local records remain available even if the retry journal cannot be written. */ }
 }
 
@@ -85,6 +93,12 @@ export function getRemoteSyncStatus(): RemoteSyncStatus {
 
 export function isRemoteSyncLocked(): boolean {
   return remoteSyncLocked;
+}
+
+export function assertRemoteStorageWritable(): void {
+  if (getStorageMode() === 'remote' && remoteSyncLocked) {
+    throw new Error('尚未成功載入雲端資料，已暫停寫入以保護訂單。請連線後按「重試同步」，不需要重新打單。');
+  }
 }
 
 /** 是否有已排程但尚未推送的雲端變更（含去抖動計時中）。 */
@@ -236,7 +250,7 @@ export async function fetchRemoteBundle(): Promise<DongshanDataBundleV1> {
   const body = await timeAsync('remote.fetch-bundle.json', () =>
     res.json().then(decodeSyncResponse) as Promise<{ ok?: boolean; bundle?: DongshanDataBundleV1 }>,
   );
-  if (!body?.ok || !body.bundle) {
+  if (!body?.ok || !body.bundle || !body.bundle.keys || typeof body.bundle.keys !== 'object' || Array.isArray(body.bundle.keys)) {
     throw new Error('遠端同步回應格式錯誤。');
   }
   reportPerfMetric({
@@ -300,7 +314,11 @@ export async function pushRemoteBundle(
     throw Object.assign(new Error(`PUT ${res.status}${requestId ? `（同步編號 ${requestId}）` : ''}`), { syncStatus: statusFromResponse(res) });
   }
 
-  const receipt = await res.json().catch(() => null) as { updatedAt?: number } | null;
+  const receipt = await res.json().catch(() => null) as { ok?: boolean; updatedAt?: number } | null;
+  if (receipt?.ok !== true || (receipt.updatedAt !== undefined &&
+      (typeof receipt.updatedAt !== 'number' || !Number.isFinite(receipt.updatedAt) || receipt.updatedAt < 0))) {
+    throw Object.assign(new Error('雲端未回傳有效的儲存確認，資料保留在此裝置並等待重試；請勿重新打單。'), { syncStatus: 'error' });
+  }
   noteRemoteBundleUpdatedAt({ ...fullBundle, updatedAt: receipt?.updatedAt ?? fullBundle.updatedAt });
 }
 
@@ -333,6 +351,7 @@ async function pushBundleTextWithAutoMerge(
     await pushBundleTextWithAutoMergeImpl(bundleText, dirtyKeys);
   } finally {
     activePushes--;
+    dispatchStatus(lastStatus);
   }
 }
 
@@ -340,19 +359,21 @@ async function pushBundleTextWithAutoMergeImpl(
   bundleText: string,
   dirtyKeys: readonly DongshanStorageKey[],
 ): Promise<void> {
-  remoteSyncLocked = false;
   const dirty = dirtyKeys.length > 0 ? dirtyKeys : [...DONGSHAN_EXPORT_STORAGE_KEYS];
   persistPendingKeys(dirty);
+  const savingVersions = readPendingVersions();
+  dispatchStatus('idle');
   let text = bundleText;
 
   for (let attempt = 0; attempt <= MAX_CONFLICT_MERGE_RETRIES; attempt++) {
     try {
       await pushRemoteBundle(text, dirty);
       try {
-        const remaining = readPersistedPendingKeys().filter(
-          (key) => !dirty.includes(key) || pendingDirtyKeys.has(key),
-        );
-        if (remaining.length > 0) localStorage.setItem(PENDING_KEYS_STORAGE, JSON.stringify(remaining));
+        const current = readPendingVersions();
+        const remaining = Object.fromEntries(Object.entries(current).filter(([key, version]) =>
+          !dirty.includes(key as DongshanStorageKey) || pendingDirtyKeys.has(key as DongshanStorageKey) || version !== savingVersions[key],
+        ));
+        if (Object.keys(remaining).length > 0) localStorage.setItem(PENDING_KEYS_STORAGE, JSON.stringify(remaining));
         else localStorage.removeItem(PENDING_KEYS_STORAGE);
       } catch { /* Retry journal is best effort. */ }
       dispatchStatus('ok');
@@ -396,6 +417,7 @@ function scheduleDebouncedPushWithDirty(
   for (const k of dirtyKeys ?? []) pendingDirtyKeys.add(k);
   persistPendingKeys([...pendingDirtyKeys]);
   pendingAfterText = afterText;
+  dispatchStatus('idle');
 
   if (debounceTimer != null) {
     clearTimeout(debounceTimer);
@@ -472,7 +494,7 @@ function reportRemoteImportFailure(error: string, action: string): void {
   reportUserError({
     title: '雲端資料載入失敗',
     message: quotaLike
-      ? '手機已取得雲端資料，但此裝置的瀏覽器儲存空間不足，無法載入完整營運資料。請先不要在此手機新增或修改資料，並請管理員協助清理手機 Safari/PWA 網站資料或進行資料歸檔。'
+      ? '手機已取得雲端資料，但此裝置的瀏覽器儲存空間不足，無法載入完整營運資料。請先停止新增或修改資料，勿清除網站資料；由管理員備份並確認待同步資料後，再處理裝置空間。'
       : `雲端資料無法載入到此裝置。請先不要新增或修改資料，並將此錯誤截圖回報管理員：${error}`,
     severity: 'error',
     source: 'remoteSyncHub',
@@ -554,12 +576,13 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
     return;
   }
 
-  remoteSyncLocked = false;
+  remoteSyncLocked = true;
   dispatchStatus('idle');
+  let loaded = false;
 
   try {
-    const retryKeys = readPersistedPendingKeys();
     const bundle = await fetchRemoteBundle();
+    const retryKeys = readPersistedPendingKeys();
 
     if (!isRemoteBundleEffectivelyEmpty(bundle)) {
       const local = timeSync('remote.init.build-local-bundle', () => buildDongshanDataBundle());
@@ -573,25 +596,33 @@ export async function initRemoteSyncOnAppLoad(): Promise<void> {
         return;
       }
       noteRemoteBundleUpdatedAt(bundle);
+      loaded = true;
+      remoteSyncLocked = false;
       if (retryKeys.length > 0) {
         await pushRemoteBundleWithAutoMerge(serializeDongshanDataBundle(), retryKeys);
       }
     } else if (localExportStorageHasData()) {
-      await pushBundleTextWithAutoMerge(
+      loaded = true;
+      remoteSyncLocked = false;
+      await pushRemoteBundleWithAutoMerge(
         serializeDongshanDataBundle(),
         [...DONGSHAN_EXPORT_STORAGE_KEYS],
       );
     }
 
+    loaded = true;
+    remoteSyncLocked = false;
     if (applyConflictRecoveryAfterRemoteImport()) {
-      await pushBundleTextWithAutoMerge(
+      await pushRemoteBundleWithAutoMerge(
         serializeDongshanDataBundle(),
         [...DONGSHAN_EXPORT_STORAGE_KEYS],
       );
+      clearConflictRecoveryBundle();
     }
 
     dispatchStatus('ok');
   } catch (e) {
+    remoteSyncLocked = !loaded;
     applySyncFailureFromUnknown(e);
   }
 }
@@ -605,7 +636,8 @@ export function pushRemoteIfLocalBundleChangedSince(snapshot: string): void {
 
 export async function syncRemoteAfterDirectLocalMutation(): Promise<void> {
   if (getStorageMode() !== 'remote') return;
-  await pushBundleTextWithAutoMerge(
+  assertRemoteStorageWritable();
+  await pushRemoteBundleWithAutoMerge(
     serializeDongshanDataBundle(),
     [...DONGSHAN_EXPORT_STORAGE_KEYS],
   );
@@ -617,6 +649,20 @@ export async function awaitRemotePushIdle(): Promise<void> {
   await pushChain;
 }
 
+export async function retryPendingRemotePush(): Promise<void> {
+  if (getStorageMode() !== 'remote' || activePushes > 0) return;
+  if (remoteSyncLocked) {
+    await initRemoteSyncOnAppLoad();
+    return;
+  }
+  const keys = readPersistedPendingKeys();
+  if (pendingAfterText == null && keys.length > 0) {
+    scheduleDebouncedPushWithDirty(serializeDongshanDataBundle(), keys);
+  }
+  await awaitRemotePushIdle();
+  if (!hasPendingRemotePush()) await refreshRemoteBundleNow();
+}
+
 export async function withRemoteStorageRead<T>(fn: () => T | Promise<T>): Promise<T> {
   await storageTick();
   return await Promise.resolve(fn());
@@ -624,6 +670,7 @@ export async function withRemoteStorageRead<T>(fn: () => T | Promise<T>): Promis
 
 export async function withRemoteStorageWrite<T>(fn: () => T | Promise<T>): Promise<T> {
   await storageTick();
+  assertRemoteStorageWritable();
   if (getStorageMode() !== 'remote') {
     return await Promise.resolve(fn());
   }
@@ -643,6 +690,7 @@ export async function withRemoteStorageWrite<T>(fn: () => T | Promise<T>): Promi
 /** 寫入本機並排程雲端推送，但不等待推送完成（盤點自動儲存等高頻寫入用）。 */
 export async function withRemoteStorageWriteDeferPush<T>(fn: () => T | Promise<T>): Promise<T> {
   await storageTick();
+  assertRemoteStorageWritable();
   if (getStorageMode() !== 'remote') {
     return await Promise.resolve(fn());
   }

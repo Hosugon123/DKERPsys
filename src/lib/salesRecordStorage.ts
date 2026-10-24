@@ -36,6 +36,7 @@ type StoreV1 = {
   version: 1;
   /** 鍵為 `scopeId|YYYY-MM-DD`；舊版僅 `YYYY-MM-DD` 視為總部直營。 */
   byDate: Record<string, Row>;
+  deletedByDate?: Record<string, string>;
 };
 
 export type SalesRecordDateRange = { startYmd: string; endYmd: string };
@@ -68,7 +69,7 @@ function cloneStore(s: StoreV1): StoreV1 {
       snapshot: cloneSnapshot(row.snapshot),
     };
   }
-  return { version: 1, byDate };
+  return { version: 1, byDate, ...(s.deletedByDate ? { deletedByDate: { ...s.deletedByDate } } : {}) };
 }
 
 function loadStore(): StoreV1 {
@@ -104,7 +105,7 @@ function migrateLegacyBareDateKeys(s: StoreV1): StoreV1 {
     const scoped = scopedStallDateKey(HQ_SCOPE_ID, key);
     if (!next[scoped]) next[scoped] = row;
   }
-  return { version: 1, byDate: next };
+  return { ...s, version: 1, byDate: next };
 }
 
 function saveStore(s: StoreV1) {
@@ -241,7 +242,8 @@ export function mergeSalesRecordWithCatalog(snap: SalesRecordDaySnapshot): Sales
  */
 export function saveSalesRecord(ymd: string, snapshot: SalesRecordDaySnapshot, scopeId?: string) {
   const s = loadStore();
-  const completedAt = new Date().toISOString();
+  const deletedAt = s.deletedByDate?.[scopedStallDateKey(resolveStallStorageScopeId(scopeId), ymd)];
+  const completedAt = new Date(Math.max(Date.now(), (Date.parse(deletedAt ?? '') || 0) + 1)).toISOString();
   const prev = readRow(s, ymd, scopeId)?.snapshot;
   const snapshotMerged = mergeSnapshotWithCatalog(snapshot);
   const who = getSessionActorDisplayName();
@@ -316,7 +318,12 @@ export function removeSalesRecordDay(ymd: string, scopeId?: string): boolean {
     delete s.byDate[ymd];
     removed = true;
   }
-  if (removed) saveStore(s);
+  if (removed) {
+    const row = readRow(loadStore(), ymd, scopeId);
+    const afterRow = Date.parse(row?.snapshot.updatedAt ?? row?.completedAt ?? '') || 0;
+    s.deletedByDate = { ...s.deletedByDate, [scopedKey]: new Date(Math.max(Date.now(), afterRow + 1)).toISOString() };
+    saveStore(s);
+  }
   return removed;
 }
 

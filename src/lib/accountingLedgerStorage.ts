@@ -93,6 +93,7 @@ type StoreV1 = {
 type StoreV2 = {
   version: 2;
   byScope: Record<string, AccountingLedgerEntry[]>;
+  deletedById?: Record<string, string>;
 };
 
 let cachedStoreRaw: string | null | undefined;
@@ -107,7 +108,7 @@ function cloneStore(s: StoreV2): StoreV2 {
   for (const [scopeId, rows] of Object.entries(s.byScope)) {
     byScope[scopeId] = rows.map(cloneEntry);
   }
-  return { version: 2, byScope };
+  return { version: 2, byScope, ...(s.deletedById ? { deletedById: { ...s.deletedById } } : {}) };
 }
 
 function newId(): string {
@@ -268,7 +269,7 @@ function migrateMisplacedLedgerScopes(s: StoreV2): { store: StoreV2; changed: bo
 
   if (!changed) return { store: s, changed: false };
   byScope[HQ_SCOPE_ID] = stay;
-  return { store: { version: 2, byScope }, changed: true };
+  return { store: { ...s, version: 2, byScope }, changed: true };
 }
 
 function finalizeLoadedStore(store: StoreV2): StoreV2 {
@@ -324,7 +325,7 @@ function loadStore(): StoreV2 {
           ? (rows as AccountingLedgerEntry[]).map((row) => coerceEntry(row as AccountingLedgerEntry))
           : [];
       }
-      const finalized = finalizeLoadedStore({ version: 2, byScope });
+      const finalized = finalizeLoadedStore({ version: 2, byScope, ...(p.deletedById ? { deletedById: p.deletedById } : {}) });
       cachedStoreRaw = raw;
       cachedStore = cloneStore(finalized);
       return cloneStore(finalized);
@@ -675,6 +676,7 @@ export function removeAccountingLedgerEntry(id: string): boolean {
   const next = prev.filter((e) => e.id !== id);
   if (next.length === prev.length) return false;
   s.byScope[scopeId] = next;
+  s.deletedById = { ...s.deletedById, [id]: new Date().toISOString() };
   saveStore(s);
   return true;
 }

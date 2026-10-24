@@ -1,6 +1,6 @@
 import { bareYmdFromStallStorageKey } from './scopedStallDateKey';
 import { effectiveOrderDateYmd } from './orderHistoryStorage';
-import { mergeOrderLikeRecord } from './bundleRecordMerge';
+import { mergeOrderLikeRecord, mergeStorageKeyRecords } from './bundleRecordMerge';
 import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 export const DATA_ARCHIVE_STORAGE_KEY = 'dongshan_data_archives_v1';
@@ -24,7 +24,7 @@ type StallStore = { version: 1; byDate: Record<string, unknown> };
 type SalesStore = { version: 1; byDate: Record<string, unknown> };
 type LedgerEntry = { id: string; dateYmd: string; scopeId?: string; [key: string]: unknown };
 type LedgerStoreV1 = { version: 1; entries: LedgerEntry[] };
-type LedgerStoreV2 = { version: 2; byScope: Record<string, LedgerEntry[]> };
+type LedgerStoreV2 = { version: 2; byScope: Record<string, LedgerEntry[]>; deletedById?: Record<string, string> };
 
 export type DataArchivePayload = {
   orderHistory: AnyOrder[];
@@ -148,7 +148,7 @@ function normalizeLedgerStore(raw: unknown): LedgerStoreV2 {
     for (const [scopeId, rows] of Object.entries(obj.byScope)) {
       byScope[scopeId] = Array.isArray(rows) ? rows as LedgerEntry[] : [];
     }
-    return { version: 2, byScope };
+    return { version: 2, byScope, ...(obj.deletedById ? { deletedById: obj.deletedById } : {}) };
   }
   return {
     version: 2,
@@ -160,6 +160,7 @@ function normalizeLedgerStore(raw: unknown): LedgerStoreV2 {
 
 function splitLedgerStore(store: LedgerStoreV2, cutoffYmd: string) {
   const keep: LedgerStoreV2 = emptyLedgerStore();
+  if (store.deletedById) keep.deletedById = { ...store.deletedById };
   const archive: LedgerStoreV2 = emptyLedgerStore();
   let archivedCount = 0;
   for (const [scopeId, rows] of Object.entries(store.byScope)) {
@@ -264,25 +265,11 @@ function mergeOrdersById(existing: AnyOrder[], archived: AnyOrder[]): AnyOrder[]
 }
 
 function mergeDateStore<T extends StallStore | SalesStore>(existing: T, archived: T): T {
-  return {
-    ...existing,
-    byDate: {
-      ...(archived.byDate ?? {}),
-      ...(existing.byDate ?? {}),
-    },
-  };
+  return JSON.parse(mergeStorageKeyRecords('dongshan_sales_records_v1', JSON.stringify(archived), JSON.stringify(existing))!);
 }
 
 function mergeLedgerStore(existing: LedgerStoreV2, archived: LedgerStoreV2): LedgerStoreV2 {
-  const byScope: Record<string, LedgerEntry[]> = {};
-  for (const [scopeId, rows] of Object.entries({ ...archived.byScope, ...existing.byScope })) {
-    const byId = new Map<string, LedgerEntry>();
-    for (const row of archived.byScope[scopeId] ?? []) byId.set(row.id, row);
-    for (const row of existing.byScope[scopeId] ?? []) byId.set(row.id, row);
-    byScope[scopeId] = [...byId.values()].sort((a, b) => b.dateYmd.localeCompare(a.dateYmd));
-    if (byScope[scopeId].length === 0) delete byScope[scopeId];
-  }
-  return { version: 2, byScope };
+  return JSON.parse(mergeStorageKeyRecords('dongshan_accounting_ledger_v1', JSON.stringify(archived), JSON.stringify(existing))!);
 }
 
 export function restoreDataArchive(id: string): boolean {

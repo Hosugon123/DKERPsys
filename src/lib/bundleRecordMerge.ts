@@ -6,6 +6,7 @@ import type { DongshanStorageKey } from './appDataBundle';
 import { mergeFranchiseeRetailStoreJson } from './franchiseeRetailState';
 import { HQ_SCOPE_ID } from './dataScope';
 import { isLegacyBareStallDateKey, scopedStallDateKey } from './scopedStallDateKey';
+import { mergeDeletionTimes } from './recordDeletion';
 
 export type OrderLikeForMerge = {
   id: string;
@@ -407,6 +408,7 @@ function parseOrderLikeArray(raw: string | null | undefined): { id: string; upda
 type LedgerStoreV2 = {
   version?: number;
   byScope?: Record<string, { id: string; updatedAt?: string; createdAt: string }[]>;
+  deletedById?: Record<string, string>;
 };
 
 function mergeAccountingLedger(localRaw: string | null | undefined, cloudRaw: string | null | undefined): string {
@@ -415,18 +417,20 @@ function mergeAccountingLedger(localRaw: string | null | undefined, cloudRaw: st
   const localScopes = local.byScope && typeof local.byScope === 'object' ? local.byScope : {};
   const cloudScopes = cloud.byScope && typeof cloud.byScope === 'object' ? cloud.byScope : {};
   const scopeIds = new Set([...Object.keys(localScopes), ...Object.keys(cloudScopes)]);
+  const deletedById = mergeDeletionTimes(local.deletedById, cloud.deletedById);
   const byScope: Record<string, ReturnType<typeof mergeArraysById>> = {};
   for (const scopeId of scopeIds) {
     const la = Array.isArray(localScopes[scopeId]) ? localScopes[scopeId]! : [];
     const ca = Array.isArray(cloudScopes[scopeId]) ? cloudScopes[scopeId]! : [];
-    byScope[scopeId] = mergeArraysById(la, ca);
+    byScope[scopeId] = mergeArraysById(la, ca).filter((row) => !deletedById[row.id]);
   }
-  return JSON.stringify({ version: 2, byScope });
+  return JSON.stringify({ version: 2, byScope, ...(Object.keys(deletedById).length ? { deletedById } : {}) });
 }
 
 type ByDateStore = {
   version?: number;
   byDate?: Record<string, { updatedAt?: string; snapshot?: { updatedAt?: string } }>;
+  deletedByDate?: Record<string, string>;
 };
 
 type DayLineLike = { out?: string; remain?: string; updatedAt?: string };
@@ -588,10 +592,16 @@ function mergeByDateStore(localRaw: string | null | undefined, cloudRaw: string 
       ? normalizeByDateStoreKeys(cloud.byDate as Record<string, unknown>)
       : {};
   const dateKeys = new Set([...Object.keys(localDates), ...Object.keys(cloudDates)]);
+  const deletedByDate = mergeDeletionTimes(local.deletedByDate, cloud.deletedByDate);
   const byDate: Record<string, unknown> = {};
   for (const dk of dateKeys) {
-    const l = localDates[dk];
-    const c = cloudDates[dk];
+    const survivesDeletion = (row: unknown): boolean => {
+      if (!row || !deletedByDate[dk]) return Boolean(row);
+      const snapshot = snapshotForByDateRow(row);
+      return recordUpdatedAtMs({ updatedAt: snapshot?.updatedAt, createdAt: (row as ByDateRowLike).completedAt }) > Date.parse(deletedByDate[dk]);
+    };
+    const l = survivesDeletion(localDates[dk]) ? localDates[dk] : undefined;
+    const c = survivesDeletion(cloudDates[dk]) ? cloudDates[dk] : undefined;
     if (l == null) {
       byDate[dk] = c;
       continue;
@@ -602,7 +612,15 @@ function mergeByDateStore(localRaw: string | null | undefined, cloudRaw: string 
     }
     byDate[dk] = mergeByDateRow(l, c);
   }
-  return JSON.stringify({ version: local.version ?? cloud.version ?? 1, byDate });
+  for (const [key, deletedAt] of Object.entries(deletedByDate)) {
+    const row = byDate[key] as ByDateRowLike | undefined;
+    const snapshot = snapshotForByDateRow(row);
+    if (recordUpdatedAtMs({ updatedAt: snapshot?.updatedAt, createdAt: row?.completedAt }) <= Date.parse(deletedAt)) {
+      delete byDate[key];
+    }
+  }
+  return JSON.stringify({ version: local.version ?? cloud.version ?? 1, byDate,
+    ...(Object.keys(deletedByDate).length ? { deletedByDate } : {}) });
 }
 
 function mergeOrderSeqMap(localRaw: string | null | undefined, cloudRaw: string | null | undefined): string {

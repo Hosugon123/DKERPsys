@@ -45,7 +45,6 @@ export type DongshanStorageKey = (typeof DONGSHAN_EXPORT_STORAGE_KEYS)[number];
 
 const OPTIONAL_REMOTE_IMPORT_KEYS = new Set<string>([
   'dongshan_pwa_icon_v1',
-  'dongshan_data_archives_v1',
 ]);
 
 export type DongshanDataBundleV1 = {

@@ -1,10 +1,13 @@
 /**
- * 雲端 409 衝突後，重新整理會以遠端 bundle 覆寫本機；此處暫存衝突當下的本機快照，載入後還原再嘗試推送。
+ * 舊版衝突快照：與最新資料合併復原，確認上傳成功後才移除備份。
  */
 import {
   importDongshanDataBundle,
   parseBundleJson,
   serializeDongshanDataBundle,
+  buildDongshanDataBundle,
+  mergeDongshanBundlesLocalWinsDirty,
+  type DongshanDataBundleV1,
 } from './appDataBundle';
 import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
@@ -34,11 +37,10 @@ export function clearConflictRecoveryBundle(): void {
   }
 }
 
-/** 讀取並清除暫存；無資料時回傳 null */
-function takeConflictRecoveryRaw(): string | null {
+/** 保留到雲端確認成功，避免復原／上傳失敗時連備份也遺失。 */
+function readConflictRecoveryRaw(): string | null {
   try {
     const raw = localStorage.getItem(RECOVERY_KEY);
-    localStorage.removeItem(RECOVERY_KEY);
     return raw;
   } catch {
     return null;
@@ -50,11 +52,13 @@ function takeConflictRecoveryRaw(): string | null {
  * @returns 是否成功還原
  */
 export function applyConflictRecoveryAfterRemoteImport(): boolean {
-  const raw = takeConflictRecoveryRaw();
+  const raw = readConflictRecoveryRaw();
   if (!raw?.trim()) return false;
   try {
-    const parsed = parseBundleJson(raw);
-    const result = importDongshanDataBundle(parsed);
+    const parsed = parseBundleJson(raw) as DongshanDataBundleV1;
+    if (!parsed?.keys || typeof parsed.keys !== 'object') return false;
+    const merged = mergeDongshanBundlesLocalWinsDirty(parsed, buildDongshanDataBundle(), []);
+    const result = importDongshanDataBundle(merged);
     return result.ok;
   } catch {
     return false;

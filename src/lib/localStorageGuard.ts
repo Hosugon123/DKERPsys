@@ -1,7 +1,6 @@
+// Only rebuildable presentation/debug data; never remove archives or recovery copies.
 const RECOVERABLE_LOCAL_STORAGE_KEYS = [
-  'dongshan_conflict_recovery_bundle_v1',
   'dongshan_pwa_icon_v1',
-  'dongshan_data_archives_v1',
   'dongshan_performance_debug_v1',
 ] as const;
 

@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useRef, useState, useDeferredValue, lazy, Suspense, type ReactNode } from 'react';
 import DeployUpdateBanner from './components/DeployUpdateBanner';
 import GlobalErrorReporter from './components/GlobalErrorReporter';
+import RemoteSyncIndicator from './components/RemoteSyncIndicator';
+import { retryPendingRemotePush } from './services/remoteSyncHub';
 import PullToRefresh from './components/PullToRefresh';
 import { useIsNarrowScreen } from './hooks/useIsNarrowScreen';
 import { useMobileSidebarSwipe } from './hooks/useMobileSidebarSwipe';
@@ -98,9 +100,12 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('pagehide', onPageHide);
+    const onOnline = () => { void retryPendingRemotePush(); };
+    window.addEventListener('online', onOnline);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('online', onOnline);
     };
   }, []);
 
@@ -313,6 +318,7 @@ export default function App() {
           onLogout={handleLogout}
           sidebarSwipe={isNarrow ? sidebarSwipe : undefined}
         />
+        <RemoteSyncIndicator />
         <PullToRefresh
           enabled={isNarrow}
           onRefresh={handlePullRefresh}

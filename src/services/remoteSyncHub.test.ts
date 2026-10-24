@@ -263,6 +263,98 @@ describe('remote sync write flushing', () => {
     expect(getRemoteSyncStatus()).not.toBe('ok');
   });
 
+  it('blocks writes after failed initial cloud loading and unlocks after a successful retry', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const { initRemoteSyncOnAppLoad, isRemoteSyncLocked, retryPendingRemotePush } = await import('./remoteSyncHub');
+    await initRemoteSyncOnAppLoad();
+    expect(isRemoteSyncLocked()).toBe(true);
+    const { orders } = await import('./apiService');
+    await expect(orders.appendProcurementOrderEntry({
+      lines: [], totalAmount: 0, actorRole: 'admin', orderDateYmd: '2026-10-24',
+    })).rejects.toThrow('暫停寫入');
+    expect(localStorage.getItem('dongshan_franchise_mgmt_orders_v1')).toBeNull();
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, bundle: emptyCloudBundle() }), { status: 200 }));
+    await retryPendingRemotePush();
+    expect(isRemoteSyncLocked()).toBe(false);
+  });
+
+  it('rolls back prior carryover deductions if creating the new local order fails', async () => {
+    const { appendProcurementOrderEntry, setOrderStallCountStamp } = await import('../lib/orderHistoryStorage');
+    const basisId = appendProcurementOrderEntry({
+      lines: [{ productId: 'duck', name: '鴨頭', qty: 18, unitPrice: 15, unit: '支' }],
+      totalAmount: 270, actorRole: 'admin', orderDateYmd: '2026-10-23',
+    });
+    setOrderStallCountStamp(basisId, { basisYmd: '2026-10-23', completedAt: '2026-10-23T20:00:00.000Z',
+      snapshot: { lines: { duck: { out: '18', remain: '5' } }, actualRevenue: '195', updatedAt: '2026-10-23T20:00:00.000Z' },
+    });
+    const { buildDongshanDataBundle } = await import('../lib/appDataBundle');
+    const before = buildDongshanDataBundle().keys;
+    const original = Storage.prototype.setItem;
+    let failed = false;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (!failed && key === 'dongshan_franchise_mgmt_orders_v1' && JSON.parse(String(value)).length > 1) {
+        failed = true; throw new Error('forced new order write failure');
+      }
+      original.call(this, key, value);
+    });
+    try {
+      const { orders } = await import('./apiService');
+      await expect(orders.appendProcurementOrderEntry({
+        lines: [{ productId: 'duck', name: '鴨頭', qty: 13, unitPrice: 15, unit: '支' }],
+        totalAmount: 195, actorRole: 'admin', orderDateYmd: '2026-10-24',
+        procurementDeductionBasisOrderId: basisId,
+        procurementDeductionAppliedQtyByBasisOrderId: { [basisId]: { duck: 5 } },
+      })).rejects.toThrow('forced new order write failure');
+    } finally { write.mockRestore(); }
+    expect(buildDongshanDataBundle().keys).toEqual(before);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not clear a newer in-flight write journal when an older write is acknowledged', async () => {
+    vi.useFakeTimers();
+    const responses: Array<(res: Response) => void> = [];
+    globalThis.fetch = vi.fn(() => new Promise<Response>((resolve) => responses.push(resolve)));
+    const { pushRemoteBundleWithAutoMerge, hasPendingRemotePush } = await import('./remoteSyncHub');
+    const { serializeDongshanDataBundle } = await import('../lib/appDataBundle');
+    localStorage.setItem('dongshan_store_code_v1', '"001"');
+    const a = pushRemoteBundleWithAutoMerge(serializeDongshanDataBundle(), ['dongshan_store_code_v1']);
+    await vi.waitFor(() => expect(responses).toHaveLength(1));
+    localStorage.setItem('dongshan_store_code_v1', '"002"');
+    const b = pushRemoteBundleWithAutoMerge(serializeDongshanDataBundle(), ['dongshan_store_code_v1']);
+    const failedB = b.catch((error: unknown) => error);
+    await vi.waitFor(() => expect(responses).toHaveLength(2));
+    responses[0](new Response('{"ok":true}', { status: 200 }));
+    await a;
+    expect(localStorage.getItem('dongshan_pending_sync_keys_v1')).not.toBeNull();
+    responses[1](new Response('{}', { status: 503 }));
+    expect(await failedB).toBeInstanceOf(Error);
+    expect(hasPendingRemotePush()).toBe(true);
+  });
+
+  it('retries a direct mutation failure through the durable pending queue', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(new Response('{"ok":true}', { status: 200 }));
+    const { syncRemoteAfterDirectLocalMutation, hasPendingRemotePush, awaitRemotePushIdle } = await import('./remoteSyncHub');
+    localStorage.setItem('dongshan_store_code_v1', '"007"');
+    await expect(syncRemoteAfterDirectLocalMutation()).rejects.toThrow('Failed to fetch');
+    expect(hasPendingRemotePush()).toBe(true);
+    await awaitRemotePushIdle();
+    expect(hasPendingRemotePush()).toBe(false);
+  });
+
+  it.each(['<html>wrong endpoint</html>', '{"ok":false}', '{"ok":true,"updatedAt":"bad"}'])(
+    'does not clear pending data for a HTTP 200 response without a valid save confirmation: %s', async (body) => {
+      vi.useFakeTimers();
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
+      const { syncRemoteAfterDirectLocalMutation, hasPendingRemotePush, getRemoteSyncStatus } = await import('./remoteSyncHub');
+      localStorage.setItem('dongshan_store_code_v1', '"007"');
+      await expect(syncRemoteAfterDirectLocalMutation()).rejects.toThrow('儲存確認');
+      expect(hasPendingRemotePush()).toBe(true);
+      expect(getRemoteSyncStatus()).toBe('error');
+    },
+  );
+
   it('does not overwrite local edits made while a background refresh is fetching', async () => {
     let finishGet!: (res: Response) => void;
     globalThis.fetch = vi.fn((_url, init) => init?.method === 'GET'
@@ -304,7 +396,7 @@ describe('remote sync write flushing', () => {
     const { withRemoteStorageWriteDeferPush } = await import('./remoteSyncHub');
     await withRemoteStorageWriteDeferPush(() => localStorage.setItem('dongshan_store_code_v1', '"007"'));
     expect(fetch).not.toHaveBeenCalled();
-    expect(JSON.parse(localStorage.getItem('dongshan_pending_sync_keys_v1')!)).toContain('dongshan_store_code_v1');
+    expect(Object.keys(JSON.parse(localStorage.getItem('dongshan_pending_sync_keys_v1')!))).toContain('dongshan_store_code_v1');
     vi.clearAllTimers();
     vi.resetModules();
     globalThis.fetch = vi.fn(async (_url, init) => new Response(JSON.stringify(

@@ -220,6 +220,11 @@ function isValidBundle(bundle) {
   return Boolean(bundle && typeof bundle === 'object' && !Array.isArray(bundle));
 }
 
+function isValidSnapshot(bundle) {
+  return isValidBundle(bundle) && isValidBundle(bundle.keys) &&
+    Object.values(bundle.keys).every((value) => value === null || typeof value === 'string');
+}
+
 function normalizePartialKeys(raw) {
   if (!Array.isArray(raw)) return null;
   return [...new Set(raw.filter((key) => typeof key === 'string' && key.trim()))];
@@ -279,6 +284,7 @@ export default async function handler(req, res) {
       const raw = await perf.time('redis_get', () => redis.get(KV_KEY));
       perf.mark('redis_get_bytes', 0, { chars: typeof raw === 'string' ? raw.length : 0 });
       const stored = await perf.time('json_parse', async () => parseJsonBodyMaybe(raw));
+      if (raw != null && !isValidSnapshot(stored)) throw new Error('Stored cloud bundle is invalid; writes must remain blocked until recovery');
       const response = { ok: true, bundle: isValidBundle(stored) ? stored : emptyBundle() };
       statusCode = 200;
       return res.status(200).json(req.headers['x-dongshan-sync-encoding'] === SYNC_ENCODING
@@ -302,7 +308,7 @@ export default async function handler(req, res) {
       }
 
       const bundle = body.bundle;
-      if (!isValidBundle(bundle)) {
+      if (!isValidSnapshot(bundle)) {
         statusCode = 400;
         return badRequest(res, 'invalid bundle');
       }
@@ -317,6 +323,7 @@ export default async function handler(req, res) {
       const rawCloud = await perf.time('redis_get_before_put', () => redis.get(KV_KEY));
       perf.mark('redis_get_before_put_bytes', 0, { chars: typeof rawCloud === 'string' ? rawCloud.length : 0 });
       const cloudBundle = await perf.time('json_parse_cloud', async () => parseJsonBodyMaybe(rawCloud));
+      if (rawCloud != null && !isValidSnapshot(cloudBundle)) throw new Error('Stored cloud bundle is invalid; refusing to overwrite it');
       const cloudUpdatedAt =
         cloudBundle && typeof cloudBundle === 'object' && !isCloudBundleEmpty(cloudBundle)
           ? readUpdatedAt(cloudBundle)
@@ -344,6 +351,10 @@ export default async function handler(req, res) {
         partialKeys,
         updatedAt: Math.max(Date.now(), cloudUpdatedAt + 1),
       });
+      // A device missing its local archive copy must not erase the cloud's only copy.
+      if (cloudBundle?.keys?.dongshan_data_archives_v1 != null && bundle.keys.dongshan_data_archives_v1 == null) {
+        storedBundle.keys.dongshan_data_archives_v1 = cloudBundle.keys.dongshan_data_archives_v1;
+      }
 
       const storedText = stringifyJsonMeasured(perf, 'json_stringify_store', storedBundle);
       perf.mark('redis_set_bytes', 0, {

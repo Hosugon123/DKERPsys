@@ -33,7 +33,7 @@ export type RefreshAppPageOptions = {
 
 /** 強制重新載入頁面（帶快取破除參數，載入後由 App 還原網址） */
 export function reloadAppShell(): void {
-  if (!canReloadAppShell()) return;
+  if (!canReloadAppShell() || hasPendingRemotePush()) return;
   const url = new URL(window.location.href);
   url.searchParams.delete(PULL_RELOAD_QUERY_KEY);
   url.searchParams.set(PULL_RELOAD_QUERY_KEY, String(Date.now()));

@@ -420,7 +420,7 @@ describe('mergeDongshanBundlesLocalWinsDirty (multi-device)', () => {
     });
 
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function setItem(key: string, value: string) {
-      if (key === 'dongshan_pwa_icon_v1' || key === 'dongshan_data_archives_v1') {
+      if (key === 'dongshan_pwa_icon_v1') {
         const error = new Error('quota exceeded') as Error & { code: number };
         error.name = 'QuotaExceededError';
         error.code = 22;
@@ -441,7 +441,7 @@ describe('mergeDongshanBundlesLocalWinsDirty (multi-device)', () => {
     };
     expect(sales.byDate?.['scope:hq|2026-06-03']?.snapshot.actualRevenue).toBe('1000');
     expect(localStorage.getItem('dongshan_pwa_icon_v1')).toBeNull();
-    expect(localStorage.getItem('dongshan_data_archives_v1')).toBeNull();
+    expect(localStorage.getItem('dongshan_data_archives_v1')).toBe(cloud.keys.dongshan_data_archives_v1);
   });
 
   it('手機容量不足導致核心資料匯入失敗時，不留下半套資料', () => {
