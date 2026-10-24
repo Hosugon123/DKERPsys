@@ -1,4 +1,5 @@
 import { createClient } from 'redis';
+import { decodeSyncRequest, encodeSyncResponse, SYNC_ENCODING } from '../server/syncTransport.js';
 
 const KV_KEY = 'dongshan:data-bundle:v1';
 const REDIS_ENV_KEY = 'REDIS_URL';
@@ -263,19 +264,23 @@ export default async function handler(req, res) {
       const raw = await perf.time('redis_get', () => redis.get(KV_KEY));
       perf.mark('redis_get_bytes', 0, { chars: typeof raw === 'string' ? raw.length : 0 });
       const stored = await perf.time('json_parse', async () => parseJsonBodyMaybe(raw));
-      if (stored && typeof stored === 'object') {
-        statusCode = 200;
-        return res.status(200).json({ ok: true, bundle: stored });
-      }
+      const response = { ok: true, bundle: isValidBundle(stored) ? stored : emptyBundle() };
       statusCode = 200;
-      return res.status(200).json({ ok: true, bundle: emptyBundle() });
+      return res.status(200).json(req.headers['x-dongshan-sync-encoding'] === SYNC_ENCODING
+        ? encodeSyncResponse(response) : response);
     }
 
     if (req.method === 'PUT') {
-      const body = await perf.time('body_parse', async () => parseJsonBodyMaybe(req.body), {
-        bodyType: typeof req.body,
-        chars: typeof req.body === 'string' ? req.body.length : undefined,
-      });
+      let body;
+      try {
+        body = await perf.time('body_parse', async () => decodeSyncRequest(parseJsonBodyMaybe(req.body)), {
+          bodyType: typeof req.body,
+          chars: typeof req.body === 'string' ? req.body.length : undefined,
+        });
+      } catch {
+        statusCode = 400;
+        return badRequest(res, 'invalid compressed sync payload');
+      }
       if (!body) {
         statusCode = 400;
         return badRequest(res, 'invalid json body');

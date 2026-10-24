@@ -39,6 +39,7 @@ describe('remote sync write flushing', () => {
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 
@@ -189,5 +190,76 @@ describe('remote sync write flushing', () => {
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('GET');
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe('PUT');
+  });
+
+  it('retains an immediate failed order and retries the same id without creating a second order', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 413 }))
+      .mockResolvedValue(new Response('{"ok":true}', { status: 200 }));
+    localStorage.setItem('dongshan_franchise_mgmt_orders_v1', JSON.stringify([{
+      id: 'previous', source: 'procurement', status: '已完成',
+      createdAt: '2026-10-23T10:00:00.000Z', updatedAt: '2026-10-23T20:00:00.000Z',
+      orderDateYmd: '2026-10-23', scopeId: 'scope:hq', totalAmount: 150, payableAmount: 150,
+      itemCount: 10, lines: [{ productId: 'duck', name: '鴨頭', qty: 10, unitPrice: 15, unit: '支' }],
+      stallCountBasisYmd: '2026-10-23', stallCountCompletedAt: '2026-10-23T20:00:00.000Z',
+      stallCountSnapshot: { lines: { duck: { out: '10', remain: '5' } },
+        actualRevenue: '75', updatedAt: '2026-10-23T20:00:00.000Z' },
+    }]));
+    const { orders } = await import('./apiService');
+    const { RemoteWritePendingError } = await import('../lib/remoteWritePendingError');
+    const { awaitRemotePushIdle, hasPendingRemotePush } = await import('./remoteSyncHub');
+    const error = await orders.appendProcurementOrderEntry({
+      lines: [{ productId: 'duck', name: '鴨頭', qty: 13, unitPrice: 15, unit: '支' }],
+      totalAmount: 195, actorRole: 'admin', orderDateYmd: '2026-10-24',
+      procurementDeductionBasisOrderId: 'previous',
+      procurementDeductionAppliedQtyByBasisOrderId: { previous: { duck: 5 } },
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RemoteWritePendingError);
+    const id = (error as InstanceType<typeof RemoteWritePendingError>).localResult;
+    expect(typeof id).toBe('string');
+    expect(hasPendingRemotePush()).toBe(true);
+    const inventoryBeforeRetry = localStorage.getItem('dongshan_stall_inventory_v1');
+    await awaitRemotePushIdle();
+    expect(hasPendingRemotePush()).toBe(false);
+    const rows = JSON.parse(localStorage.getItem('dongshan_franchise_mgmt_orders_v1')!);
+    expect(rows).toHaveLength(2);
+    const order = rows.find((row: { id: string }) => row.id === id);
+    expect(order.lines[0].qty).toBe(13);
+    expect(order.procurementDeductionAppliedQtyByBasisOrderId).toEqual({ previous: { duck: 5 } });
+    expect(localStorage.getItem('dongshan_stall_inventory_v1')).toBe(inventoryBeforeRetry);
+    expect(localStorage.getItem('dongshan_pending_sync_keys_v1')).toBeNull();
+  });
+
+  it('recovers failed immediate writes after reload without overwriting unrelated cloud keys', async () => {
+    localStorage.setItem('dongshan_store_code_v1', '"007"');
+    localStorage.setItem('dongshan_pending_sync_keys_v1', '["dongshan_store_code_v1"]');
+    const cloud = { ...emptyCloudBundle(), updatedAt: 100, keys: {
+      dongshan_store_code_v1: '"001"', dongshan_sidebar_main_nav_order_v1_admin: '["orders"]',
+    } };
+    globalThis.fetch = vi.fn(async (_url, init) => new Response(JSON.stringify(
+      init?.method === 'GET' ? { ok: true, bundle: cloud } : { ok: true },
+    ), { status: 200 }));
+    const { initRemoteSyncOnAppLoad, hasPendingRemotePush } = await import('./remoteSyncHub');
+    await initRemoteSyncOnAppLoad();
+    expect(localStorage.getItem('dongshan_store_code_v1')).toBe('"007"');
+    expect(localStorage.getItem('dongshan_sidebar_main_nav_order_v1_admin')).toBe('["orders"]');
+    expect(vi.mocked(fetch).mock.calls.map(([, init]) => init?.method)).toEqual(['GET', 'PUT']);
+    expect(hasPendingRemotePush()).toBe(false);
+  });
+
+  it('does not report a successful save when all version conflict retries fail', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn(async (_url, init) => new Response(JSON.stringify(
+      init?.method === 'GET' ? { ok: true, bundle: emptyCloudBundle() } : { ok: false },
+    ), { status: init?.method === 'GET' ? 200 : 409 }));
+    const { pushRemoteBundleWithAutoMerge, hasPendingRemotePush, getRemoteSyncStatus } = await import('./remoteSyncHub');
+    localStorage.setItem('dongshan_store_code_v1', '"007"');
+    const { serializeDongshanDataBundle } = await import('../lib/appDataBundle');
+    await expect(pushRemoteBundleWithAutoMerge(
+      serializeDongshanDataBundle(), ['dongshan_store_code_v1'],
+    )).rejects.toThrow('雲端已有更新');
+    expect(hasPendingRemotePush()).toBe(true);
+    expect(getRemoteSyncStatus()).not.toBe('ok');
   });
 });

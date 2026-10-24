@@ -57,6 +57,7 @@ import {
   ymd,
 } from '../lib/stallInventoryStorage';
 import { isQuotaExceededError } from '../lib/localStorageGuard';
+import { RemoteWritePendingError } from '../lib/remoteWritePendingError';
 import { computeLine, aggregateStallKpis, roundProcurementQty, PROCUREMENT_QTY_MAX } from '../lib/stallMath';
 import {
   formatSlashDateTimeFromIso,
@@ -658,6 +659,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
 
     void (async () => {
       let createdOrderId = '';
+      let pendingSyncError: RemoteWritePendingError | undefined;
       setCheckoutBusy(true);
       try {
         const orderId = await ordersApi.appendProcurementOrderEntry({
@@ -682,6 +684,12 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                   ),
                 }
               : {}),
+        }).catch((error: unknown) => {
+          if (error instanceof RemoteWritePendingError && typeof error.localResult === 'string') {
+            pendingSyncError = error;
+            return error.localResult;
+          }
+          throw error;
         });
         createdOrderId = orderId;
         if (syncProcurementToLedger && (userRole === 'admin' || userRole === 'employee')) {
@@ -693,6 +701,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
           });
           if (draft) await ledgerApi.append(draft);
         }
+        if (pendingSyncError) throw pendingSyncError;
         clearWorkDraft(WORK_DRAFT_IDS.procurement);
         setOrderSuccess(true);
         setSubmitError('');
@@ -704,6 +713,18 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
         setSyncProcurementToLedger(false);
         setTimeout(() => setOrderSuccess(false), 3000);
       } catch (error) {
+        if (error instanceof RemoteWritePendingError && typeof error.localResult === 'string') {
+          createdOrderId = error.localResult;
+        }
+        if (createdOrderId) {
+          // The order already exists locally; never submit the same cart/deduction twice.
+          clearWorkDraft(WORK_DRAFT_IDS.procurement);
+          setCart({});
+          setQtyInputDraft({});
+          setCartDeductedBasisOrderId('');
+          setCartDeductedAppliedQtyByBasisOrderId({});
+          setSyncProcurementToLedger(false);
+        }
         setSubmitError(procurementSubmitErrorMessage(error, createdOrderId !== ''));
       } finally {
         setCheckoutBusy(false);

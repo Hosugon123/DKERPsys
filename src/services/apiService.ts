@@ -40,6 +40,7 @@ import * as systemUsers from '../lib/systemUsersStorage';
 import { getStoreCode3, setStoreCode3 } from '../lib/storeCodeStorage';
 import * as dataArchive from '../lib/dataArchiveStorage';
 import { roundProcurementQty } from '../lib/stallMath';
+import { RemoteWritePendingError } from '../lib/remoteWritePendingError';
 
 export {
   awaitRemotePushIdle,
@@ -98,10 +99,14 @@ async function withUiRemoteStorageWriteNow<T>(
     const out = await Promise.resolve(fn());
     const after = serializeDongshanDataBundle();
     if (after !== before) {
-      await pushRemoteBundleWithAutoMerge(
-        after,
-        dirtyKeys ?? storageKeysChangedBetweenBundleTexts(before, after),
-      );
+      try {
+        await pushRemoteBundleWithAutoMerge(
+          after,
+          dirtyKeys ?? storageKeysChangedBetweenBundleTexts(before, after),
+        );
+      } catch (error) {
+        throw new RemoteWritePendingError(out, error);
+      }
     }
     return out;
   } catch (error) {
