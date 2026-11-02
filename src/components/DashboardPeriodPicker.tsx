@@ -15,11 +15,12 @@ export function toYmdLocal(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-export function resolveCurrentMonthYmdRange(): { startYmd: string; endYmd: string } {
+export function resolveCurrentMonthYmdRange(includeFutureDates = false): { startYmd: string; endYmd: string } {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
-  return { startYmd: toYmdLocal(start), endYmd: toYmdLocal(today) };
+  const end = includeFutureDates ? new Date(today.getFullYear(), today.getMonth() + 1, 0) : today;
+  return { startYmd: toYmdLocal(start), endYmd: toYmdLocal(end) };
 }
 
 export function normalizeYmdRangePair(startYmd: string, endYmd: string): { startYmd: string; endYmd: string } {
@@ -29,19 +30,19 @@ export function normalizeYmdRangePair(startYmd: string, endYmd: string): { start
   return startYmd <= endYmd ? { startYmd, endYmd } : { startYmd: endYmd, endYmd: startYmd };
 }
 
-/** 曆法月 1–12（year 為西元年）；結束日不晚於今日。 */
-export function ymdRangeForCalendarMonth(year: number, month1to12: number): { startYmd: string; endYmd: string } {
+/** 曆法月 1–12（year 為西元年）；報表預設只到今日，訂單可選整月。 */
+export function ymdRangeForCalendarMonth(year: number, month1to12: number, includeFutureDates = false): { startYmd: string; endYmd: string } {
   const m = Math.min(12, Math.max(1, Math.floor(month1to12)));
   const start = new Date(year, m - 1, 1);
   const endOfMonth = new Date(year, m, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const end = endOfMonth > today ? today : endOfMonth;
+  const end = !includeFutureDates && endOfMonth > today ? today : endOfMonth;
   return { startYmd: toYmdLocal(start), endYmd: toYmdLocal(end) };
 }
 
-export function resolveDashboardPeriodYmd(mode: DashboardPeriodMode): { startYmd: string; endYmd: string } {
-  if (mode.kind === 'month') return resolveCurrentMonthYmdRange();
+export function resolveDashboardPeriodYmd(mode: DashboardPeriodMode, includeFutureDates = false): { startYmd: string; endYmd: string } {
+  if (mode.kind === 'month') return resolveCurrentMonthYmdRange(includeFutureDates);
   return normalizeYmdRangePair(mode.startYmd, mode.endYmd);
 }
 
@@ -69,12 +70,14 @@ function DashboardCustomPeriodModal({
   initialEnd,
   onClose,
   onConfirm,
+  includeFutureDates,
 }: {
   open: boolean;
   initialStart: string;
   initialEnd: string;
   onClose: () => void;
   onConfirm: (startYmd: string, endYmd: string) => void;
+  includeFutureDates: boolean;
 }) {
   const year = new Date().getFullYear();
   const [draftStart, setDraftStart] = useState(initialStart);
@@ -99,12 +102,12 @@ function DashboardCustomPeriodModal({
 
   const pickMonth = useCallback(
     (month1to12: number) => {
-      const { startYmd, endYmd } = ymdRangeForCalendarMonth(year, month1to12);
+      const { startYmd, endYmd } = ymdRangeForCalendarMonth(year, month1to12, includeFutureDates);
       setPickedMonth(month1to12);
       setDraftStart(startYmd);
       setDraftEnd(endYmd);
     },
-    [year],
+    [year, includeFutureDates],
   );
 
   if (!open) return null;
@@ -221,6 +224,7 @@ export const DashboardMonthCustomRangePicker = memo(function DashboardMonthCusto
   ariaLabel = '資料區間',
   className,
   stretch = false,
+  includeFutureDates = false,
 }: {
   value: DashboardPeriodMode;
   onChange: (next: DashboardPeriodMode) => void;
@@ -228,10 +232,12 @@ export const DashboardMonthCustomRangePicker = memo(function DashboardMonthCusto
   className?: string;
   /** 按鈕均分寬度（KPI 卡內用） */
   stretch?: boolean;
+  /** 訂單可預訂未來日期；營收統計仍預設只到今日。 */
+  includeFutureDates?: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [customArmed, setCustomArmed] = useState(false);
-  const resolved = resolveDashboardPeriodYmd(value);
+  const resolved = resolveDashboardPeriodYmd(value, includeFutureDates);
 
   return (
     <div className={cn('min-w-0', className)} aria-label={ariaLabel}>
@@ -265,6 +271,7 @@ export const DashboardMonthCustomRangePicker = memo(function DashboardMonthCusto
         </p>
       ) : null}
       <DashboardCustomPeriodModal
+        includeFutureDates={includeFutureDates}
         open={modalOpen}
         initialStart={resolved.startYmd}
         initialEnd={resolved.endYmd}

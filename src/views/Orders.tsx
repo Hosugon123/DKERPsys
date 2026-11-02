@@ -2051,7 +2051,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   }, [catalogItemsForOrderDetail, rawList, supplyRetailView]);
 
   const effectiveDateRange = useMemo(() => {
-    const { startYmd, endYmd } = resolveDashboardPeriodYmd(orderListPeriod);
+    const { startYmd, endYmd } = resolveDashboardPeriodYmd(orderListPeriod, true);
     return { from: startYmd, to: endYmd };
   }, [orderListPeriod]);
 
@@ -2732,6 +2732,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
         >
           <div className="min-w-0 rounded-xl border border-amber-900/30 bg-zinc-950/60 p-3 space-y-3">
             <DashboardMonthCustomRangePicker
+              includeFutureDates
               value={orderListPeriod}
               onChange={handleOrderListPeriodChange}
               ariaLabel="訂單日期區間"

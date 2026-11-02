@@ -309,7 +309,7 @@ export function orderMatchesListDateRange(
   const bookYmd = effectiveOrderDateYmd(o);
   if (bookYmd >= from && bookYmd <= to) return true;
   if (o.status !== '待出貨') return false;
-  const createdYmd = o.createdAt.slice(0, 10);
+  const createdYmd = ymdFromCreatedAtLocal(o.createdAt);
   return createdYmd >= from && createdYmd <= to;
 }
 

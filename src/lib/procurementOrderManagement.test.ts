@@ -96,4 +96,17 @@ describe('procurement order appears in order management', () => {
     );
     expect(inRange).toBe(true);
   });
+
+  it('uses the local creation day for early-morning orders, not the UTC day', () => {
+    const localCreatedAt = new Date(2026, 10, 1, 2, 58).toISOString();
+    expect(orderMatchesListDateRange({
+      status: '待出貨', createdAt: localCreatedAt, orderDateYmd: '2026-11-02',
+    }, '2026-11-01', '2026-11-01')).toBe(true);
+    expect(orderMatchesListDateRange({
+      status: '待出貨', createdAt: localCreatedAt, orderDateYmd: '2026-11-02',
+    }, '2026-10-01', '2026-10-31')).toBe(false);
+    expect(orderMatchesListDateRange({
+      status: '已完成', createdAt: localCreatedAt, orderDateYmd: '2026-11-02',
+    }, '2026-11-01', '2026-11-01')).toBe(false);
+  });
 });
