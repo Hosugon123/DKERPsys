@@ -380,6 +380,23 @@ describe('procurement weekday sold reference', () => {
     expect(ref.sampleDayCount).toBe(2);
   });
 
+  it('retains estimate labels in last-week and statistical references without marking actual counts', () => {
+    saveSalesRecord('2026-06-11', {
+      lines: { [PRODUCT_ID]: { out: '100', remain: '20', remainSource: 'estimated' } },
+      actualRevenue: '1000', updatedAt: '2026-06-11T18:00:00Z',
+    }, FRANCHISE_SCOPE);
+    for (const mode of ['lastWeek', 'avg', 'max', 'min'] as const) {
+      const reference = computeProcurementWeekdaySoldReference(ORDER_DATE, [], 'headquarter', mode, 3);
+      expect(reference.estimatedProductIds.has(PRODUCT_ID)).toBe(true);
+      expect(reference.soldByProductId.get(PRODUCT_ID)).toBe(80);
+    }
+    saveSalesRecord('2026-06-11', {
+      lines: { [PRODUCT_ID]: { out: '100', remain: '20', remainSource: 'counted' } },
+      actualRevenue: '1000', updatedAt: '2026-06-11T19:00:00Z',
+    }, FRANCHISE_SCOPE);
+    expect(computeProcurementWeekdaySoldReference(ORDER_DATE, [], 'headquarter').estimatedProductIds.size).toBe(0);
+  });
+
   it('上週與統計模式只取目前登入店別，不混入其他店同日銷售紀錄', () => {
     const lastWeekYmd = '2026-06-11';
     const olderSameWeekdayYmd = '2026-06-04';

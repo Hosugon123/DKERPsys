@@ -7,11 +7,11 @@ import {
 } from './scopedStallDateKey';
 import { getAllSupplyItems, getSupplyItem } from './supplyCatalog';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
-import { num, roundProcurementQty } from './stallMath';
+import { num, roundProcurementQty, type StallRemainSource } from './stallMath';
 import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
 /** 與 stallInventoryStorage 之 DaySnapshot 結構一致（此檔避免反向 import 造成循環） */
-export type SalesRecordDayLine = { out: string; remain: string; updatedAt?: string };
+export type SalesRecordDayLine = { out: string; remain: string; updatedAt?: string; remainSource?: StallRemainSource };
 export type SalesRecordDaySnapshot = {
   lines: Record<string, SalesRecordDayLine>;
   actualRevenue: string;
@@ -198,7 +198,7 @@ function mergeSnapshotWithCatalog(snap: SalesRecordDaySnapshot): SalesRecordDayS
 }
 
 function salesLineRevisionKey(l: SalesRecordDayLine | undefined): string {
-  return `${String(l?.out ?? '').trim()}\u001f${String(l?.remain ?? '').trim()}`;
+  return `${String(l?.out ?? '').trim()}\u001f${String(l?.remain ?? '').trim()}\u001f${l?.remainSource ?? ''}`;
 }
 
 function stampChangedSalesLines(

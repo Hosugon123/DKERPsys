@@ -65,4 +65,37 @@ describe('estimateStallRemainLinesFromRevenue', () => {
       )
     ).toEqual({ duck: '0' });
   });
+
+  it('does not overwrite counted remaining quantities, including sold-out zero', () => {
+    const lines = { a: { out: '100', remain: '20' }, b: { out: '50', remain: '0' } };
+    expect(estimateStallRemainLinesFromRevenue(
+      ['a', 'b'], id => lines[id as keyof typeof lines], id => item(id, 10), 300,
+    )).toEqual({});
+  });
+
+  it('subtracts known sales before estimating uncounted items and rounds count units only', () => {
+    const lines = {
+      counted: { out: '100', remain: '20' },
+      count: { out: '10', remain: '' },
+      weight: { out: '10', remain: '' },
+    };
+    expect(estimateStallRemainLinesFromRevenue(
+      Object.keys(lines), id => lines[id as keyof typeof lines],
+      id => ({ ...item(id, 10), pieceUnit: id === 'weight' ? '兩' : '支' }),
+      933,
+    )).toEqual({ count: '3', weight: '3.35' });
+  });
+
+  it('allows recalculating explicitly estimated values but leaves measured values alone', () => {
+    expect(estimateStallRemainLinesFromRevenue(
+      ['duck'], () => ({ out: '10', remain: '7', remainSource: 'estimated' }),
+      id => item(id, 10), 50,
+    )).toEqual({ duck: '5' });
+  });
+
+  it('does not invent sales when items have no usable unit price', () => {
+    expect(estimateStallRemainLinesFromRevenue(
+      ['duck'], () => ({ out: '10', remain: '' }), id => item(id, 0), 500,
+    )).toEqual({ duck: '10' });
+  });
 });

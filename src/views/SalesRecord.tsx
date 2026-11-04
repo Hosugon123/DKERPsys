@@ -17,6 +17,7 @@ import {
   num,
   aggregateStallKpis,
   computeLine,
+  formatStallLeftoverRate,
   isStallRemainEntryValid,
   parseMoneyInputForLedgerGap,
   roundProcurementQty,
@@ -491,6 +492,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
             out: prev.lines[itemId]?.out ?? '',
             remain: prev.lines[itemId]?.remain ?? '',
             [field]: next,
+            ...(field === 'remain' ? { remainSource: 'counted' as const } : {}),
           },
         },
       };
@@ -510,6 +512,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
             out: prev.lines[itemId]?.out ?? '',
             remain: prev.lines[itemId]?.remain ?? '',
             [field]: next,
+            ...(field === 'remain' ? { remainSource: 'counted' as const } : {}),
           },
         },
       };
@@ -1232,7 +1235,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                         {unitRetail.toLocaleString()}
                                       </td>
                                       <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
-                                        {c.remainUnfilled || c.out <= 0 ? (
+                                        {!c.leftRateValid ? (
                                           '—'
                                         ) : (
                                           <span
@@ -1240,7 +1243,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                               c.leftRatePct > 40 && 'text-red-400 font-semibold',
                                             )}
                                           >
-                                            {`${c.leftRatePct.toFixed(2)}%`}
+                                            {formatStallLeftoverRate(c, line.remainSource)}
                                           </span>
                                         )}
                                       </td>
@@ -1328,7 +1331,7 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {tableRows.map(({ item, c, unitRetail }) => (
+                                {tableRows.map(({ item, line, c, unitRetail }) => (
                                   <tr key={item.id} className="border-b border-zinc-800/60">
                                     <td className="px-2 sm:px-3 py-2 text-zinc-200 sticky left-0 bg-zinc-900 z-[2] shadow-[8px_0_10px_-10px_rgba(0,0,0,0.85)]">
                                       {item.name}
@@ -1380,13 +1383,13 @@ export default function SalesRecord({ userRole }: { userRole: UserRole }) {
                                       {unitRetail.toLocaleString()}
                                     </td>
                                     <td className="px-1.5 sm:px-2 py-2 text-center tabular-nums text-amber-200/70 whitespace-nowrap">
-                                      {c.remainUnfilled || c.out <= 0 ? (
+                                      {!c.leftRateValid ? (
                                         '—'
                                       ) : (
                                         <span
                                           className={cn(c.leftRatePct > 40 && 'text-red-400 font-semibold')}
                                         >
-                                          {`${c.leftRatePct.toFixed(2)}%`}
+                                          {formatStallLeftoverRate(c, line.remainSource)}
                                         </span>
                                       )}
                                     </td>

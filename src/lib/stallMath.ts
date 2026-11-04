@@ -4,6 +4,8 @@ import { pricePerPackage, isConsumableItem, estimatedRetailPerPackage } from './
 /** 攤上單列金額計價基準：批價（進貨）或零售參考。 */
 export type StallLineUnitBasis = 'wholesale' | 'retail';
 
+export type StallRemainSource = 'estimated' | 'counted';
+
 function unitPricePerPackage(item: SupplyItem, basis: StallLineUnitBasis): number {
   return basis === 'retail' ? estimatedRetailPerPackage(item) : pricePerPackage(item);
 }
@@ -33,6 +35,11 @@ export function leftoverRate(out: number, remain: number) {
   return (remain / out) * 100;
 }
 
+export function formatStallLeftoverRate(c: LineComputed, source?: StallRemainSource): string {
+  if (!c.leftRateValid) return '—';
+  return `${source === 'estimated' ? '估算 ' : ''}${c.leftRatePct.toFixed(2)}%`;
+}
+
 export type LineComputed = {
   out: number;
   remain: number;
@@ -41,6 +48,7 @@ export type LineComputed = {
   remValue: number;
   soldRevenue: number;
   leftRatePct: number;
+  leftRateValid: boolean;
   /** 剩餘欄位為空白（未填）— 不應以 0 推算售出，帳上該列售出／應有營收不計入 */
   remainUnfilled: boolean;
 };
@@ -67,6 +75,11 @@ export function computeLine(
   const remain = remainUnfilled ? 0 : num(remainS);
   const unit = unitPricePerPackage(item, basis);
   const sold = remainUnfilled ? 0 : soldFromRow(out, remain);
+  const outRaw = String(outS ?? '').replace(/,/g, '').trim();
+  const remainRaw = String(remainS ?? '').replace(/,/g, '').trim();
+  const leftRateValid = outRaw !== '' && remainRaw !== '' &&
+    Number.isFinite(Number(outRaw)) && Number.isFinite(Number(remainRaw)) &&
+    out > 0 && remain >= 0 && remain <= out;
   return {
     out,
     remain,
@@ -75,6 +88,7 @@ export function computeLine(
     remValue: remain * unit,
     soldRevenue: sold * unit,
     leftRatePct: remainUnfilled || out <= 0 ? 0 : leftoverRate(out, remain),
+    leftRateValid,
     remainUnfilled,
   };
 }
@@ -157,7 +171,7 @@ function formatEstimatedStallQty(n: number): string {
  */
 export function estimateStallRemainLinesFromRevenue(
   itemIds: string[],
-  getOutRemain: (id: string) => { out: string; remain: string },
+  getOutRemain: (id: string) => { out: string; remain: string; remainSource?: StallRemainSource },
   getItem: (id: string) => SupplyItem | undefined,
   actualRevenue: number,
   opts?: { unitBasis?: StallLineUnitBasis }
@@ -167,20 +181,29 @@ export function estimateStallRemainLinesFromRevenue(
     .map((id) => {
       const item = getItem(id);
       if (!item) return null;
-      const out = Math.max(0, num(getOutRemain(id).out));
+      const line = getOutRemain(id);
+      const out = Math.max(0, num(line.out));
       const unit = unitPricePerPackage(item, basis);
-      return { id, out, possibleRevenue: out * unit };
+      const measured = String(line.remain ?? '').trim() !== '' && line.remainSource !== 'estimated';
+      return { id, out, item, measured, soldRevenue: soldFromRow(out, Math.max(0, num(line.remain))) * unit, possibleRevenue: out * unit };
     })
-    .filter((row): row is { id: string; out: number; possibleRevenue: number } => row !== null);
+    .filter((row) => row !== null);
 
-  const totalPossibleRevenue = rows.reduce((sum, row) => sum + row.possibleRevenue, 0);
+  const knownRevenue = rows.filter(row => row.measured).reduce((sum, row) => sum + row.soldRevenue, 0);
+  const uncounted = rows.filter(row => !row.measured);
+  const totalPossibleRevenue = uncounted.reduce((sum, row) => sum + row.possibleRevenue, 0);
   if (totalPossibleRevenue <= 0) {
-    return Object.fromEntries(rows.map((row) => [row.id, '0']));
+    return Object.fromEntries(uncounted.map((row) => [row.id, formatEstimatedStallQty(row.out)]));
   }
 
-  const soldRatio = Math.max(0, Math.min(1, actualRevenue / totalPossibleRevenue));
+  const soldRatio = Math.max(0, Math.min(1, (actualRevenue - knownRevenue) / totalPossibleRevenue));
   return Object.fromEntries(
-    rows.map((row) => [row.id, formatEstimatedStallQty(row.out * (1 - soldRatio))])
+    uncounted.map((row) => {
+      const remain = row.out * (1 - soldRatio);
+      const weighted = ['兩', '斤', '公斤', '公克', 'g', 'kg'].includes(row.item.pieceUnit);
+      const qty = !weighted && Number.isInteger(row.out) ? Math.round(remain) : remain;
+      return [row.id, formatEstimatedStallQty(qty)];
+    })
   );
 }
 

@@ -1557,6 +1557,7 @@ export function stallCountSnapshotPersistedMatches(
   if (String(a.revenueGapReason ?? '').trim() !== String(b.revenueGapReason ?? '').trim()) return false;
   const ids = new Set([...Object.keys(a.lines ?? {}), ...Object.keys(b.lines ?? {})]);
   for (const id of ids) {
+    if (a.lines[id]?.remainSource !== b.lines[id]?.remainSource) return false;
     if (stallSnapshotLineQtyKey(a.lines, id, 'out') !== stallSnapshotLineQtyKey(b.lines, id, 'out')) {
       return false;
     }

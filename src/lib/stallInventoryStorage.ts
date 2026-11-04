@@ -31,6 +31,7 @@ import {
   mergeSalesRecordWithCatalog,
   saveSalesRecord,
   type SalesRecordDaySnapshot,
+  type SalesRecordDayLine,
 } from './salesRecordStorage';
 import { ymdDashToSlash } from './dateDisplay';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
@@ -41,11 +42,7 @@ const KEY = 'dongshan_stall_inventory_v1';
 let cachedStoreRaw: string | null | undefined;
 let cachedStore: StoreV1 | null = null;
 
-export type DayLine = {
-  out: string;
-  remain: string;
-  updatedAt?: string;
-};
+export type DayLine = SalesRecordDayLine;
 
 export type DaySnapshot = {
   lines: Record<string, DayLine>;
@@ -171,7 +168,7 @@ function saveAll(s: StoreV1) {
 }
 
 function dayLineRevisionKey(l: DayLine | undefined): string {
-  return `${String(l?.out ?? '').trim()}\u001f${String(l?.remain ?? '').trim()}`;
+  return `${String(l?.out ?? '').trim()}\u001f${String(l?.remain ?? '').trim()}\u001f${l?.remainSource ?? ''}`;
 }
 
 function dayLineUpdatedMs(line: DayLine | undefined): number {
@@ -281,7 +278,7 @@ export function stallDaySnapshotFingerprint(snap: DaySnapshot): string {
   const lines = lineKeys
     .map((id) => {
       const l = snap.lines[id] ?? { out: '', remain: '' };
-      return `${id}\t${String(l.out).trim()}\t${String(l.remain).trim()}`;
+      return `${id}\t${String(l.out).trim()}\t${String(l.remain).trim()}\t${l.remainSource ?? ''}`;
     })
     .join('\n');
   return [

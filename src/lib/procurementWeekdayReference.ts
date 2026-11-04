@@ -28,12 +28,14 @@ function accumulateSoldQtyByProductFromSnapshot(
   outMap: Map<string, number>,
   snap: SalesRecordDaySnapshot,
   retailView: SupplyRetailView,
+  estimatedIds?: Set<string>,
 ) {
   const ownerId = franchiseeOwnerForRetail();
   const merged = mergeSalesRecordWithCatalog(snap);
   for (const it of getAllSupplyItems(retailView, ownerId)) {
     if (isConsumableItem(it)) continue;
     const line = merged.lines[it.id] ?? { out: '', remain: '' };
+    if (line.remainSource === 'estimated') estimatedIds?.add(it.id);
     const c = computeLine(line.out, line.remain, it, { unitBasis: 'retail' });
     if (c.out > 0) outMap.set(it.id, c.out);
     if (c.remainUnfilled || c.sold <= 0) continue;
@@ -95,6 +97,7 @@ function pickLatestStallOrderForYmd(
 }
 
 export type ProcurementLastWeekSameDayRef = {
+  estimatedProductIds: ReadonlySet<string>;
   /** 訂單歸屬日 − 7 天（或統計參考日） */
   referenceYmd: string;
   soldByProductId: ReadonlyMap<string, number>;
@@ -155,10 +158,11 @@ function soldMapForYmd(
   ymdDash: string,
   orders: OrderHistoryEntry[],
   retailView: SupplyRetailView,
-): { soldMap: Map<string, number>; outMap: Map<string, number>; hasData: boolean; revenue: number } {
+): { soldMap: Map<string, number>; outMap: Map<string, number>; hasData: boolean; revenue: number; estimatedProductIds: Set<string> } {
   const scopeId = getDataScopeContext().scopeId;
   const soldByProductId = new Map<string, number>();
   const outByProductId = new Map<string, number>();
+  const estimatedProductIds = new Set<string>();
 
   const salesRaw = getSalesRecord(ymdDash, scopeId);
   if (salesRaw) {
@@ -167,20 +171,21 @@ function soldMapForYmd(
       outByProductId,
       salesRaw,
       retailView,
+      estimatedProductIds,
     );
-    return { soldMap: soldByProductId, outMap: outByProductId, hasData: true, revenue: revenueForSnapshot(salesRaw, retailView) };
+    return { soldMap: soldByProductId, outMap: outByProductId, hasData: true, revenue: revenueForSnapshot(salesRaw, retailView), estimatedProductIds };
   }
 
   const matched = pickLatestStallOrderForYmd(ymdDash, orders, scopeId);
   if (matched) {
     const snap = resolveStallSnapshotFromOrder(matched);
     if (snap) {
-      accumulateSoldQtyByProductFromSnapshot(soldByProductId, outByProductId, snap, retailView);
-      return { soldMap: soldByProductId, outMap: outByProductId, hasData: true, revenue: revenueForSnapshot(snap, retailView) };
+      accumulateSoldQtyByProductFromSnapshot(soldByProductId, outByProductId, snap, retailView, estimatedProductIds);
+      return { soldMap: soldByProductId, outMap: outByProductId, hasData: true, revenue: revenueForSnapshot(snap, retailView), estimatedProductIds };
     }
   }
 
-  return { soldMap: soldByProductId, outMap: outByProductId, hasData: false, revenue: 0 };
+  return { soldMap: soldByProductId, outMap: outByProductId, hasData: false, revenue: 0, estimatedProductIds };
 }
 
 function listSameWeekdayYmdsBefore(
@@ -215,8 +220,8 @@ export function computeProcurementLastWeekSameDaySold(
 ): ProcurementLastWeekSameDayRef {
   const scopedOrders = ordersForProcurementSoldReference(orders);
   const referenceYmd = addDaysYmd(orderDateYmd, -7);
-  const { soldMap, outMap, hasData } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
-  return { referenceYmd, soldByProductId: soldMap, outByProductId: outMap, hasCompletedStallDay: hasData };
+  const { soldMap, outMap, hasData, estimatedProductIds } = soldMapForYmd(referenceYmd, scopedOrders, retailView);
+  return { referenceYmd, soldByProductId: soldMap, outByProductId: outMap, hasCompletedStallDay: hasData, estimatedProductIds };
 }
 
 /**
@@ -248,14 +253,16 @@ export function computeProcurementWeekdaySoldReference(
   const soldPerDay = new Map<string, Map<string, number>>();
   const outPerDay = new Map<string, Map<string, number>>();
   const revenueByYmd = new Map<string, number>();
+  const estimatedIdsByYmd = new Map<string, Set<string>>();
   const activeYmds: string[] = [];
 
   for (const ymdDash of qualifyingYmds) {
-    const { soldMap, outMap, hasData, revenue } = soldMapForYmd(ymdDash, scopedOrders, retailView);
+    const { soldMap, outMap, hasData, revenue, estimatedProductIds } = soldMapForYmd(ymdDash, scopedOrders, retailView);
     if (!hasData) continue;
     soldPerDay.set(ymdDash, soldMap);
     outPerDay.set(ymdDash, outMap);
     revenueByYmd.set(ymdDash, revenue);
+    estimatedIdsByYmd.set(ymdDash, estimatedProductIds);
     activeYmds.push(ymdDash);
   }
 
@@ -271,6 +278,7 @@ export function computeProcurementWeekdaySoldReference(
     }, null);
     return {
       referenceYmd: pickedYmd ?? fallbackYmd,
+      estimatedProductIds: estimatedIdsByYmd.get(pickedYmd ?? '') ?? new Set<string>(),
       soldByProductId: new Map(soldPerDay.get(pickedYmd ?? '') ?? []),
       outByProductId: new Map(outPerDay.get(pickedYmd ?? '') ?? []),
       hasCompletedStallDay: activeYmds.length > 0,
@@ -304,6 +312,7 @@ export function computeProcurementWeekdaySoldReference(
 
   return {
     referenceYmd: fallbackYmd,
+    estimatedProductIds: new Set(activeYmds.flatMap(day => [...(estimatedIdsByYmd.get(day) ?? [])])),
     soldByProductId,
     outByProductId,
     hasCompletedStallDay: activeYmds.length > 0,

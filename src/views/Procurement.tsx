@@ -1427,6 +1427,7 @@ export default memo(function Procurement({ userRole }: { userRole: UserRole }) {
                       (weekdaySoldRef.soldByProductId.has(catalogItem.id) ||
                         weekdaySoldRef.outByProductId.has(catalogItem.id)) ? (
                         <>
+                          {weekdaySoldRef.estimatedProductIds.has(catalogItem.id) && <span className="text-xs">估 </span>}
                           {(weekdaySoldRef.soldByProductId.get(catalogItem.id) ?? 0).toLocaleString()}
                           <span className="text-zinc-500">/</span>
                           <span className="text-emerald-300/90">

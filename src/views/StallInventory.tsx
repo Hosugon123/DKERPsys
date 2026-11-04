@@ -28,6 +28,7 @@ import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
 import {
   num,
   computeLine,
+  formatStallLeftoverRate,
   aggregateStallKpis,
   estimateStallRemainLinesFromRevenue,
   isStallRemainEntryValid,
@@ -236,7 +237,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         ...prev,
         lines: {
           ...prev.lines,
-          [id]: { ...prev.lines[id], [key]: value },
+          [id]: { ...prev.lines[id], [key]: value, ...(key === 'remain' ? { remainSource: 'counted' as const } : {}) },
         },
       }));
     },
@@ -252,7 +253,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         ...prev,
         lines: {
           ...prev.lines,
-          [id]: { ...prev.lines[id], [key]: formatStallBumpedValue(next) },
+          [id]: { ...prev.lines[id], [key]: formatStallBumpedValue(next), ...(key === 'remain' ? { remainSource: 'counted' as const } : {}) },
         },
       };
     });
@@ -299,7 +300,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       stallDisplayItems.map((item) => {
         const line = snap.lines[item.id] ?? { out: '', remain: '' };
         const c = computeLine(line.out, line.remain, item, { unitBasis: 'retail' });
-        return { item, c };
+        return { item, c, line };
       }),
     [snap.lines, stallDisplayItems, supplyRetailView]
   );
@@ -470,11 +471,11 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     setSnap((prev) => {
       const lines = { ...prev.lines };
       for (const [id, remain] of Object.entries(estimatedRemainById)) {
-        lines[id] = { ...lines[id], remain };
+        lines[id] = { ...lines[id], remain, remainSource: 'estimated' };
       }
       return { ...prev, lines };
     });
-    setRecomputeMsg('已依實收金額與帶出比例估算剩餘貨量；請快速檢查後再送出盤點完成。');
+    setRecomputeMsg('僅估算未盤點的品項，已填剩餘不變；估算餘貨率不是實盤結果，請核對後完成盤點。');
     setTimeout(() => setRecomputeMsg(null), 7000);
   };
 
@@ -868,7 +869,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ item, c }) => (
+            {rows.map(({ item, c, line }) => (
               <tr
                 key={item.id}
                 className="border-b border-zinc-800/70 hover:bg-white/[0.02] text-zinc-200 align-top"
@@ -1002,7 +1003,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                   {item.pieceUnit}
                 </td>
                 <td className="px-1 sm:px-2 py-2 sm:py-2.5 text-center text-amber-200/80 font-mono text-sm align-top leading-normal">
-                  {c.remainUnfilled || c.out <= 0 ? (
+                  {!c.leftRateValid ? (
                     '—'
                   ) : (
                     <span
@@ -1011,7 +1012,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                         c.leftRatePct > 40 && 'text-red-400 font-semibold',
                       )}
                     >
-                      {`${c.leftRatePct.toFixed(2)}%`}
+                      {formatStallLeftoverRate(c, line.remainSource)}
                     </span>
                   )}
                 </td>
