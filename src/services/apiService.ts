@@ -435,6 +435,7 @@ export const orders = {
     completedAt: string;
     recordSnap: import('../lib/salesRecordStorage').SalesRecordDaySnapshot;
     stallDaySnap: stallInventory.DaySnapshot;
+    allowRevenueEstimation?: boolean;
     scopeId?: string;
   }): Promise<stallInventory.CommitStallInventoryCompleteResult> {
     return withUiRemoteStorageWriteNow(() =>

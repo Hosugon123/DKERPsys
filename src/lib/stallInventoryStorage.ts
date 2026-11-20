@@ -1195,7 +1195,7 @@ export function ensureBasisDayFromOrderSnapshot(orderId: string): void {
 
 export type CommitStallInventoryCompleteResult =
   | { ok: true }
-  | { ok: false; reason: 'order_not_found' | 'stamp_failed' | 'persist_mismatch' };
+  | { ok: false; reason: 'order_not_found' | 'stamp_failed' | 'persist_mismatch' | 'estimate_not_authorized' };
 
 /**
  * 盤點完成一次寫入：訂單押記、攤上日、銷售紀錄（同 scope／營業日），並驗證押記已落地。
@@ -1206,9 +1206,14 @@ export function commitStallInventoryComplete(params: {
   completedAt: string;
   recordSnap: SalesRecordDaySnapshot;
   stallDaySnap: DaySnapshot;
+  allowRevenueEstimation?: boolean;
   scopeId?: string;
 }): CommitStallInventoryCompleteResult {
   const { orderId, basisYmd, completedAt, recordSnap, stallDaySnap, scopeId } = params;
+  if (!params.allowRevenueEstimation &&
+      [...Object.values(recordSnap.lines), ...Object.values(stallDaySnap.lines)].some(line => line.remainSource === 'estimated')) {
+    return { ok: false, reason: 'estimate_not_authorized' };
+  }
   if (!readMergedOrderByIdFromStores(orderId)) {
     return { ok: false, reason: 'order_not_found' };
   }

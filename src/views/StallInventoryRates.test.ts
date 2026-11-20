@@ -37,6 +37,14 @@ it('preserves a counted rate while visibly labeling uncounted estimates in the l
     expect(remain.value).toBe('20');
     expect(remain.closest('tr')!.textContent).toContain('20.00%');
     const estimate = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('用實收估算剩餘'))!;
+    const optIn = Array.from(host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      .find(input => input.closest('label')?.textContent?.includes('以實收估算未盤點品項'))!;
+    expect(optIn.checked).toBe(false);
+    expect(estimate.disabled).toBe(true);
+    await act(async () => estimate.click());
+    expect(host.querySelector<HTMLInputElement>('[aria-label="米血 剩餘貨量"]')!.value).toBe('');
+    await act(async () => optIn.click());
+    expect(estimate.disabled).toBe(false);
     await act(async () => estimate.click());
     expect(remain.value).toBe('20');
     expect(remain.closest('tr')!.textContent).toContain('20.00%');
@@ -44,6 +52,14 @@ it('preserves a counted rate while visibly labeling uncounted estimates in the l
     const uncounted = host.querySelector<HTMLInputElement>('[aria-label="米血 剩餘貨量"]')!;
     expect(uncounted.value).not.toBe('');
     expect(uncounted.closest('tr')!.textContent).toContain('估算 ');
+    await act(async () => optIn.click());
+    expect(estimate.disabled).toBe(true);
+    expect(uncounted.value).toBe('');
+    expect(remain.value).toBe('20');
+    await act(async () => root.render(null));
+    await act(async () => root.render(createElement(StallInventory, { userRole: 'admin' })));
+    expect(Array.from(host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      .find(input => input.closest('label')?.textContent?.includes('以實收估算未盤點品項'))!.checked).toBe(false);
   } finally {
     await act(async () => root.unmount());
     host.remove();

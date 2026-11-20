@@ -3,7 +3,7 @@ import { addDaysYmd, parseYmd, ymd } from './stallInventoryStorage';
 import { stallSalesBoardRowYmd } from './financeLib';
 import { orderCountsTowardStallEconomics, orderMatchesProcurementSoldReferenceScope, resolveOrderDataScopeId, type OrderHistoryEntry } from './orderHistoryStorage';
 import {
-  getSalesRecord,
+  getSalesRecordForStatistics as getSalesRecord,
   listSalesRecordMeta,
   mergeSalesRecordWithCatalog,
   type SalesRecordDaySnapshot,

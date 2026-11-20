@@ -30,10 +30,10 @@ import {
   computeLine,
   formatStallLeftoverRate,
   aggregateStallKpis,
-  estimateStallRemainLinesFromRevenue,
   isStallRemainEntryValid,
   parseMoneyInputForLedgerGap,
 } from '../lib/stallMath';
+import { clearEstimatedStallRemains, prepareStallCountSnapshot } from '../lib/stallCountPreparation';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   ymd,
@@ -122,6 +122,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   const [stallCountSubmitting, setStallCountSubmitting] = useState(false);
   /** 盤點落差可選同步至流水帳 */
   const [syncGapToLedger, setSyncGapToLedger] = useState(false);
+  const [allowRevenueEstimation, setAllowRevenueEstimation] = useState(false);
   /** 本場盤點鎖定之單一叫貨單：植入帶出、盤點完成押記皆針對此單。 */
   const [viewOrderId, setViewOrderId] = useState(() => restoredStall?.viewOrderId ?? '');
   const skipNextDayLoadRef = useRef(Boolean(restoredStall?.snap));
@@ -181,6 +182,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     stallBaselineRef.current = stallDaySnapshotFingerprint(day);
     setSnap(day);
   }, [stallBasisYmd, stallScopeId, viewOrderId]);
+
+  useEffect(() => {
+    setAllowRevenueEstimation(false);
+  }, [viewOrderId, stallBasisYmd, stallScopeId]);
 
   const stallDirty = useMemo(
     () => stallDaySnapshotFingerprint(snap) !== stallBaselineRef.current,
@@ -305,6 +310,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     [snap.lines, stallDisplayItems, supplyRetailView]
   );
 
+  const prepareCurrentSnapshot = () => prepareStallCountSnapshot(
+    snap, stallDisplayItems.map(item => item.id), id => getSupplyItem(id, supplyRetailView), allowRevenueEstimation,
+  );
+
   /** 通過欄位檢查後才開啟「確認盤點完成」彈窗 */
   const requestInventoryComplete = () => {
     if (!viewOrderId) {
@@ -312,10 +321,16 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       setTimeout(() => setRecomputeMsg(null), 6000);
       return;
     }
+    const prepared = prepareCurrentSnapshot();
+    if (prepared.ok === false) {
+      setRecomputeMsg(prepared.error);
+      return;
+    }
     const missingRemainNames: string[] = [];
     for (const item of stallDisplayItems) {
-      const raw = snap.lines[item.id]?.remain;
-      if (!isStallRemainEntryValid(raw)) missingRemainNames.push(item.name);
+      const line = prepared.snapshot.lines[item.id];
+      const raw = line?.remain;
+      if (!isStallRemainEntryValid(raw) || num(raw) > num(line?.out)) missingRemainNames.push(item.name);
     }
     if (missingRemainNames.length > 0) {
       const n = missingRemainNames.length;
@@ -325,21 +340,28 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           : `${missingRemainNames.slice(0, 6).join('、')} 等共 ${n} 項`;
       window.alert(
         `「剩餘貨量」尚有未正確填寫：${list}\n\n` +
-          '請補齊每一列；已售完可按「已售完」帶入 0，或手動填 0 以上之數字。'
+          '請補齊每一列；剩餘須介於 0 與帶出量之間，已售完請填 0。'
       );
       return;
     }
+    setSnap(prepared.snapshot);
     setStallCountConfirmOpen(true);
   };
 
   /** 彈窗按「確定」後寫入：訂單押記、攤上日、銷售紀錄（歷史訂單才會顯示已盤點） */
   const commitInventoryComplete = () => {
     if (!viewOrderId || stallCountSubmitting) return;
-    const lines: DaySnapshot['lines'] = { ...snap.lines };
+    const prepared = prepareCurrentSnapshot();
+    if (prepared.ok === false) {
+      setRecomputeMsg(prepared.error);
+      setStallCountConfirmOpen(false);
+      return;
+    }
+    const lines: DaySnapshot['lines'] = { ...prepared.snapshot.lines };
     for (const it of supplyItems) {
       if (!lines[it.id]) lines[it.id] = { out: '', remain: '' };
     }
-    const next: DaySnapshot = { ...snap, lines };
+    const next: DaySnapshot = { ...prepared.snapshot, lines };
     const completedAt = new Date().toISOString();
     const stampBasisYmd = stallBasisYmd;
     const recordLinesFromStamp: DaySnapshot['lines'] = { ...next.lines };
@@ -383,6 +405,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           completedAt,
           recordSnap: recordSnapAligned,
           stallDaySnap: dayToSave,
+          allowRevenueEstimation,
           scopeId: stallScopeId,
         }).catch((error: unknown) => {
           if (error instanceof RemoteWritePendingError && error.localResult &&
@@ -394,7 +417,9 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
         });
         if (res.ok === false) {
           const msg =
-            res.reason === 'order_not_found'
+            res.reason === 'estimate_not_authorized'
+              ? '未勾選估算模式，不可送出估算數量。請改填實盤數量後重試。'
+              : res.reason === 'order_not_found'
               ? '找不到訂單，可能已被刪除或同步覆蓋。請重新選擇訂單後再試。'
               : res.reason === 'persist_mismatch'
                 ? '盤點資料驗證不一致，已還原此次寫入。請保留輸入內容並聯絡管理員確認。'
@@ -412,6 +437,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           }
         }
         setSyncGapToLedger(false);
+        setAllowRevenueEstimation(false);
         setStallListTick((n) => n + 1);
         stallBaselineRef.current = stallDaySnapshotFingerprint(dayToSave);
         clearWorkDraft(WORK_DRAFT_IDS.stallInventory);
@@ -450,6 +476,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   };
 
   const applyEstimatedRemainFromRevenue = () => {
+    if (!allowRevenueEstimation) return;
     const actualRevenue = parseMoneyInputForLedgerGap(snap.actualRevenue);
     if (actualRevenue === null || actualRevenue < 0) {
       setRecomputeMsg('請先輸入本日實收金額，再用實收估算剩餘。');
@@ -461,20 +488,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       setTimeout(() => setRecomputeMsg(null), 5000);
       return;
     }
-    const estimatedRemainById = estimateStallRemainLinesFromRevenue(
-      stallDisplayItems.map((item) => item.id),
-      (id) => snap.lines[id] ?? { out: '', remain: '' },
-      (id) => getSupplyItem(id, supplyRetailView),
-      actualRevenue,
-      { unitBasis: 'retail' }
-    );
-    setSnap((prev) => {
-      const lines = { ...prev.lines };
-      for (const [id, remain] of Object.entries(estimatedRemainById)) {
-        lines[id] = { ...lines[id], remain, remainSource: 'estimated' };
-      }
-      return { ...prev, lines };
-    });
+    const prepared = prepareCurrentSnapshot();
+    if (prepared.ok === false) {
+      setRecomputeMsg(prepared.error);
+      return;
+    }
+    setSnap(prepared.snapshot);
     setRecomputeMsg('僅估算未盤點的品項，已填剩餘不變；估算餘貨率不是實盤結果，請核對後完成盤點。');
     setTimeout(() => setRecomputeMsg(null), 7000);
   };
@@ -810,10 +829,22 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                     : `${ledgerGap < 0 ? '−' : '+'}$${money(Math.abs(ledgerGap))}`}
               </span>
             </div>
+            <label className="flex items-center gap-2 text-sm text-amber-100">
+              <input
+                type="checkbox"
+                checked={allowRevenueEstimation}
+                onChange={(e) => {
+                  setAllowRevenueEstimation(e.target.checked);
+                  if (!e.target.checked) setSnap(clearEstimatedStallRemains);
+                }}
+              />
+              以實收估算未盤點品項
+            </label>
             <button
               type="button"
               onClick={applyEstimatedRemainFromRevenue}
-              className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-700/60 bg-amber-950/35 px-3 text-sm font-semibold text-amber-100 hover:bg-amber-900/45 lg:w-auto"
+              disabled={!allowRevenueEstimation}
+              className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-700/60 bg-amber-950/35 px-3 text-sm font-semibold text-amber-100 hover:bg-amber-900/45 disabled:opacity-40 lg:w-auto"
             >
               <Calculator size={16} className="text-amber-400" />
               用實收估算剩餘

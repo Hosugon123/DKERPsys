@@ -20,7 +20,7 @@ import {
 } from './orderStallDisplayRevenue';
 import type { SupplyRetailView } from './supplyCatalog';
 import { resolveOrderStallStorageScopeId } from './scopedStallDateKey';
-import { getSalesRecord, mergeSalesRecordWithCatalog } from './salesRecordStorage';
+import { getSalesRecordForStatistics as getSalesRecord, mergeSalesRecordWithCatalog } from './salesRecordStorage';
 import { num } from './stallMath';
 import { resolveOrderStoreLabel } from './orderStoreLabel';
 import { HQ_SCOPE_ID } from './dataScope';

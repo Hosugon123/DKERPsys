@@ -2,7 +2,7 @@ import type { FranchiseManagementOrder, OrderHistoryEntry } from './orderHistory
 import { resolveOrderStallStorageScopeId } from './scopedStallDateKey';
 import { getAllSupplyItems, getSupplyItem, isConsumableItem, type SupplyRetailView } from './supplyCatalog';
 import { aggregateStallKpis, num } from './stallMath';
-import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
+import { getSalesRecordForStatistics as getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
 
 type StallFields = Pick<
   FranchiseManagementOrder,

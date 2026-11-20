@@ -30,7 +30,13 @@ export type SalesRecordDaySnapshot = {
 
 const SALES_KEY = 'dongshan_sales_records_v1';
 
-type Row = { completedAt: string; completedByName?: string; snapshot: SalesRecordDaySnapshot };
+type Row = {
+  completedAt: string;
+  completedByName?: string;
+  snapshot: SalesRecordDaySnapshot;
+  /** 當天盤點數量；snapshot.lines 仍供後續叫貨扣餘貨使用。 */
+  countedLines?: SalesRecordDaySnapshot['lines'];
+};
 
 type StoreV1 = {
   version: 1;
@@ -67,6 +73,7 @@ function cloneStore(s: StoreV1): StoreV1 {
       completedAt: row.completedAt,
       ...(row.completedByName ? { completedByName: row.completedByName } : {}),
       snapshot: cloneSnapshot(row.snapshot),
+      ...(row.countedLines ? { countedLines: cloneSnapshot({ ...row.snapshot, lines: row.countedLines }).lines } : {}),
     };
   }
   return { version: 1, byDate, ...(s.deletedByDate ? { deletedByDate: { ...s.deletedByDate } } : {}) };
@@ -279,6 +286,7 @@ export function patchSalesRecordRevenueGapReason(ymd: string, reason: string, sc
     ymd,
     {
       completedAt: row?.completedAt ?? now,
+      ...(row?.countedLines ? { countedLines: row.countedLines } : {}),
       ...(row?.completedByName ? { completedByName: row.completedByName } : who ? { completedByName: who } : {}),
       snapshot: {
         ...prev,
@@ -302,6 +310,13 @@ export function getSalesRecord(ymd: string, scopeId?: string): SalesRecordDaySna
   const row = readRow(s, ymd, scopeId);
   if (!row) return null;
   return mergeSnapshotWithCatalog(row.snapshot);
+}
+
+/** 銷售分析只讀當天盤點，不能把隔日帶走的餘貨算成當天售出。 */
+export function getSalesRecordForStatistics(ymd: string, scopeId?: string): SalesRecordDaySnapshot | null {
+  const row = readRow(loadStore(), ymd, scopeId);
+  if (!row) return null;
+  return mergeSnapshotWithCatalog({ ...row.snapshot, lines: row.countedLines ?? row.snapshot.lines });
 }
 
 /** 刪除指定範圍、營業日之銷售紀錄（刪單連動清理用）。 */
@@ -406,7 +421,7 @@ export function listSalesRecordSnapshots(scopeId?: string, ranges?: readonly Sal
       completedAt: row.completedAt,
       completedByName: row.completedByName,
       scopeId: sid,
-      snapshot: mergeSnapshotWithCatalog(row.snapshot),
+      snapshot: mergeSnapshotWithCatalog({ ...row.snapshot, lines: row.countedLines ?? row.snapshot.lines }),
     });
   }
   return out.sort((a, b) => b.ymd.localeCompare(a.ymd));
@@ -445,6 +460,7 @@ export function applySalesRecordOrderDeduction(
     ymdStr,
     {
       ...row,
+      countedLines: row.countedLines ?? cloneSnapshot(prev).lines,
       snapshot: { ...prev, lines, updatedAt: now },
     },
     scopeId,
@@ -474,6 +490,9 @@ export function restoreSalesRecordOrderDeduction(
       lines[key] = { ...(lines[key] ?? lines[id]), remain: String(next), updatedAt: now };
     }
   }
-  writeRow(s, ymdStr, { ...row, snapshot: { ...prev, lines, updatedAt: now } }, scopeId);
+  writeRow(s, ymdStr, {
+    ...row, countedLines: row.countedLines ?? cloneSnapshot(prev).lines,
+    snapshot: { ...prev, lines, updatedAt: now },
+  }, scopeId);
   saveStore(s);
 }

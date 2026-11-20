@@ -23,7 +23,7 @@ import {
   roundProcurementQty,
 } from '../lib/stallMath';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
+import { getSalesRecordForStatistics as getSalesRecord, mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from '../lib/salesRecordStorage';
 import { orders as ordersApi } from '../services/apiService';
 import type { OrderHistoryEntry, UpdateStallSnapshotResult } from '../lib/orderHistoryStorage';
 import {
