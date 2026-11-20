@@ -1,5 +1,6 @@
-import { bareYmdFromStallStorageKey } from './scopedStallDateKey';
-import { effectiveOrderDateYmd } from './orderHistoryStorage';
+import { bareYmdFromStallStorageKey, parseScopedStallDateKey, scopedStallDateKey } from './scopedStallDateKey';
+import { effectiveOrderDateYmd, normalizeProcurementDeductionBasisOrderIds, resolveOrderDataScopeId } from './orderHistoryStorage';
+import { HQ_SCOPE_ID } from './dataScope';
 import { mergeOrderLikeRecord, mergeStorageKeyRecords } from './bundleRecordMerge';
 import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
 
@@ -88,7 +89,16 @@ function writeJson(key: string, value: unknown): void {
 }
 
 function isValidYmd(ymd: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(ymd);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
+  const date = new Date(`${ymd}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === ymd;
+}
+
+export function archiveCutoffThreeMonthsAgo(now = new Date()): string {
+  const first = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+  const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const day = Math.min(now.getDate(), lastDay);
+  return `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function orderArchiveYmd(order: AnyOrder): string {
@@ -99,14 +109,57 @@ function orderArchiveYmd(order: AnyOrder): string {
   return ymd || String(order.createdAt ?? '').slice(0, 10);
 }
 
-function splitOrders<T extends AnyOrder>(orders: T[], cutoffYmd: string): { keep: T[]; archive: T[] } {
+function splitOrders<T extends AnyOrder>(orders: T[], cutoffYmd: string, protectedIds: ReadonlySet<string>): { keep: T[]; archive: T[] } {
   const keep: T[] = [];
   const archive: T[] = [];
   for (const order of orders) {
-    if (orderArchiveYmd(order) < cutoffYmd) archive.push(order);
+    if (!protectedIds.has(order.id) && orderArchiveYmd(order) < cutoffYmd) archive.push(order);
     else keep.push(order);
   }
   return { keep, archive };
+}
+
+function archiveDependencies(orders: AnyOrder[], cutoffYmd: string) {
+  const byId = new Map<string, AnyOrder[]>();
+  const protectedIds = new Set<string>();
+  for (const order of orders) {
+    const versions = byId.get(order.id) ?? [];
+    versions.push(order);
+    byId.set(order.id, versions);
+    const counted = typeof order.stallCountCompletedAt === 'string' && order.stallCountCompletedAt.trim() !== '';
+    if (!isValidYmd(orderArchiveYmd(order)) || orderArchiveYmd(order) >= cutoffYmd ||
+        order.status === '待出貨' || (order.status !== '已取消' && !counted)) {
+      protectedIds.add(order.id);
+    }
+  }
+  // Follow all retained orders' basis chains once, including cycles and duplicate storage copies.
+  const queue = [...protectedIds];
+  for (let i = 0; i < queue.length; i += 1) {
+    for (const order of byId.get(queue[i]) ?? []) {
+      const basisIds = normalizeProcurementDeductionBasisOrderIds({
+        procurementDeductionBasisOrderId: typeof order.procurementDeductionBasisOrderId === 'string' ? order.procurementDeductionBasisOrderId : undefined,
+        procurementDeductionBasisOrderIds: Array.isArray(order.procurementDeductionBasisOrderIds)
+          ? order.procurementDeductionBasisOrderIds.filter((id): id is string => typeof id === 'string') : undefined,
+      });
+      for (const id of basisIds) {
+        if (protectedIds.has(id)) continue;
+        protectedIds.add(id);
+        queue.push(id);
+      }
+    }
+  }
+  const protectedDays = new Set<string>();
+  for (const order of orders) {
+    if (!protectedIds.has(order.id)) continue;
+    const scope = resolveOrderDataScopeId({
+      scopeId: typeof order.scopeId === 'string' ? order.scopeId : undefined,
+      actorUserId: typeof order.actorUserId === 'string' ? order.actorUserId : undefined,
+    }) ?? HQ_SCOPE_ID;
+    for (const date of [orderArchiveYmd(order), order.stallCountBasisYmd]) {
+      if (typeof date === 'string' && isValidYmd(date)) protectedDays.add(scopedStallDateKey(scope, date));
+    }
+  }
+  return { protectedIds, protectedDays };
 }
 
 function emptyStallStore(): StallStore {
@@ -124,12 +177,14 @@ function emptyLedgerStore(): LedgerStoreV2 {
 function splitByDateStore<T extends StallStore | SalesStore>(
   store: T,
   cutoffYmd: string,
+  protectedDays: ReadonlySet<string>,
 ): { keep: T; archive: T; archivedCount: number } {
   const keepByDate: Record<string, unknown> = {};
   const archiveByDate: Record<string, unknown> = {};
   for (const [key, row] of Object.entries(store.byDate ?? {})) {
     const ymd = bareYmdFromStallStorageKey(key);
-    if (ymd < cutoffYmd) archiveByDate[key] = row;
+    const scope = parseScopedStallDateKey(key)?.scopeId ?? HQ_SCOPE_ID;
+    if (isValidYmd(ymd) && !protectedDays.has(scopedStallDateKey(scope, ymd)) && ymd < cutoffYmd) archiveByDate[key] = row;
     else keepByDate[key] = row;
   }
   return {
@@ -180,7 +235,7 @@ function splitLedgerStore(store: LedgerStoreV2, cutoffYmd: string) {
 }
 
 function archiveId(cutoffYmd: string): string {
-  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  const stamp = crypto.randomUUID();
   return `archive-before-${cutoffYmd}-${stamp}`;
 }
 
@@ -210,10 +265,11 @@ export function archiveDataOlderThan(cutoffYmd: string): ArchiveDataResult {
   const salesRecords = safeParse<SalesStore>(localStorage.getItem(SALES_RECORDS_KEY), emptySalesStore());
   const accountingLedger = normalizeLedgerStore(safeParse<unknown>(localStorage.getItem(ACCOUNTING_LEDGER_KEY), emptyLedgerStore()));
 
-  const orderSplit = splitOrders(orderHistory, cutoffYmd);
-  const mgmtSplit = splitOrders(franchiseManagementOrders, cutoffYmd);
-  const stallSplit = splitByDateStore(stallInventory, cutoffYmd);
-  const salesSplit = splitByDateStore(salesRecords, cutoffYmd);
+  const { protectedIds, protectedDays } = archiveDependencies([...orderHistory, ...franchiseManagementOrders], cutoffYmd);
+  const orderSplit = splitOrders(orderHistory, cutoffYmd, protectedIds);
+  const mgmtSplit = splitOrders(franchiseManagementOrders, cutoffYmd, protectedIds);
+  const stallSplit = splitByDateStore(stallInventory, cutoffYmd, protectedDays);
+  const salesSplit = splitByDateStore(salesRecords, cutoffYmd, protectedDays);
   const ledgerSplit = splitLedgerStore(accountingLedger, cutoffYmd);
 
   const entry: DataArchiveEntry = {

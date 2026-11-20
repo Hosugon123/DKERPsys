@@ -4,6 +4,7 @@ import type { UserRole } from './Orders';
 import { DONGSHAN_APP_ID, DONGSHAN_EXPORT_STORAGE_KEYS, parseBundleJson } from '../lib/appDataBundle';
 import { archives, dataBundle } from '../services/apiService';
 import type { DataArchiveEntry } from '../lib/dataArchiveStorage';
+import { archiveCutoffThreeMonthsAgo } from '../lib/dataArchiveStorage';
 import { getApiBaseUrl, getApiSyncToken, getStorageMode } from '../services/storageMode';
 import { cn } from '../lib/utils';
 
@@ -22,15 +23,6 @@ function exportFilename(): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   return `dongshan-data-${stamp}.json`;
-}
-
-function archiveCutoffThreeMonthsAgo(): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() - 3);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 function archiveMovedCount(archive: DataArchiveEntry): number {

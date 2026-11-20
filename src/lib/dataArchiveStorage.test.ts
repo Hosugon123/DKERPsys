@@ -25,6 +25,7 @@ function order(id: string, ymd: string, scopeId: string) {
     actorRole: scopeId === 'scope:hq' ? 'admin' : 'franchisee',
     storeLabel: scopeId === 'scope:hq' ? '直營店' : '加盟店',
     status: '已完成',
+    stallCountCompletedAt: `${ymd}T20:00:00.000Z`,
     scopeId,
     actorUserId: scopeId === 'scope:hq' ? 'hq-user' : 'dk002',
   };

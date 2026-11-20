@@ -24,6 +24,7 @@ import {
 import { StallCountOrderBadge } from '../components/StallCountOrderBadge';
 import { LiangJinQtyHint } from '../components/LiangJinQtyHint';
 import { OrderWeekdayFilter } from '../components/OrderWeekdayFilter';
+import { useLocalCalendarDay } from '../hooks/useLocalCalendarDay';
 import { useUnsavedWorkBlock } from '../hooks/useUnsavedWorkBlock';
 import { usePersistWorkDraft, useRestoreWorkDraft } from '../hooks/useWorkDraft';
 import { WORK_DRAFT_IDS, clearWorkDraft } from '../lib/workDraftStorage';
@@ -1850,6 +1851,7 @@ const PickingOrderLineRow = memo(function PickingOrderLineRow({
 
 
 export default memo(function Orders({ userRole }: { userRole: UserRole }) {
+  const localCalendarDay = useLocalCalendarDay();
   const restoredLineEdit = useRestoreWorkDraft<OrdersLineEditDraft>(WORK_DRAFT_IDS.ordersLineEdit);
   const isHeadquarters = userRole === 'admin';
   /** 訂單明細表「叫貨金額小計」僅加盟主與管理員可見，員工不顯示 */
@@ -2053,7 +2055,7 @@ export default memo(function Orders({ userRole }: { userRole: UserRole }) {
   const effectiveDateRange = useMemo(() => {
     const { startYmd, endYmd } = resolveDashboardPeriodYmd(orderListPeriod, true);
     return { from: startYmd, to: endYmd };
-  }, [orderListPeriod]);
+  }, [orderListPeriod, localCalendarDay]);
 
   const dateScopedRawList = useMemo(
     () => rawList.filter((order) => orderMatchesListDateRange(order, effectiveDateRange.from, effectiveDateRange.to)),
