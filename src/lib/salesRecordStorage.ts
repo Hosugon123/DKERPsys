@@ -9,6 +9,7 @@ import { getAllSupplyItems, getSupplyItem } from './supplyCatalog';
 import { getSessionActorDisplayName } from './sessionActorDisplayName';
 import { num, roundProcurementQty, type StallRemainSource } from './stallMath';
 import { setLocalStorageItemWithQuotaRecovery } from './localStorageGuard';
+import { normalizeStallLineAliases } from './stallLineAliases';
 
 /** 與 stallInventoryStorage 之 DaySnapshot 結構一致（此檔避免反向 import 造成循環） */
 export type SalesRecordDayLine = { out: string; remain: string; updatedAt?: string; remainSource?: StallRemainSource };
@@ -26,6 +27,13 @@ export type SalesRecordDaySnapshot = {
   frozenWholesaleUnitPriceByItem?: Record<string, number>;
   /** Internal merge timestamps for top-level editable fields. */
   fieldUpdatedAt?: Record<string, string>;
+  /** Submission-time evidence; per-line remainSource remains authoritative after later edits. */
+  countSubmission?: {
+    policyVersion: 2;
+    submittedAt: string;
+    estimationApproved: boolean;
+    estimatedProductIds: string[];
+  };
 };
 
 const SALES_KEY = 'dongshan_sales_records_v1';
@@ -243,6 +251,10 @@ export function mergeSalesRecordWithCatalog(snap: SalesRecordDaySnapshot): Sales
   return mergeSnapshotWithCatalog(snap);
 }
 
+export function normalizeSalesRecordForWrite(snap: SalesRecordDaySnapshot): SalesRecordDaySnapshot {
+  return mergeSnapshotWithCatalog({ ...snap, lines: normalizeStallLineAliases(snap.lines, getAllSupplyItems()) });
+}
+
 /**
  * 盤點完成時寫入；覆寫同資料範圍、同營業日之舊銷售紀錄。
  * @param scopeId 未傳則用目前登入者資料範圍；訂單同步時應傳該單之 {@link resolveOrderDataScopeId}。
@@ -252,7 +264,7 @@ export function saveSalesRecord(ymd: string, snapshot: SalesRecordDaySnapshot, s
   const deletedAt = s.deletedByDate?.[scopedStallDateKey(resolveStallStorageScopeId(scopeId), ymd)];
   const completedAt = new Date(Math.max(Date.now(), (Date.parse(deletedAt ?? '') || 0) + 1)).toISOString();
   const prev = readRow(s, ymd, scopeId)?.snapshot;
-  const snapshotMerged = mergeSnapshotWithCatalog(snapshot);
+  const snapshotMerged = normalizeSalesRecordForWrite(snapshot);
   const who = getSessionActorDisplayName();
   writeRow(s, ymd, {
     completedAt,

@@ -1,6 +1,7 @@
 import type { DaySnapshot } from './stallInventoryStorage';
 import type { SupplyItem } from './supplyCatalog';
 import { estimateStallRemainLinesFromRevenue, parseMoneyInputForLedgerGap } from './stallMath';
+import { normalizeStallLineAliases } from './stallLineAliases';
 
 export function clearEstimatedStallRemains(snapshot: DaySnapshot): DaySnapshot {
   return {
@@ -17,6 +18,8 @@ export function prepareStallCountSnapshot(
   getItem: (id: string) => SupplyItem | undefined,
   allowRevenueEstimation: boolean,
 ): { ok: true; snapshot: DaySnapshot } | { ok: false; error: string } {
+  snapshot = { ...snapshot, lines: normalizeStallLineAliases(snapshot.lines,
+    itemIds.map(id => getItem(id)).filter((item): item is SupplyItem => Boolean(item))) };
   if (!allowRevenueEstimation) {
     if (itemIds.some(id => snapshot.lines[id]?.remainSource === 'estimated')) {
       return { ok: false, error: '含有先前估算的剩餘量。請重新填寫實盤數量，或勾選「以實收估算未盤點品項」。' };

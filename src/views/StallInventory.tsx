@@ -123,6 +123,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
   /** 盤點落差可選同步至流水帳 */
   const [syncGapToLedger, setSyncGapToLedger] = useState(false);
   const [allowRevenueEstimation, setAllowRevenueEstimation] = useState(false);
+  const [estimateSubmitConfirmed, setEstimateSubmitConfirmed] = useState(false);
   /** 本場盤點鎖定之單一叫貨單：植入帶出、盤點完成押記皆針對此單。 */
   const [viewOrderId, setViewOrderId] = useState(() => restoredStall?.viewOrderId ?? '');
   const skipNextDayLoadRef = useRef(Boolean(restoredStall?.snap));
@@ -310,6 +311,12 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     [snap.lines, stallDisplayItems, supplyRetailView]
   );
 
+  const estimatedRows = rows.filter(row => row.line.remainSource === 'estimated');
+  const estimateSignature = JSON.stringify(estimatedRows.map(row => [row.item.id, row.line.out, row.line.remain]));
+  useEffect(() => {
+    setEstimateSubmitConfirmed(false);
+  }, [estimateSignature, snap.actualRevenue, viewOrderId, stallBasisYmd]);
+
   const prepareCurrentSnapshot = () => prepareStallCountSnapshot(
     snap, stallDisplayItems.map(item => item.id), id => getSupplyItem(id, supplyRetailView), allowRevenueEstimation,
   );
@@ -345,6 +352,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
       return;
     }
     setSnap(prepared.snapshot);
+    setEstimateSubmitConfirmed(false);
     setStallCountConfirmOpen(true);
   };
 
@@ -355,6 +363,11 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
     if (prepared.ok === false) {
       setRecomputeMsg(prepared.error);
       setStallCountConfirmOpen(false);
+      return;
+    }
+    const hasEstimates = stallDisplayItems.some(item => prepared.snapshot.lines[item.id]?.remainSource === 'estimated');
+    if (hasEstimates && !estimateSubmitConfirmed) {
+      setRecomputeMsg('請先核對估算品項，並確認以估算數量送出。');
       return;
     }
     const lines: DaySnapshot['lines'] = { ...prepared.snapshot.lines };
@@ -405,7 +418,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
           completedAt,
           recordSnap: recordSnapAligned,
           stallDaySnap: dayToSave,
-          allowRevenueEstimation,
+          allowRevenueEstimation: allowRevenueEstimation && estimateSubmitConfirmed,
           scopeId: stallScopeId,
         }).catch((error: unknown) => {
           if (error instanceof RemoteWritePendingError && error.localResult &&
@@ -1080,7 +1093,7 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
             if (e.target === e.currentTarget && !stallCountSubmitting) setStallCountConfirmOpen(false);
           }}
         >
-          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl p-5 sm:p-6 animate-in fade-in duration-200">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl p-5 sm:p-6 animate-in fade-in duration-200">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 id="stall-count-confirm-title" className="text-lg font-bold text-zinc-100">
@@ -1108,6 +1121,18 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
                 <X size={22} />
               </button>
             </div>
+            {estimatedRows.length > 0 && (
+              <div className="mt-4 border-t border-amber-500/40 pt-3 text-sm text-amber-200">
+                <p className="font-semibold">估算品項：{estimatedRows.length} 項</p>
+                <p className="mt-1 max-h-28 overflow-y-auto break-words">{estimatedRows.map(row => row.item.name).join('、')}</p>
+                <label className="mt-3 flex items-start gap-2">
+                  <input type="checkbox" checked={estimateSubmitConfirmed}
+                    onChange={event => setEstimateSubmitConfirmed(event.target.checked)}
+                    className="mt-0.5 shrink-0 accent-amber-500" />
+                  確認這些品項以估算數量寫入銷售紀錄
+                </label>
+              </div>
+            )}
             <div className="mt-5 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
               <button
                 type="button"
@@ -1120,10 +1145,10 @@ export default function StallInventory({ userRole }: { userRole: UserRole }) {
               <button
                 type="button"
                 onClick={commitInventoryComplete}
-                disabled={stallCountSubmitting}
+                disabled={stallCountSubmitting || (estimatedRows.length > 0 && !estimateSubmitConfirmed)}
                 className="w-full sm:w-auto min-h-[44px] px-4 rounded-xl bg-amber-500 text-zinc-950 text-sm font-bold hover:bg-amber-400 disabled:opacity-60"
               >
-                {stallCountSubmitting ? '送出中…' : '確定送出'}
+                {stallCountSubmitting ? '送出中…' : estimatedRows.length > 0 ? '確定以估算送出' : '確定送出'}
               </button>
             </div>
           </div>

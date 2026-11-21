@@ -1,5 +1,6 @@
 import { getAllSupplyItems, getSupplyItem, isConsumableItem } from './supplyCatalog';
 import { num, soldFromRow, aggregateStallKpis, roundProcurementQty, isStallRemainEntryValid } from './stallMath';
+import { normalizeStallLineAliases } from './stallLineAliases';
 import {
   loadFranchiseManagementOrders,
   loadOrderHistory,
@@ -29,6 +30,7 @@ import {
   applySalesRecordOrderDeduction,
   restoreSalesRecordOrderDeduction,
   mergeSalesRecordWithCatalog,
+  normalizeSalesRecordForWrite,
   saveSalesRecord,
   type SalesRecordDaySnapshot,
   type SalesRecordDayLine,
@@ -56,6 +58,7 @@ export type DaySnapshot = {
   lastSavedByName?: string;
   /** Internal merge timestamps for top-level editable fields. */
   fieldUpdatedAt?: Record<string, string>;
+  countSubmission?: SalesRecordDaySnapshot['countSubmission'];
 };
 
 type StoreV1 = {
@@ -290,6 +293,7 @@ export function stallDaySnapshotFingerprint(snap: DaySnapshot): string {
 }
 
 export function saveDay(ymdStr: string, snap: DaySnapshot, scopeId?: string) {
+  snap = { ...snap, lines: normalizeStallLineAliases(snap.lines, getAllSupplyItems()) };
   const s = loadAll();
   const editor = getSessionActorDisplayName();
   const prev = readStallDay(s, ymdStr, scopeId);
@@ -1209,11 +1213,22 @@ export function commitStallInventoryComplete(params: {
   allowRevenueEstimation?: boolean;
   scopeId?: string;
 }): CommitStallInventoryCompleteResult {
-  const { orderId, basisYmd, completedAt, recordSnap, stallDaySnap, scopeId } = params;
+  const { orderId, basisYmd, completedAt, scopeId } = params;
+  const recordSnap = normalizeSalesRecordForWrite(params.recordSnap);
+  const stallDaySnap = { ...params.stallDaySnap,
+    lines: normalizeStallLineAliases(params.stallDaySnap.lines, getAllSupplyItems()) };
   if (!params.allowRevenueEstimation &&
       [...Object.values(recordSnap.lines), ...Object.values(stallDaySnap.lines)].some(line => line.remainSource === 'estimated')) {
     return { ok: false, reason: 'estimate_not_authorized' };
   }
+  const estimatedProductIds = Object.entries(recordSnap.lines)
+    .filter(([, line]) => line.remainSource === 'estimated').map(([id]) => id).sort();
+  const countSubmission: NonNullable<SalesRecordDaySnapshot['countSubmission']> = {
+    policyVersion: 2, submittedAt: completedAt,
+    estimationApproved: Boolean(params.allowRevenueEstimation && estimatedProductIds.length), estimatedProductIds,
+  };
+  recordSnap.countSubmission = countSubmission;
+  stallDaySnap.countSubmission = countSubmission;
   if (!readMergedOrderByIdFromStores(orderId)) {
     return { ok: false, reason: 'order_not_found' };
   }

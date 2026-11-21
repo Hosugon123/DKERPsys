@@ -1,5 +1,5 @@
 import { mergeOrderLikeRecord, recordUpdatedAtMs } from './bundleRecordMerge';
-import { mergeSalesRecordWithCatalog, type SalesRecordDaySnapshot } from './salesRecordStorage';
+import { mergeSalesRecordWithCatalog, normalizeSalesRecordForWrite, type SalesRecordDaySnapshot } from './salesRecordStorage';
 import { roundProcurementQty } from './stallMath';
 import { allocateOrderSerialId } from './orderSerialId';
 import { getDataScopeContext, HQ_SCOPE_ID, resolveFranchiseeRetailOwnerUserId, franchiseeOwnerUserIdFromScopeId } from './dataScope';
@@ -1513,7 +1513,7 @@ export function setOrderStallCountStamp(
   fields: { basisYmd: string; completedAt: string; snapshot: SalesRecordDaySnapshot }
 ): boolean {
   if (!readMergedOrderByIdFromStores(orderId)) return false;
-  const merged = mergeSalesRecordWithCatalog(fields.snapshot);
+  const merged = normalizeSalesRecordForWrite(fields.snapshot);
   const ctx = getDataScopeContext();
   const completedByUserId = ctx.userId?.trim() || undefined;
   const who = persistableActorDisplayName();
@@ -1579,7 +1579,7 @@ export function updateStallCountSnapshotByOrderId(
   orderId: string,
   snapshot: SalesRecordDaySnapshot
 ): UpdateStallSnapshotResult {
-  const merged = mergeSalesRecordWithCatalog(snapshot);
+  const merged = normalizeSalesRecordForWrite(snapshot);
   const now = new Date().toISOString();
   const nextSnap: SalesRecordDaySnapshot = { ...merged, updatedAt: snapshot.updatedAt || now };
 
